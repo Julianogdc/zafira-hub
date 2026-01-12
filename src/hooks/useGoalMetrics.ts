@@ -20,7 +20,20 @@ export function useGoalMetrics() {
     const { goals } = useGoalsStore();
     const { user } = useAuthStore();
 
-    const activeGoals = goals.filter((g) => g.active !== false && (!g.ownerId || g.ownerId === user?.id));
+    const activeGoals = goals.filter((g) => {
+        if (g.active === false) return false;
+
+        // 1. Owner or Assignee
+        if (!g.ownerId || g.ownerId === user?.id || g.assignedTo === user?.id) return true;
+
+        // 2. Public Goals (Everyone calls see)
+        if (g.visibility === 'public') return true;
+
+        // 3. Partners (Admin and Managers)
+        if (g.visibility === 'partners' && (user?.role === 'admin' || user?.role === 'manager')) return true;
+
+        return false;
+    });
 
     // CÁLCULO DE PROGRESSO
     const calculated = activeGoals.map((goal) => {

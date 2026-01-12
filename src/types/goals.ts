@@ -57,4 +57,5 @@ export interface Goal {
   progress: number;
   ownerId?: string;
   assignedTo?: string; // New: RBAC
+  visibility?: 'private' | 'public' | 'partners';
 }

@@ -47,7 +47,8 @@ const AppHeader = () => {
 
   return (
     <header className="flex h-14 items-center gap-3 border-b border-border bg-background/70 px-4 backdrop-blur-xl sticky top-0 z-10">
-      {/* SidebarTrigger removed per user request - moved to internal sidebar */}
+      {/* SidebarTrigger for Mobile - Hidden on Desktop */}
+      <SidebarTrigger className="md:hidden" />
 
       {/* Show Zafira Hub branding ONLY on Dashboard */}
       {isDashboard && (

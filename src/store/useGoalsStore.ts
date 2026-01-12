@@ -5,6 +5,7 @@ import { useAuthStore } from './useAuthStore';
 
 type GoalFormData = Omit<Goal, 'id' | 'createdAt' | 'status' | 'currentValue' | 'progress'> & {
   assignedTo?: string; // Form field
+  visibility: 'private' | 'public' | 'partners';
 };
 
 const INITIAL_FORM_STATE: GoalFormData = {
@@ -18,7 +19,8 @@ const INITIAL_FORM_STATE: GoalFormData = {
   startDate: Date.now(),
   endDate: Date.now(),
   active: true,
-  assignedTo: undefined
+  assignedTo: undefined,
+  visibility: 'private'
 };
 
 interface GoalsState {
@@ -95,6 +97,7 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
         createdAt: new Date(g.created_at).getTime(),
         ownerId: g.owner_id,
         assignedTo: g.assigned_to, // Mapped
+        visibility: g.visibility || 'private',
         checklist: (g.checklist || []).map((c: any) => ({
           id: c.id,
           label: c.label,
@@ -128,7 +131,8 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
         active: form.active,
         progress: 0,
         owner_id: user.user?.id,
-        assigned_to: form.assignedTo // Insert
+        assigned_to: form.assignedTo, // Insert
+        visibility: form.visibility
       };
 
       const { data: goal, error: goalError } = await supabase
@@ -197,6 +201,7 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
       if (updates.active !== undefined) payload.active = updates.active;
       if (updates.progress !== undefined) payload.progress = updates.progress;
       if (updates.status) payload.status = updates.status;
+      if (updates.visibility) payload.visibility = updates.visibility;
 
       const { error } = await supabase.from('goals').update(payload).eq('id', id);
       if (error) throw error;

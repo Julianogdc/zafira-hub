@@ -182,6 +182,19 @@ export function GoalFormDialog({
                             </select>
                         </div>
                     )}
+
+                    <div className="grid gap-1.5">
+                        <Label>Visibilidade</Label>
+                        <select
+                            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                            value={form.visibility}
+                            onChange={(e) => setForm({ visibility: e.target.value as any })}
+                        >
+                            <option value="private">Privada (Apenas Eu e Resp.)</option>
+                            <option value="partners">Sócios (Admin & Gestores)</option>
+                            <option value="public">Pública (Todos da Empresa)</option>
+                        </select>
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                         <div className="grid gap-1.5">
                             <Label>Início</Label>

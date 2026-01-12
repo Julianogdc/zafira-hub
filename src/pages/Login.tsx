@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Lock, Mail, ArrowRight, Loader2, User as UserIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
+import { useAuthStore } from '@/store/useAuthStore';
 
 const Login = () => {
     const [loading, setLoading] = useState(false);
@@ -38,10 +39,12 @@ const Login = () => {
                 });
                 if (error) throw error;
 
-                // If auto-confirm is enabled, session is returned immediately
                 if (data.session) {
                     toast.success('Conta criada com sucesso!');
-                    navigate(from, { replace: true });
+                    // Force session update before navigation
+                    await useAuthStore.getState().checkSession();
+                    const target = from === '/login' ? '/' : from;
+                    navigate(target, { replace: true });
                 } else {
                     toast.success('Conta criada com sucesso! Verifique seu email para confirmar.');
                     setIsSignUp(false);
@@ -52,8 +55,13 @@ const Login = () => {
                     password
                 });
                 if (error) throw error;
+
                 toast.success('Bem-vindo de volta!');
-                navigate(from, { replace: true });
+                // Force session update before navigation to ensure ProtectedRoute sees the user
+                await useAuthStore.getState().checkSession();
+
+                const target = from === '/login' ? '/' : from;
+                navigate(target, { replace: true });
             }
         } catch (error: any) {
             console.error(error);

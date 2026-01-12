@@ -29,8 +29,8 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Copiar nossa configuração customizada do Nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expor a porta 80
-EXPOSE 80
+# Expor a porta 3000
+EXPOSE 3000
 
 # Iniciar o Nginx
 CMD ["nginx", "-g", "daemon off;"]
