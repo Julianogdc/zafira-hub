@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design system Zafira Hub - all colors in HSL */
+
+@layer base {
+  :root {
+    /* Base surfaces */
+    --background: 260 30% 6%;
+    --foreground: 270 33% 96%;
+
+    --card: 257 28% 12% / 0.78; /* glassy panels */
+    --card-foreground: 270 33% 96%;
+
+    --popover: 257 28% 10% / 0.98;
+    --popover-foreground: 270 33% 96%;
+
+    /* Brand */
+    --primary: 268 83% 67%; /* electric purple */
+    --primary-foreground: 260 40% 8%;
+
+    --secondary: 255 20% 14% / 0.9;
+    --secondary-foreground: 270 30% 92%;
+
+    --muted: 255 16% 14% / 0.9;
+    --muted-foreground: 260 12% 70%;
+
+    --accent: 280 65% 74%;
+    --accent-foreground: 260 40% 8%;
+
+    --destructive: 350 85% 60%;
+    --destructive-foreground: 260 40% 8%;
+
+    --border: 260 34% 18%;
+    --input: 260 34% 18%;
+    --ring: 268 83% 67%;
+
+    --radius: 0.9rem;
+
+    /* Sidebar surfaces */
+    --sidebar-background: 258 28% 8% / 0.98;
+    --sidebar-foreground: 270 20% 88%;
+    --sidebar-primary: 268 83% 67%;
+    --sidebar-primary-foreground: 260 40% 8%;
+    --sidebar-accent: 260 32% 16%;
+    --sidebar-accent-foreground: 270 30% 96%;
+    --sidebar-border: 260 32% 18%;
+    --sidebar-ring: 268 83% 67%;
+
+    color-scheme: dark;
+  }
+
+  .dark {
+    --background: 260 30% 6%;
+    --foreground: 270 33% 96%;
+
+    --card: 257 28% 12% / 0.78;
+    --card-foreground: 270 33% 96%;
+
+    --popover: 257 28% 10% / 0.98;
+    --popover-foreground: 270 33% 96%;
+
+    --primary: 268 83% 67%;
+    --primary-foreground: 260 40% 8%;
+
+    --secondary: 255 20% 14% / 0.9;
+    --secondary-foreground: 270 30% 92%;
+
+    --muted: 255 16% 14% / 0.9;
+    --muted-foreground: 260 12% 70%;
+
+    --accent: 280 65% 74%;
+    --accent-foreground: 260 40% 8%;
+
+    --destructive: 350 85% 60%;
+    --destructive-foreground: 260 40% 8%;
+
+    --border: 260 34% 18%;
+    --input: 260 34% 18%;
+    --ring: 268 83% 67%;
+
+    --sidebar-background: 258 28% 8% / 0.98;
+    --sidebar-foreground: 270 20% 88%;
+    --sidebar-primary: 268 83% 67%;
+    --sidebar-primary-foreground: 260 40% 8%;
+    --sidebar-accent: 260 32% 16%;
+    --sidebar-accent-foreground: 270 30% 96%;
+    --sidebar-border: 260 32% 18%;
+    --sidebar-ring: 268 83% 67%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+}

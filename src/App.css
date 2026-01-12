@@ -1,0 +1,5 @@
+/* Reset default Vite layout so Zafira Hub can use full-width application shell */
+
+#root {
+  min-height: 100vh;
+}
