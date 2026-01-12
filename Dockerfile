@@ -10,6 +10,13 @@ RUN npm ci
 # Copiar todo o código fonte
 COPY . .
 
+# Definir argumentos de build para variáveis de ambiente VITE
+ARG VITE_SUPABASE_URL
+ARG VITE_SUPABASE_ANON_KEY
+
+# Definir variáveis de ambiente para o processo de build
+# ARG permite que as variáveis sejam passadas via --build-arg
+# Se não forem passadas, o build tentará ler do arquivo .env (se existir)
 # Executar o build de produção (Vite)
 RUN npm run build
 
