@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { toast } from "sonner";
 import { Tool } from "@/types/tools";
 import { useToolsStore } from "@/store/useToolsStore";
 import { ToolCard } from "@/components/tools/ToolCard";
@@ -9,7 +10,7 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { PageHeader } from "@/components/ui/PageHeader";
 
 export default function Ferramentas() {
-  const { tools, fetchTools } = useToolsStore();
+  const { tools, fetchTools, deleteTool } = useToolsStore();
   const { user } = useAuthStore();
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
 
@@ -28,6 +29,13 @@ export default function Ferramentas() {
   const handleEditTool = (tool: Tool) => {
     setEditingTool(tool);
     setIsEditModalOpen(true);
+  };
+
+  const handleDeleteTool = async (tool: Tool) => {
+    if (confirm(`Tem certeza que deseja excluir "${tool.name}"?`)) {
+      await deleteTool(tool.id);
+      toast.success("Ferramenta excluída com sucesso!");
+    }
   };
 
   return (
@@ -64,6 +72,7 @@ export default function Ferramentas() {
                 tool={tool}
                 onOpen={handleOpenTool}
                 onEdit={handleEditTool} // Passando a função
+                onDelete={user?.role === 'admin' ? handleDeleteTool : undefined}
               />
             ))}
           </div>

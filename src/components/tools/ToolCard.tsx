@@ -2,16 +2,17 @@ import { Tool } from "@/types/tools";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Play, Rocket, Settings2, Code, Terminal, Pencil } from "lucide-react";
+import { ExternalLink, Play, Rocket, Settings2, Code, Terminal, Pencil, Trash2 } from "lucide-react";
 
 interface ToolCardProps {
   tool: Tool;
   onOpen: (tool: Tool) => void;
-  onEdit: (tool: Tool) => void; // Nova Prop
+  onEdit: (tool: Tool) => void;
+  onDelete?: (tool: Tool) => void;
 }
 
-export const ToolCard = ({ tool, onOpen, onEdit }: ToolCardProps) => {
-  
+export const ToolCard = ({ tool, onOpen, onEdit, onDelete }: ToolCardProps) => {
+
   const getStatusStyle = (status: string) => {
     switch (status) {
       case 'active': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
@@ -37,11 +38,11 @@ export const ToolCard = ({ tool, onOpen, onEdit }: ToolCardProps) => {
       hover:shadow-[0_0_30px_-5px_rgba(168,85,247,0.3)]
       flex flex-col justify-between relative
     ">
-      {/* Botão de Editar (Pequeno e discreto no topo) */}
-      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Button 
-          variant="ghost" 
-          size="icon" 
+      {/* Botões de Ação (No topo) */}
+      <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
           className="h-8 w-8 bg-black/40 hover:bg-purple-500 hover:text-white text-zinc-400 rounded-full"
           onClick={(e) => {
             e.stopPropagation(); // Evita abrir o card
@@ -50,6 +51,19 @@ export const ToolCard = ({ tool, onOpen, onEdit }: ToolCardProps) => {
         >
           <Pencil className="w-3.5 h-3.5" />
         </Button>
+        {onDelete && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 bg-black/40 hover:bg-red-500 hover:text-white text-zinc-400 rounded-full"
+            onClick={(e) => {
+              e.stopPropagation(); // Evita abrir o card
+              onDelete(tool);
+            }}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        )}
       </div>
 
       <CardHeader className="pb-3">
@@ -68,7 +82,7 @@ export const ToolCard = ({ tool, onOpen, onEdit }: ToolCardProps) => {
           {tool.description}
         </CardDescription>
       </CardHeader>
-      
+
       <CardContent>
         <div className="text-xs text-slate-500 font-mono flex gap-2 items-center">
           <Code className="w-3 h-3" />
@@ -77,7 +91,7 @@ export const ToolCard = ({ tool, onOpen, onEdit }: ToolCardProps) => {
       </CardContent>
 
       <CardFooter className="pt-0">
-        <Button 
+        <Button
           className="w-full bg-white/5 text-zinc-300 hover:bg-purple-500 hover:text-white border border-white/10 hover:border-purple-400 transition-all duration-300"
           onClick={() => onOpen(tool)}
           disabled={tool.status === 'inactive'}
