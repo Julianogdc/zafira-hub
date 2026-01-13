@@ -130,8 +130,20 @@ export const useCRMStore = create<CRMState>((set, get) => ({
         const lead = get().leads.find(l => l.id === leadId);
         if (!lead || lead.status === newStatus) return;
 
+        // Snapshot current state for rollback
+        const previousLeads = get().leads;
+
+        // Optimistic Update: Update local state immediately
+        set(state => ({
+            leads: state.leads.map(l =>
+                l.id === leadId
+                    ? { ...l, status: newStatus, updatedAt: new Date().toISOString() }
+                    : l
+            )
+        }));
+
         try {
-            // Update status
+            // Update status in Supabase
             const { error: updateError } = await supabase
                 .from('leads')
                 .update({ status: newStatus, updated_at: new Date().toISOString() })
@@ -149,6 +161,7 @@ export const useCRMStore = create<CRMState>((set, get) => ({
 
             if (historyError) console.error('Error saving history:', historyError);
 
+            // Background Refetch (Silent) - verifies data consistency without blocking
             get().fetchLeads();
 
             // Notify if closed
@@ -162,6 +175,8 @@ export const useCRMStore = create<CRMState>((set, get) => ({
             }
         } catch (error) {
             console.error('Error moving lead:', error);
+            // Revert to previous state on error
+            set({ leads: previousLeads });
         }
     }
 }));

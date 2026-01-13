@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Tool } from "@/types/tools";
 import { useToolsStore } from "@/store/useToolsStore";
 import { ToolCard } from "@/components/tools/ToolCard";
@@ -9,9 +9,13 @@ import { useAuthStore } from "@/store/useAuthStore";
 import { PageHeader } from "@/components/ui/PageHeader";
 
 export default function Ferramentas() {
-  const { tools } = useToolsStore();
+  const { tools, fetchTools } = useToolsStore();
   const { user } = useAuthStore();
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
+
+  useEffect(() => {
+    fetchTools();
+  }, [fetchTools]);
   const [editingTool, setEditingTool] = useState<Tool | null>(null); // Estado da Edição
   const [isLauncherOpen, setIsLauncherOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);

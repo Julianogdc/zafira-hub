@@ -31,6 +31,7 @@ const Login = () => {
                     email,
                     password,
                     options: {
+                        emailRedirectTo: window.location.origin,
                         data: {
                             full_name: name,
                             avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
