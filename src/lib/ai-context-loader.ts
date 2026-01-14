@@ -108,14 +108,76 @@ export const getGoalsContext = async (): Promise<GoalsContext> => {
 
 export const getClientsContext = async (): Promise<string> => {
     try {
-        const { data: clients, error } = await supabase.from('clients').select('name, status, contract_value').eq('status', 'active');
+        // Fetch ALL clients with related data
+        const { data: clients, error } = await supabase
+            .from('clients')
+            .select(`
+                *,
+                contracts:client_contracts(*),
+                paymentHistory:client_payments(*)
+            `);
+
         if (error) throw error;
 
-        const totalMRR = clients?.reduce((acc, c) => acc + (Number(c.contract_value) || 0), 0) || 0;
-        return `Total Active Clients: ${clients?.length || 0}. Total Monthly Recurring Revenue (MRR): R$ ${totalMRR.toFixed(2)}.`;
+        if (!clients || clients.length === 0) return "No clients found.";
+
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        const currentMonthKey = `${(currentMonth + 1).toString().padStart(2, '0')}/${currentYear}`;
+
+        let totalMRR = 0;
+        let pendingRevenue = 0;
+        let activeCount = 0;
+        let inactiveCount = 0;
+
+        const detailedList: string[] = [];
+
+        clients.forEach((c: any) => {
+            const isActive = c.status === 'active';
+            const value = Number(c.contract_value) || 0;
+
+            if (isActive) {
+                totalMRR += value;
+                activeCount++;
+            } else {
+                inactiveCount++;
+            }
+
+            // Check Payment Status for Current Month
+            const paymentRecord = c.paymentHistory?.find((p: any) => p.month === currentMonthKey);
+            const isPaid = paymentRecord?.status === 'paid';
+
+            if (isActive && !isPaid) {
+                pendingRevenue += value;
+            }
+
+            // Format Payment Day
+            const payDay = c.payment_day ? `Day ${c.payment_day}` : 'No fixed day';
+
+            // Recent History (Last 3 months)
+            // Simplified for now, just listing status
+
+            detailedList.push(
+                `- ${c.name} (${c.status.toUpperCase()}): Value R$ ${value.toFixed(2)}. PayDay: ${payDay}. ` +
+                `Current Month (${currentMonthKey}): ${isPaid ? 'PAID' : 'PENDING'}. ` +
+                `Contracts: ${c.contracts?.length || 0}.`
+            );
+        });
+
+        return `
+[CLIENTS INTELLIGENCE]
+Total Clients: ${clients.length} (Active: ${activeCount}, Inactive: ${inactiveCount})
+Current MRR: R$ ${totalMRR.toFixed(2)}
+Potential/Pending Revenue (This Month): R$ ${pendingRevenue.toFixed(2)}
+
+DETAILED CLIENT LIST:
+${detailedList.join('\n')}
+        `.trim();
+
     } catch (error) {
         console.error("Error loading Clients context", error);
-        return "";
+        return "Error loading client data.";
     }
 };
 

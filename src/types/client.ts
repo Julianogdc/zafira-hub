@@ -37,4 +37,5 @@ export interface ClientStats {
   totalContractValue: number;
   newClientsThisMonth: number; // Novo KPI
   churnRate: string; // Churn Rate em %
+  averageTicket: number;
 }

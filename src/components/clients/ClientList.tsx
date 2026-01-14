@@ -37,19 +37,25 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { XCircle, PowerOff } from "lucide-react";
 
 interface ClientListProps {
   clients: Client[];
   onEdit: (client: Client) => void;
+  onViewHistory: (client: Client) => void;
   selectedMonth: number;
   selectedYear: number;
 }
 
-export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: ClientListProps) {
-  const { deleteClient, setPaymentStatus } = useClientStore();
+export function ClientList({ clients, onEdit, onViewHistory, selectedMonth, selectedYear }: ClientListProps) {
+  const { deleteClient, setPaymentStatus, updateClient } = useClientStore();
   const { addTransaction } = useFinanceStore();
 
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
+
+  // Bulk Selection
+  const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
 
   // Sorting State
   const [sortConfig, setSortConfig] = useState<{
@@ -168,6 +174,50 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
     }
   };
 
+  // --- BULK ACTIONS ---
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      const allIds = new Set(sortedClients.map(c => c.id));
+      setSelectedClients(allIds);
+    } else {
+      setSelectedClients(new Set());
+    }
+  };
+
+  const handleSelectOne = (id: string, checked: boolean) => {
+    const newSelected = new Set(selectedClients);
+    if (checked) {
+      newSelected.add(id);
+    } else {
+      newSelected.delete(id);
+    }
+    setSelectedClients(newSelected);
+  };
+
+  const handleBulkDeactivate = async () => {
+    if (selectedClients.size === 0) return;
+    const confirm = window.confirm(`Deseja desativar ${selectedClients.size} clientes?`);
+    if (!confirm) return;
+
+    for (const id of selectedClients) {
+      await updateClient(id, { status: 'inactive' });
+    }
+    toast.success(`${selectedClients.size} clientes desativados.`);
+    setSelectedClients(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedClients.size === 0) return;
+    const confirm = window.confirm(`ATENÇÃO: Deseja EXCLUIR permanentemente ${selectedClients.size} clientes?`);
+    if (!confirm) return;
+
+    for (const id of selectedClients) {
+      await deleteClient(id);
+    }
+    toast.success(`${selectedClients.size} clientes excluídos.`);
+    setSelectedClients(new Set());
+  };
+
   if (clients.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center p-12 text-zinc-500 bg-zinc-950/30 border border-white/5 rounded-xl border-dashed">
@@ -177,13 +227,59 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
     );
   }
 
+  const allSelected = sortedClients.length > 0 && selectedClients.size === sortedClients.length;
+
   return (
     <>
+      {selectedClients.size > 0 && (
+        <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 p-2.5 px-4 rounded-lg mb-4 animate-in fade-in slide-in-from-top-2">
+          <span className="text-sm font-medium text-emerald-400">
+            {selectedClients.size} cliente(s) selecionado(s)
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-zinc-300 hover:text-white hover:bg-white/10 gap-2 border border-white/5"
+              onClick={handleBulkDeactivate}
+            >
+              <PowerOff className="w-3.5 h-3.5" />
+              Desativar
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8 text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2 border border-red-500/20"
+              onClick={handleBulkDelete}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              Excluir
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 ml-2 text-zinc-400 hover:text-white"
+              onClick={() => setSelectedClients(new Set())}
+            >
+              <XCircle className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-xl border border-white/10 overflow-hidden">
         <TooltipProvider>
           <Table>
             <TableHeader className="bg-zinc-900/50">
               <TableRow className="border-white/10 hover:bg-transparent">
+                <TableHead className="w-[40px]">
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={handleSelectAll}
+                    className="border-zinc-700 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
+                  />
+                </TableHead>
                 <TableHead
                   className="text-zinc-400 cursor-pointer hover:text-white transition-colors group"
                   onClick={() => handleSort('name')}
@@ -238,6 +334,13 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
                     className="border-white/5 hover:bg-zinc-900/50 cursor-pointer transition-colors group"
                     onClick={() => onEdit(client)}
                   >
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedClients.has(client.id)}
+                        onCheckedChange={(checked) => handleSelectOne(client.id, checked as boolean)}
+                        className="border-zinc-700 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
+                      />
+                    </TableCell>
                     <TableCell className="font-medium text-zinc-200">
                       {client.name}
                     </TableCell>
@@ -323,6 +426,18 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
 
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="Ver Histórico"
+                          className="h-8 w-8 text-zinc-400 hover:text-blue-400 hover:bg-blue-950/30"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onViewHistory(client);
+                          }}
+                        >
+                          <FileText className="w-4 h-4" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"

@@ -6,7 +6,10 @@ import {
   BarChart2,
   Calendar as CalendarIcon,
   LayoutList,
-  Users2
+  Users2,
+  Filter,
+  Search,
+  Download
 } from 'lucide-react';
 import {
   LineChart,
@@ -17,12 +20,21 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import { useClientStore } from '../store/useClientStore';
 import { useAuthStore } from '../store/useAuthStore';
 import { Client } from '../types/client';
 import { ClientStatsDisplay } from '../components/clients/ClientStats';
 import { ClientList } from '../components/clients/ClientList';
 import { ClientForm } from '../components/clients/ClientForm';
+import { ClientHistorySheet } from '../components/clients/ClientHistorySheet';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -44,6 +56,10 @@ export default function Clientes() {
   const [isSheetOpen, setIsSheetOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
 
+  // Controle do Histórico (Sheet)
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [viewingHistoryClient, setViewingHistoryClient] = useState<Client | null>(null);
+
   // Navegação Temporal
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<'monthly' | 'annual'>('monthly');
@@ -51,20 +67,21 @@ export default function Clientes() {
   const selectedMonth = currentDate.getMonth();
   const selectedYear = currentDate.getFullYear();
 
-  // HEPER: Verifica se cliente está ativo em um determinado mês/ano
-  const isClientActiveInPeriod = (client: Client, month: number, year: number) => {
-    // Data de referência (Início do mês selecionado)
+  // HELPER: Verifica apenas se as datas conferem com o período
+  const isContractInPeriod = (client: Client, month: number, year: number) => {
     const periodStart = new Date(year, month, 1);
-    // Data de referência (Fim do mês selecionado)
     const periodEnd = new Date(year, month + 1, 0);
 
-    // Início do contrato
     const start = client.contractStart ? new Date(client.contractStart + 'T00:00:00') : new Date(client.createdAt);
-    // Fim do contrato (ou muito distante se null)
+    // If no end date, assume active forever unless status says otherwise - but for "overlap", infinite end.
     const end = client.contractEnd ? new Date(client.contractEnd + 'T00:00:00') : new Date('2100-01-01');
 
-    // Lógica de overlap: O contrato começa antes do fim do período E termina depois do início do período
-    return start <= periodEnd && end >= periodStart && client.status === 'active';
+    return start <= periodEnd && end >= periodStart;
+  };
+
+  // HELPER: Verifica se está ativo (Datas + Status Active)
+  const isClientActiveInPeriod = (client: Client, month: number, year: number) => {
+    return isContractInPeriod(client, month, year) && client.status === 'active';
   };
 
   // Função refinada para cálculo de receita
@@ -84,11 +101,18 @@ export default function Clientes() {
   };
 
   // --- ESTATÍSTICAS DINÂMICAS ---
+  const activeClientsCount = clients.filter(c => isClientActiveInPeriod(c, selectedMonth, selectedYear)).length;
+  // Inactive count: Clients who match the PERIOD (overlap) but are NOT active
+  const inactiveClientsCount = clients.filter(c => isContractInPeriod(c, selectedMonth, selectedYear) && c.status !== 'active').length;
+
+  const totalRevenue = calculateRevenue(selectedMonth, selectedYear);
+
   const dynamicStats = {
-    totalClients: clients.length,
-    activeClients: clients.filter(c => isClientActiveInPeriod(c, selectedMonth, selectedYear)).length,
-    inactiveClients: clients.filter(c => !isClientActiveInPeriod(c, selectedMonth, selectedYear)).length,
-    totalContractValue: calculateRevenue(selectedMonth, selectedYear),
+    totalClients: clients.length, // Total DB
+    activeClients: activeClientsCount,
+    inactiveClients: inactiveClientsCount,
+    totalContractValue: totalRevenue,
+    averageTicket: activeClientsCount > 0 ? totalRevenue / activeClientsCount : 0,
 
     newClientsThisMonth: clients.filter(c => {
       const d = new Date(c.contractStart || c.createdAt);
@@ -131,8 +155,57 @@ export default function Clientes() {
     setCurrentDate(newDate);
   };
 
+  // Filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'paid' | 'pending'>('all');
+
   // --- LISTA FILTRADA P/ MÊS ---
-  const monthlyClients = clients.filter(c => isClientActiveInPeriod(c, selectedMonth, selectedYear));
+  const monthlyClients = clients.filter(c => {
+    // 0. Search Term
+    if (searchTerm && !c.name.toLowerCase().includes(searchTerm.toLowerCase())) return false;
+
+    // 1. Period check (Date overlap only)
+    const inPeriod = isContractInPeriod(c, selectedMonth, selectedYear);
+    if (!inPeriod) return false;
+
+    // 2. Status Filter
+    if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+
+    // 3. Payment Filter
+    if (paymentFilter !== 'all') {
+      const currentMonthKey = `${(selectedMonth + 1).toString().padStart(2, '0')}/${selectedYear}`;
+      const isPaid = c.paymentHistory?.some(p => p.month === currentMonthKey && p.status === 'paid');
+
+      if (paymentFilter === 'paid' && !isPaid) return false;
+      if (paymentFilter === 'pending' && isPaid) return false;
+    }
+
+    return true;
+  });
+
+  const handleExportCSV = () => {
+    const headers = ['Nome', 'Status', 'Valor Contrato', 'Início', 'Fim', 'Dia Pagamento'];
+    const rows = monthlyClients.map(c => [
+      c.name,
+      c.status === 'active' ? 'Ativo' : 'Inativo',
+      c.contractValue.toString().replace('.', ','),
+      c.contractStart || '-',
+      c.contractEnd || '-',
+      c.paymentDay || '-'
+    ]);
+
+    const csvContent = [
+      headers.join(';'),
+      ...rows.map(r => r.join(';'))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `clientes_${selectedMonth + 1}_${selectedYear}.csv`;
+    link.click();
+  };
 
   const handleCreateNew = () => {
     setEditingClient(null);
@@ -142,6 +215,11 @@ export default function Clientes() {
   const handleEdit = (client: Client) => {
     setEditingClient(client);
     setIsSheetOpen(true);
+  };
+
+  const handleViewHistory = (client: Client) => {
+    setViewingHistoryClient(client);
+    setIsHistoryOpen(true);
   };
 
   return (
@@ -179,6 +257,7 @@ export default function Clientes() {
             </ToggleGroupItem>
           </ToggleGroup>
 
+
           <div className="h-6 w-px bg-white/10 mx-2" />
 
           <Button
@@ -194,12 +273,59 @@ export default function Clientes() {
 
       <ClientStatsDisplay stats={dynamicStats} />
 
+      {/* Barra de Filtros e Busca */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-auto">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+            <Input
+              placeholder="Buscar cliente..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-9 w-full sm:w-[280px] pl-9 bg-zinc-950/50 border-white/10 text-sm text-zinc-300 placeholder:text-zinc-500 focus-visible:ring-emerald-500/20"
+            />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-2 sm:pb-0">
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+            <SelectTrigger className="h-9 w-[130px] bg-zinc-950/50 border-white/10 text-sm text-zinc-300 hover:bg-white/5 focus:ring-0">
+              <div className="flex items-center gap-2">
+                <Filter className="w-3.5 h-3.5 text-zinc-500" />
+                <SelectValue />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas</SelectItem>
+              <SelectItem value="active">Ativos</SelectItem>
+              <SelectItem value="inactive">Inativos</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={paymentFilter} onValueChange={(v) => setPaymentFilter(v as any)}>
+            <SelectTrigger className="h-9 w-[130px] bg-zinc-950/50 border-white/10 text-sm text-zinc-300 hover:bg-white/5 focus:ring-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos Pagam.</SelectItem>
+              <SelectItem value="paid">Pagos</SelectItem>
+              <SelectItem value="pending">Pendentes</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button variant="outline" size="icon" onClick={handleExportCSV} title="Exportar CSV" className="h-9 w-9 border-white/10 bg-zinc-950/50 text-zinc-400 hover:text-white hover:bg-white/5">
+            <Download className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
       <div className="min-h-[400px]">
         {viewMode === 'monthly' ? (
           <div className="animate-in slide-in-from-left-4 duration-500">
             <ClientList
               clients={monthlyClients}
               onEdit={handleEdit}
+              onViewHistory={handleViewHistory}
               selectedMonth={selectedMonth}
               selectedYear={selectedYear}
             />
@@ -251,6 +377,12 @@ export default function Clientes() {
         isOpen={isSheetOpen}
         onClose={() => setIsSheetOpen(false)}
         editingClient={editingClient}
+      />
+
+      <ClientHistorySheet
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        client={viewingHistoryClient}
       />
     </div>
   );

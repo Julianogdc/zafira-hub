@@ -61,10 +61,16 @@ export function ClientStatsDisplay({ stats }: ClientStatsProps) {
           <h3 className="text-sm font-medium text-blue-400/80">Valor em Contratos</h3>
           <Wallet className="w-4 h-4 text-blue-400" />
         </div>
-        <div className="text-2xl font-bold text-white">
-          {formatCurrency(stats.totalContractValue)}
+        <div className="flex items-center gap-2">
+          <div className="text-2xl font-bold text-white">
+            {formatCurrency(stats.totalContractValue)}
+          </div>
+          <span className="text-xs text-zinc-500 leading-tight">Recorrência<br />mensal</span>
         </div>
-        <p className="text-xs text-zinc-500 mt-1">Recorrência mensal</p>
+
+        <div className="mt-2 text-sm font-medium text-emerald-500">
+          Ticket Médio: {formatCurrency(stats.averageTicket)}
+        </div>
       </div>
 
     </div>

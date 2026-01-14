@@ -38,11 +38,12 @@ const gatherContext = async (type: AIAnalysisType): Promise<string> => {
   const settings = aiState.settings;
 
   // 1. CARREGAR DADOS VIA DB (Async)
+  // FORCE ENABLE ALL PERMISSIONS AS REQUESTED BY USER "ACESSO A TUDO"
   const dbContext = await loadSummarizedContext({
-    canReadFinance: settings.canReadFinance,
-    canReadClients: settings.canReadClients,
-    canReadGoals: settings.canReadGoals,
-    canReadCRM: true // Assuming true for now or add to settings
+    canReadFinance: true,
+    canReadClients: true,
+    canReadGoals: true,
+    canReadCRM: true
   });
 
   // 2. MEMÓRIA ESTRATÉGICA (O Cérebro)
@@ -62,7 +63,7 @@ const gatherContext = async (type: AIAnalysisType): Promise<string> => {
     🧠 MEMÓRIA ESTRATÉGICA (DIRETRIZES IMUTÁVEIS):
     ${strategicMemory}
 
-    📊 DADOS EM TEMPO REAL (BANCO DE DADOS):
+    📊 DADOS EM TEMPO REAL (BANCO DE DADOS - ACESSO TOTAL):
     ${dbContext}
     
     💬 CONTEXTO IMEDIATO (CHAT):
@@ -131,11 +132,30 @@ REGRA DE USO:
     body: JSON.stringify({
       contents: [{
         parts: [{
-          text: `QUEM VOCÊ É:\n${activePersona}\n\n${conversationRules}\n\nO QUE ESTÁ ACONTECENDO (DADOS):\n${context}\n\nO QUE O ADM FALOU:\n${userPrompt}`
+          text: `
+SYSTEM INSTRUCTION (CRITYCAL):
+You are an AI connected to a CRM Database.
+You have been provided with REAL-TIME DATA in the section "O QUE ESTÁ ACONTECENDO (DADOS)".
+1. YOU MUST ONLY use the data provided in that section.
+2. DO NOT INVENT, GUESS, or HALLUCINATE clients, values, or payments.
+3. If the data is empty or the client is not listed, say "Não encontrei essa informação nos dados.".
+4. NEVER create example cases like "Cliente B" or "João". Only cite real names found in the context.
+
+QUEM VOCÊ É:
+${activePersona}
+
+${conversationRules}
+
+O QUE ESTÁ ACONTECENDO (DADOS):
+${context}
+
+O QUE O ADM FALOU:
+${userPrompt}
+`
         }]
       }],
       generationConfig: {
-        temperature: 0.6, // AUMENTEI: Mais humana, menos robótica.
+        temperature: 0.4, // Aumentado levemente para 0.4 para evitar respostas muito curtas, mas ainda seguro.
         maxOutputTokens: 8192,
       }
     })
