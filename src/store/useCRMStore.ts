@@ -145,6 +145,9 @@ export const useCRMStore = create<CRMState>((set, get) => ({
 
     deleteLead: async (id) => {
         try {
+            // Manual Cascade: Delete tasks first (in case DB cascade isn't set)
+            await supabase.from('crm_tasks').delete().eq('lead_id', id);
+
             const { error } = await supabase.from('leads').delete().eq('id', id);
             if (error) throw error;
             set(state => ({ leads: state.leads.filter(l => l.id !== id) }));

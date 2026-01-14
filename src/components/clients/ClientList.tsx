@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Edit2, Trash2, FileText, AlertCircle, AlertTriangle, CheckCircle2, DollarSign } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { Edit2, Trash2, FileText, AlertCircle, AlertTriangle, CheckCircle2, DollarSign, ArrowUpDown, ArrowUp, ArrowDown, Calendar } from 'lucide-react';
 import { Client } from '../../types/client';
 import { useClientStore } from '../../store/useClientStore';
 import { useFinanceStore } from '../../store/useFinanceStore';
@@ -50,6 +50,57 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
   const { addTransaction } = useFinanceStore();
 
   const [clientToDelete, setClientToDelete] = useState<string | null>(null);
+
+  // Sorting State
+  const [sortConfig, setSortConfig] = useState<{
+    key: 'name' | 'contractValue' | 'paymentDay' | null;
+    direction: 'asc' | 'desc';
+  }>({ key: 'name', direction: 'asc' });
+
+  const sortedClients = useMemo(() => {
+    const sortable = [...clients];
+    if (sortConfig.key) {
+      sortable.sort((a, b) => {
+        let aValue = a[sortConfig.key!];
+        let bValue = b[sortConfig.key!];
+
+        // Handle PaymentDay nulls
+        if (sortConfig.key === 'paymentDay') {
+          aValue = aValue || 0;
+          bValue = bValue || 0;
+        }
+
+        if (aValue === bValue) return 0;
+
+        // String comparison
+        if (typeof aValue === 'string' && typeof bValue === 'string') {
+          return sortConfig.direction === 'asc'
+            ? aValue.localeCompare(bValue)
+            : bValue.localeCompare(aValue);
+        }
+
+        // Number comparison
+        // @ts-ignore
+        if (aValue < bValue) {
+          return sortConfig.direction === 'asc' ? -1 : 1;
+        }
+        // @ts-ignore
+        if (aValue > bValue) {
+          return sortConfig.direction === 'asc' ? 1 : -1;
+        }
+        return 0;
+      });
+    }
+    return sortable;
+  }, [clients, sortConfig]);
+
+  const handleSort = (key: 'name' | 'contractValue' | 'paymentDay') => {
+    let direction: 'asc' | 'desc' = 'asc';
+    if (sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
+  };
 
   const currentMonthKey = `${(selectedMonth + 1).toString().padStart(2, '0')}/${selectedYear}`;
 
@@ -133,17 +184,51 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
           <Table>
             <TableHeader className="bg-zinc-900/50">
               <TableRow className="border-white/10 hover:bg-transparent">
-                <TableHead className="text-zinc-400">Cliente</TableHead>
+                <TableHead
+                  className="text-zinc-400 cursor-pointer hover:text-white transition-colors group"
+                  onClick={() => handleSort('name')}
+                >
+                  <div className="flex items-center gap-2">
+                    Cliente
+                    {sortConfig.key === 'name' && (
+                      sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                    )}
+                    {sortConfig.key !== 'name' && <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-50" />}
+                  </div>
+                </TableHead>
+                <TableHead
+                  className="text-zinc-400 cursor-pointer hover:text-white transition-colors group"
+                  onClick={() => handleSort('paymentDay')}
+                >
+                  <div className="flex items-center gap-2">
+                    Dia Pgto
+                    {sortConfig.key === 'paymentDay' && (
+                      sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                    )}
+                    {sortConfig.key !== 'paymentDay' && <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-50" />}
+                  </div>
+                </TableHead>
                 <TableHead className="text-zinc-400">Status</TableHead>
                 <TableHead className="text-zinc-400">Pagamento ({currentMonthKey})</TableHead>
-                <TableHead className="text-zinc-400">Vencimento</TableHead>
-                <TableHead className="text-zinc-400">Valor Mensal</TableHead>
+                <TableHead className="text-zinc-400">Vencimento Contrato</TableHead>
+                <TableHead
+                  className="text-zinc-400 cursor-pointer hover:text-white transition-colors group"
+                  onClick={() => handleSort('contractValue')}
+                >
+                  <div className="flex items-center gap-2">
+                    Valor Mensal
+                    {sortConfig.key === 'contractValue' && (
+                      sortConfig.direction === 'asc' ? <ArrowUp className="w-3 h-3 text-emerald-500" /> : <ArrowDown className="w-3 h-3 text-emerald-500" />
+                    )}
+                    {sortConfig.key !== 'contractValue' && <ArrowUpDown className="w-3 h-3 opacity-0 group-hover:opacity-50" />}
+                  </div>
+                </TableHead>
                 <TableHead className="text-zinc-400">Docs</TableHead>
                 <TableHead className="text-right text-zinc-400">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {clients.map((client) => {
+              {sortedClients.map((client) => {
                 const expirationStatus = getExpirationStatus(client.contractEnd);
                 const isPaidThisMonth = client.paymentHistory?.some(p => p.month === currentMonthKey && p.status === 'paid');
 
@@ -155,6 +240,13 @@ export function ClientList({ clients, onEdit, selectedMonth, selectedYear }: Cli
                   >
                     <TableCell className="font-medium text-zinc-200">
                       {client.name}
+                    </TableCell>
+
+                    <TableCell>
+                      <div className="flex items-center gap-1.5 text-zinc-300">
+                        <Calendar className="w-3 h-3 text-zinc-500" />
+                        {client.paymentDay ? `Dia ${client.paymentDay}` : '-'}
+                      </div>
                     </TableCell>
 
                     <TableCell>

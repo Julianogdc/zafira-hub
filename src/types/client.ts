@@ -27,6 +27,7 @@ export interface Client {
   createdAt: string;
   updatedAt: string;
   ownerId?: string;
+  paymentDay?: number;
 }
 
 export interface ClientStats {

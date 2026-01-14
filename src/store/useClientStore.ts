@@ -48,6 +48,7 @@ export const useClientStore = create<ClientState>((set, get) => ({
         createdAt: c.created_at,
         updatedAt: c.updated_at,
         ownerId: c.owner_id,
+        paymentDay: c.payment_day,
         contracts: c.contracts.map((ct: any) => ({
           id: ct.id,
           fileName: ct.file_name,
@@ -83,7 +84,8 @@ export const useClientStore = create<ClientState>((set, get) => ({
         contract_start: clientData.contractStart || null,
         contract_end: clientData.contractEnd || null,
         notes: clientData.notes,
-        owner_id: user.user.id
+        owner_id: user.user.id,
+        payment_day: clientData.paymentDay
       };
 
       const { data, error } = await supabase.from('clients').insert(payload).select().single();
@@ -108,6 +110,7 @@ export const useClientStore = create<ClientState>((set, get) => ({
       if (data.contractEnd !== undefined) payload.contract_end = data.contractEnd || null;
       if (data.notes) payload.notes = data.notes;
       if (data.churnedAt) payload.churned_at = data.churnedAt;
+      if (data.paymentDay !== undefined) payload.payment_day = data.paymentDay;
       payload.updated_at = new Date().toISOString();
 
       const { error } = await supabase.from('clients').update(payload).eq('id', id);

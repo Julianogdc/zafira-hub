@@ -47,6 +47,7 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
   const [notes, setNotes] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [paymentDay, setPaymentDay] = useState('');
 
   // Upload States
   const [isUploading, setIsUploading] = useState(false);
@@ -64,6 +65,7 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
       setNotes(editingClient.notes);
       setStartDate(editingClient.contractStart || '');
       setEndDate(editingClient.contractEnd || '');
+      setPaymentDay(editingClient.paymentDay?.toString() || '');
     } else {
       resetForm();
     }
@@ -76,6 +78,7 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
     setNotes('');
     setStartDate('');
     setEndDate('');
+    setPaymentDay('');
     setPendingFile(null);
   };
 
@@ -118,6 +121,14 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
 
     const cleanValue = value.replace(/[^\d,]/g, '').replace(',', '.');
     const numericValue = parseFloat(cleanValue);
+
+    // Validate Payment Day
+    const pDay = parseInt(paymentDay);
+    if (paymentDay && (isNaN(pDay) || pDay < 1 || pDay > 31)) {
+      showError("Dia de pagamento inválido (1-31).");
+      return;
+    }
+
     let targetClientId = editingClient?.id;
 
     try {
@@ -128,6 +139,7 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
         notes,
         contractStart: startDate,
         contractEnd: endDate,
+        paymentDay: pDay || null
       };
 
       if (editingClient) {
@@ -205,6 +217,19 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
                     });
                     setValue(p);
                   }}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-zinc-400">Dia de Pagamento</Label>
+                <Input
+                  type="number"
+                  placeholder="Ex: 5"
+                  min={1}
+                  max={31}
+                  className="bg-zinc-900/50 border-white/10"
+                  value={paymentDay}
+                  onChange={(e) => setPaymentDay(e.target.value)}
                 />
               </div>
             </div>

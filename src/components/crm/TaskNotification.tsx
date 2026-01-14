@@ -24,6 +24,11 @@ export function TaskNotification({ onOpenTask }: TaskNotificationProps) {
         const today = new Date();
         return tasks.filter(task => {
             if (task.completed || !task.dueDate) return false;
+
+            // Filter out orphans
+            const hasLead = leads.some(l => l.id === task.leadId);
+            if (!hasLead) return false;
+
             const dueDate = parseISO(task.dueDate);
             // Due today OR overdue
             return isSameDay(dueDate, today) || isBefore(dueDate, today);
