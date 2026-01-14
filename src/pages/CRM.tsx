@@ -5,28 +5,35 @@ import { KanbanBoard } from '@/components/crm/KanbanBoard';
 import { LeadForm } from '@/components/crm/LeadForm';
 import { CRMFilters } from '@/components/crm/CRMFilters';
 import { CRMImportDialog } from "@/components/crm/CRMImportDialog";
-import { FunnelViewDialog } from "@/components/crm/FunnelViewDialog";
+import { LeadDetailsModal } from "@/components/crm/LeadDetailsModal";
+import { CRMDashboard } from "@/components/crm/CRMDashboard";
+import { FunnelView } from "@/components/crm/FunnelView";
+import { TaskNotification } from "@/components/crm/TaskNotification";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 import { Lead } from '@/types/crm';
 import { Button } from '@/components/ui/button';
-import { Plus, Users, Target, CheckCircle2, DollarSign, TrendingUp } from 'lucide-react';
+import { Plus, Users, Target, CheckCircle2, DollarSign, TrendingUp, BarChart3, LayoutGrid, ListFilter } from 'lucide-react';
 import { SalesMotivationWidget } from '@/components/crm/SalesMotivationWidget';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 export default function CRM() {
-    const { leads: allLeads, fetchLeads, initialized } = useCRMStore();
+    const { leads: allLeads, fetchLeads, initialized, fetchTasks } = useCRMStore();
 
     useEffect(() => {
         if (!initialized) {
             fetchLeads();
+            fetchTasks(); // Fetch tasks globally
         }
-    }, [initialized, fetchLeads]);
+    }, [initialized, fetchLeads, fetchTasks]);
 
     const { user } = useAuthStore();
 
     // Filter leads: Show owned leads OR legacy leads (no owner)
     const leads = allLeads.filter(l => !l.ownerId || l.ownerId === user?.id);
     const [isFormOpen, setIsFormOpen] = useState(false);
+    const [isDashboardOpen, setIsDashboardOpen] = useState(false);
+    const [viewMode, setViewMode] = useState<'kanban' | 'funnel'>('kanban');
     const [editingLead, setEditingLead] = useState<Lead | null>(null);
 
     // Filter State
@@ -89,7 +96,8 @@ export default function CRM() {
 
     const handleEdit = (lead: Lead) => {
         setEditingLead(lead);
-        setIsFormOpen(true);
+        // setIsFormOpen(true); // Don't open the simple form, let independent state or conditional render handle it
+        // actually in the JSX below: editingLead triggers LeadDetailsModal, isFormOpen triggers LeadForm (new)
     };
 
     const handleNew = () => {
@@ -111,6 +119,14 @@ export default function CRM() {
                             </div>
                         </AccordionTrigger>
                         <div className="flex items-center gap-2 ml-4">
+                            <div className="mr-2">
+                                <TaskNotification
+                                    onOpenTask={(leadId) => {
+                                        const lead = leads.find(l => l.id === leadId);
+                                        if (lead) handleEdit(lead);
+                                    }}
+                                />
+                            </div>
                             <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-2">
                                 <CRMFilters
                                     searchTerm={searchTerm}
@@ -123,11 +139,35 @@ export default function CRM() {
                                 <div className="h-4 w-px bg-white/10 mx-2" />
                             </div>
                             <div onClick={(e) => e.stopPropagation()}>
-                                <CRMImportDialog />
+                                <Button
+                                    onClick={() => setIsDashboardOpen(true)}
+                                    variant="ghost"
+                                    size="sm"
+                                    className="text-zinc-400 hover:text-white gap-2 h-7 text-xs px-2 mr-1"
+                                >
+                                    <BarChart3 className="w-4 h-4" />
+                                    Relatórios
+                                </Button>
                             </div>
-                            <div onClick={(e) => e.stopPropagation()}>
-                                <FunnelViewDialog leads={filteredLeads} />
+                            <div onClick={(e) => e.stopPropagation()} className="flex items-center gap-1 bg-zinc-950/50 p-0.5 rounded-lg border border-white/5 mr-2">
+                                <Button
+                                    onClick={() => setViewMode('kanban')}
+                                    variant="ghost"
+                                    size="icon"
+                                    className={`h-6 w-6 rounded-md ${viewMode === 'kanban' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                >
+                                    <LayoutGrid className="w-3.5 h-3.5" />
+                                </Button>
+                                <Button
+                                    onClick={() => setViewMode('funnel')}
+                                    variant="ghost"
+                                    size="icon"
+                                    className={`h-6 w-6 rounded-md ${viewMode === 'funnel' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'}`}
+                                >
+                                    <ListFilter className="w-3.5 h-3.5" />
+                                </Button>
                             </div>
+
                             <Button onClick={(e) => { e.stopPropagation(); handleNew(); }} size="sm" className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 h-7 text-xs px-3 shadow-sm shadow-emerald-900/20">
                                 <Plus className="h-3 w-3" /> Lead
                             </Button>
@@ -195,14 +235,43 @@ export default function CRM() {
 
             {/* Kanban Board Container - Fixed height, internal scroll */}
             <div className="flex-1 min-h-0 relative overflow-hidden border-t border-white/5 pt-2">
-                <KanbanBoard leads={filteredLeads} onEditLead={handleEdit} />
+                {viewMode === 'kanban' ? (
+                    <KanbanBoard leads={filteredLeads} onEditLead={handleEdit} />
+                ) : (
+                    <FunnelView leads={filteredLeads} onEditLead={handleEdit} />
+                )}
             </div>
 
+            {/* Form for Creating NEW Leads */}
             <LeadForm
                 isOpen={isFormOpen}
                 onClose={() => setIsFormOpen(false)}
-                editingLead={editingLead}
+                editingLead={null} // Always null for new leads
             />
+
+            {/* Modal for Viewing/Editing EXISTING Leads (The "Dossier") */}
+            {editingLead && (
+                <LeadDetailsModal
+                    isOpen={!!editingLead}
+                    onClose={() => setEditingLead(null)}
+                    lead={editingLead}
+                />
+            )}
+
+            <Dialog open={isDashboardOpen} onOpenChange={setIsDashboardOpen}>
+                <DialogContent className="max-w-5xl h-[85vh] bg-zinc-950/95 border-zinc-800 text-zinc-100 flex flex-col p-6 overflow-hidden">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <BarChart3 className="w-5 h-5 text-indigo-500" />
+                            Relatório Geral (Analytics)
+                        </DialogTitle>
+                    </DialogHeader>
+
+                    <div className="flex-1 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                        <CRMDashboard leads={filteredLeads} />
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div >
     );
 }

@@ -12,9 +12,17 @@ interface KanbanBoardProps {
     onEditLead: (lead: any) => void;
 }
 
+import { LostReasonDialog } from './LostReasonDialog';
+
+// ...
+
 export const KanbanBoard = ({ leads, onEditLead }: KanbanBoardProps) => {
     const { moveLead, deleteLead } = useCRMStore();
     const [isLostCollapsed, setIsLostCollapsed] = useState(true);
+
+    // Lost Reason State
+    const [isLostReasonOpen, setIsLostReasonOpen] = useState(false);
+    const [pendingLoss, setPendingLoss] = useState<{ id: string, destination: LeadStatus } | null>(null);
 
     const columns: { id: LeadStatus; title: string; color: string }[] = [
         { id: 'prospect', title: 'Prospecção', color: 'border-l-4 border-l-blue-500' },
@@ -31,10 +39,18 @@ export const KanbanBoard = ({ leads, onEditLead }: KanbanBoardProps) => {
         if (!destination) return;
         if (destination.droppableId === source.droppableId && destination.index === source.index) return;
 
+        // Intercept LOST move
+        if (destination.droppableId === 'lost') {
+            setPendingLoss({ id: draggableId, destination: 'lost' });
+            setIsLostReasonOpen(true);
+            return;
+        }
+
         moveLead(draggableId, destination.droppableId as LeadStatus);
 
         // Automacao: Criar Cliente quando Lead vai para Fechado
         if (destination.droppableId === 'closed' && source.droppableId !== 'closed') {
+            // ... (existing logic)
             const lead = leads.find(l => l.id === draggableId);
             if (lead) {
                 useClientStore.getState().addClient({
@@ -48,6 +64,14 @@ export const KanbanBoard = ({ leads, onEditLead }: KanbanBoardProps) => {
                     description: `${lead.name} foi adicionado aos Clientes Ativos.`
                 });
             }
+        }
+    };
+
+    const confirmLoss = (reason: string) => {
+        if (pendingLoss) {
+            moveLead(pendingLoss.id, pendingLoss.destination, reason);
+            setPendingLoss(null);
+            setIsLostReasonOpen(false);
         }
     };
 
@@ -142,6 +166,12 @@ export const KanbanBoard = ({ leads, onEditLead }: KanbanBoardProps) => {
                     </div>
                 </DragDropContext>
             </div>
+
+            <LostReasonDialog
+                isOpen={isLostReasonOpen}
+                onClose={() => { setIsLostReasonOpen(false); setPendingLoss(null); }}
+                onConfirm={confirmLoss}
+            />
         </div>
     );
 };

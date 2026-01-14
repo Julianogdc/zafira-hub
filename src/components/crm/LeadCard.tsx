@@ -1,7 +1,8 @@
 import { memo } from 'react';
 import { Draggable } from '@hello-pangea/dnd';
 import { Lead } from '../../types/crm';
-import { Edit2, Trash2, MapPin, Phone, Building2, Tag } from 'lucide-react';
+import { useCRMStore } from '@/store/useCRMStore';
+import { Phone, Building2, Calendar, GripVertical, CheckSquare, Edit2, Trash2, MapPin, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
@@ -13,6 +14,9 @@ interface LeadCardProps {
 }
 
 export const LeadCard = memo(({ lead, index, onEdit, onDelete }: LeadCardProps) => {
+    const { tasks } = useCRMStore();
+    const incompleteTasksCount = tasks.filter(t => t.leadId === lead.id && !t.completed).length;
+
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('pt-BR', {
             style: 'currency',
@@ -79,6 +83,11 @@ export const LeadCard = memo(({ lead, index, onEdit, onDelete }: LeadCardProps) 
                                 <Tag className="w-2.5 h-2.5 mr-1 text-slate-500" /> {lead.niche}
                             </Badge>
                         )}
+                        {lead.tags?.map((tag, idx) => (
+                            <Badge key={idx} variant="outline" className="text-[10px] h-5 px-2 bg-indigo-500/10 text-indigo-300 border-indigo-500/20">
+                                #{tag}
+                            </Badge>
+                        ))}
                     </div>
 
                     {/* Footer Info */}
@@ -95,6 +104,19 @@ export const LeadCard = memo(({ lead, index, onEdit, onDelete }: LeadCardProps) 
                                 <span>{lead.phone}</span>
                             </div>
                         )}
+
+                        <div className="flex items-center gap-2 mt-2">
+                            {incompleteTasksCount > 0 && (
+                                <div className="flex items-center gap-1 text-[10px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20" title={`${incompleteTasksCount} tarefas pendentes`}>
+                                    <CheckSquare className="w-3 h-3" />
+                                    <span>{incompleteTasksCount}</span>
+                                </div>
+                            )}
+                            <div className="text-[10px] text-zinc-500 flex items-center gap-1 ml-auto">
+                                <Calendar className="w-3 h-3" />
+                                {new Date(lead.createdAt).toLocaleDateString('pt-BR')}
+                            </div>
+                        </div>
                     </div>
 
                     {/* Actions (Hidden by default, visible on hover) */}
