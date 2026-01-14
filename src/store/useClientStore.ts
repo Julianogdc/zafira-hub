@@ -9,7 +9,7 @@ interface ClientState {
 
   // Actions
   fetchClients: () => Promise<void>;
-  addClient: (client: Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'contracts' | 'paymentHistory'>) => Promise<void>;
+  addClient: (client: Omit<Client, 'id' | 'createdAt' | 'updatedAt' | 'contracts' | 'paymentHistory'>) => Promise<string>;
   updateClient: (id: string, data: Partial<Client>) => Promise<void>;
   deleteClient: (id: string) => Promise<void>;
   addContract: (clientId: string, fileName: string, fileData: string) => Promise<void>;
@@ -72,14 +72,18 @@ export const useClientStore = create<ClientState>((set, get) => ({
   addClient: async (clientData) => {
     try {
       const { data: user } = await supabase.auth.getUser();
+      if (!user.user) {
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+
       const payload = {
         name: clientData.name,
         status: clientData.status,
         contract_value: clientData.contractValue,
-        contract_start: clientData.contractStart,
-        contract_end: clientData.contractEnd,
+        contract_start: clientData.contractStart || null,
+        contract_end: clientData.contractEnd || null,
         notes: clientData.notes,
-        owner_id: user.user?.id
+        owner_id: user.user.id
       };
 
       const { data, error } = await supabase.from('clients').insert(payload).select().single();
@@ -100,8 +104,8 @@ export const useClientStore = create<ClientState>((set, get) => ({
       if (data.name) payload.name = data.name;
       if (data.status) payload.status = data.status;
       if (data.contractValue) payload.contract_value = data.contractValue;
-      if (data.contractStart) payload.contract_start = data.contractStart;
-      if (data.contractEnd) payload.contract_end = data.contractEnd;
+      if (data.contractStart !== undefined) payload.contract_start = data.contractStart || null;
+      if (data.contractEnd !== undefined) payload.contract_end = data.contractEnd || null;
       if (data.notes) payload.notes = data.notes;
       if (data.churnedAt) payload.churned_at = data.churnedAt;
       payload.updated_at = new Date().toISOString();

@@ -17,6 +17,7 @@ const Projetos = lazy(() => import("./pages/Projetos"));
 const Financas = lazy(() => import("./pages/Financas"));
 const Clientes = lazy(() => import("./pages/Clientes"));
 const CRM = lazy(() => import("./pages/CRM"));
+const Performance = lazy(() => import("./pages/Performance"));
 const Metas = lazy(() => import("./pages/Metas"));
 const Ferramentas = lazy(() => import("./pages/Ferramentas"));
 const IAStudio = lazy(() => import("./pages/IAStudio"));
@@ -161,6 +162,7 @@ const App = () => {
                     <Route path="/financas" element={<ManagerRoute><Financas /></ManagerRoute>} />
                     <Route path="/clientes" element={<ManagerRoute><Clientes /></ManagerRoute>} />
                     <Route path="/crm" element={<ManagerRoute><CRM /></ManagerRoute>} />
+                    {/* <Route path="/performance" element={<ManagerRoute><Performance /></ManagerRoute>} /> */}
 
                     {/* Operational Routes (All Authenticated Users) */}
                     <Route path="/ferramentas" element={<Ferramentas />} />

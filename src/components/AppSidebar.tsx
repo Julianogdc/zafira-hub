@@ -12,7 +12,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Settings2, Sparkles, Target, Users2, Wallet2, Wrench, Briefcase, Megaphone, Lock } from "lucide-react";
+import { LayoutDashboard, Settings2, Sparkles, Target, Users2, Wallet2, Wrench, Briefcase, Megaphone, Lock, TrendingUp } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -31,6 +31,7 @@ const items = [
   { label: "Projetos", href: "/projetos", icon: Briefcase, locked: true },
   { label: "Metas", href: "/metas", icon: Target },
   { label: "Comercial", href: "/crm", icon: Megaphone },
+  // { label: "Performance", href: "/performance", icon: TrendingUp },
   { label: "Ferramentas", href: "/ferramentas", icon: Wrench },
   { label: "IA Studio", href: "/ia-studio", icon: Sparkles },
   { label: "Configurações", href: "/configuracoes", icon: Settings2 },
@@ -85,6 +86,7 @@ export function AppSidebar() {
                   if (item.href === '/financas') return false;
                   if (item.href === '/clientes') return false;
                   if (item.href === '/crm') return false;
+                  if (item.href === '/performance') return false;
                   return true;
                 })
                 .map((item) => {

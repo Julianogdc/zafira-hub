@@ -110,7 +110,7 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
     reader.readAsDataURL(file);
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name || !value) {
       showError("Preencha Nome e Valor.");
       return;
@@ -131,20 +131,21 @@ export function ClientForm({ isOpen, onClose, editingClient }: ClientFormProps) 
       };
 
       if (editingClient) {
-        updateClient(editingClient.id, clientData);
+        await updateClient(editingClient.id, clientData);
       } else {
-        targetClientId = addClient(clientData);
+        targetClientId = await addClient(clientData);
       }
 
       if (pendingFile && targetClientId) {
-        addContract(targetClientId, pendingFile.name, pendingFile.data);
+        await addContract(targetClientId, pendingFile.name, pendingFile.data);
       }
 
       onClose();
       resetForm();
 
-    } catch (error) {
-      showError("Erro ao salvar. Verifique o espaço do navegador.");
+    } catch (error: any) {
+      console.error(error);
+      showError(`Erro ao salvar: ${error.message || JSON.stringify(error)}`);
     }
   };
 
