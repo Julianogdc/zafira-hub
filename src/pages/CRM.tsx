@@ -29,8 +29,8 @@ export default function CRM() {
 
     const { user } = useAuthStore();
 
-    // Filter leads: Show owned leads OR legacy leads (no owner)
-    const leads = allLeads.filter(l => !l.ownerId || l.ownerId === user?.id);
+    // Filter leads: Show all accessible leads (RLS handles security)
+    const leads = allLeads;
     const [isFormOpen, setIsFormOpen] = useState(false);
     const [isDashboardOpen, setIsDashboardOpen] = useState(false);
     const [viewMode, setViewMode] = useState<'kanban' | 'funnel'>('kanban');

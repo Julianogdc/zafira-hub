@@ -23,16 +23,8 @@ export function useGoalMetrics() {
     const activeGoals = goals.filter((g) => {
         if (g.active === false) return false;
 
-        // 1. Owner or Assignee
-        if (!g.ownerId || g.ownerId === user?.id || g.assignedTo === user?.id) return true;
-
-        // 2. Public Goals (Everyone calls see)
-        if (g.visibility === 'public') return true;
-
-        // 3. Partners (Admin and Managers)
-        if (g.visibility === 'partners' && (user?.role === 'admin' || user?.role === 'manager')) return true;
-
-        return false;
+        // RLS handles security. If we fetched it, we can see it.
+        return true;
     });
 
     // CÁLCULO DE PROGRESSO

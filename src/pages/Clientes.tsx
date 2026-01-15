@@ -49,8 +49,8 @@ export default function Clientes() {
     }
   }, [initialized, fetchClients]);
 
-  // Filter clients: Show owned clients OR legacy clients (no owner)
-  const clients = allClients.filter(c => !c.ownerId || c.ownerId === user?.id);
+  // Filter clients: Show all accessible clients (RLS handles security)
+  const clients = allClients;
 
   // Controle do Modal (Sheet)
   const [isSheetOpen, setIsSheetOpen] = useState(false);
