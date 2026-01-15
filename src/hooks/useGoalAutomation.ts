@@ -6,8 +6,13 @@ import { Goal } from '@/types/goals';
 
 export function useGoalAutomation() {
     const { goals, updateNumericProgress } = useGoalsStore();
-    const { transactions } = useFinanceStore();
-    const { leads } = useCRMStore();
+    const { leads, fetchLeads, initialized: crmInitialized } = useCRMStore();
+    const { transactions, fetchFinance, initialized: financeInitialized } = useFinanceStore();
+
+    useEffect(() => {
+        if (!financeInitialized) fetchFinance();
+        if (!crmInitialized) fetchLeads();
+    }, [financeInitialized, crmInitialized, fetchFinance, fetchLeads]);
 
     useEffect(() => {
         goals.forEach(goal => {

@@ -34,7 +34,7 @@ export function GoalFormDialog({
     const [colleagues, setColleagues] = useState<any[]>([]);
 
     useEffect(() => {
-        if (open && user?.role === 'admin') {
+        if (open && (user?.role === 'admin' || user?.role === 'manager')) {
             fetchOrganizationMembers().then(setColleagues);
         }
     }, [open, user, fetchOrganizationMembers]);
@@ -164,15 +164,19 @@ export function GoalFormDialog({
                         </div>
                     )}
 
-                    {/* ASSIGNEE SELECTOR (Admin Only) */}
-                    {user?.role === 'admin' && (
+                    {/* ASSIGNEE SELECTOR (Admin & Manager) */}
+                    {(user?.role === 'admin' || user?.role === 'manager') && (
                         <div className="grid gap-1.5">
                             <Label>Responsável</Label>
                             <select
                                 className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                                value={form.assignedTo || ''}
-                                onChange={(e) => setForm({ assignedTo: e.target.value || undefined })}
+                                value={form.assignedTo === null ? 'unassigned' : (form.assignedTo || '')}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setForm({ assignedTo: val === 'unassigned' ? null : (val || undefined) });
+                                }}
                             >
+                                <option value="unassigned">-- Geral (Sem Responsável) --</option>
                                 <option value="">Eu mesmo ({user.name})</option>
                                 {colleagues.map((colleague: any) => (
                                     <option key={colleague.id} value={colleague.id}>
@@ -190,9 +194,9 @@ export function GoalFormDialog({
                             value={form.visibility}
                             onChange={(e) => setForm({ visibility: e.target.value as any })}
                         >
-                            <option value="private">Privada (Apenas Eu e Resp.)</option>
-                            <option value="partners">Sócios (Admin & Gestores)</option>
-                            <option value="public">Pública (Todos da Empresa)</option>
+                            <option value="private">Individual (Pessoa Específica)</option>
+                            <option value="partners">Sócios (Admin & Managers)</option>
+                            <option value="public">Membros (Toda a Equipe)</option>
                         </select>
                     </div>
                     <div className="grid grid-cols-2 gap-4">

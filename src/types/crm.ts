@@ -57,6 +57,7 @@ export interface Lead {
     activities?: LeadActivity[];
     lostReason?: string;
     tags?: string[];
+    updatedAt?: string;
 }
 
 export interface PipelineColumn {
