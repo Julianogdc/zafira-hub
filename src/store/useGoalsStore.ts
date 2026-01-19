@@ -38,6 +38,9 @@ interface GoalsState {
   removeGoal: (id: string) => Promise<void>;
   updateGoal: (id: string, updates: Partial<Goal>) => Promise<void>;
   toggleCheckItem: (goalId: string, itemId: string) => Promise<void>;
+  addCheckItem: (goalId: string, label: string) => Promise<void>;
+  removeCheckItem: (goalId: string, itemId: string) => Promise<void>;
+  updateCheckItem: (goalId: string, itemId: string, label: string) => Promise<void>;
   updateNumericProgress: (goalId: string, newValue: number) => Promise<void>;
 }
 
@@ -138,27 +141,57 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
       const { data: goal, error: goalError } = await supabase
         .from('goals')
         .insert(goalPayload)
-        .select()
+        .select(`
+          *,
+          checklist:goal_checklist_items(*)
+        `)
         .single();
 
       if (goalError) throw goalError;
 
-      // Handle checklist items if any
+      // Se for meta de checklist e houver itens iniciais no form
+      let finalChecklist = [];
       if (form.type === 'checklist' && form.checklist && form.checklist.length > 0) {
         const items = form.checklist.map(item => ({
           goal_id: goal.id,
           label: item.label,
           checked: false
         }));
-        const { error: checklistError } = await supabase
+        const { data: checklistData, error: checklistError } = await supabase
           .from('goal_checklist_items')
-          .insert(items);
+          .insert(items)
+          .select();
 
         if (checklistError) console.error('Error adding checklist', checklistError);
+        else finalChecklist = (checklistData || []).map(c => ({ id: c.id, label: c.label, checked: c.checked }));
       }
 
-      set({ form: { ...INITIAL_FORM_STATE } });
-      get().fetchGoals();
+      // Atualização Otimista: Mapeia o resultado e adiciona ao estado local
+      const newGoal: Goal = {
+        id: goal.id,
+        name: goal.name,
+        category: goal.category,
+        type: goal.type,
+        targetValue: goal.target_value,
+        currentValue: goal.current_value,
+        automationBinding: goal.automation_binding,
+        period: goal.period,
+        status: goal.status,
+        startDate: new Date(goal.start_date).getTime(),
+        endDate: new Date(goal.end_date).getTime(),
+        active: goal.active,
+        progress: goal.progress,
+        createdAt: new Date(goal.created_at).getTime(),
+        ownerId: goal.owner_id,
+        assignedTo: goal.assigned_to,
+        visibility: goal.visibility || 'private',
+        checklist: finalChecklist
+      };
+
+      set(state => ({
+        goals: [newGoal, ...state.goals],
+        form: { ...INITIAL_FORM_STATE }
+      }));
 
       // Notify Assignee
       if (goalPayload.assigned_to && goalPayload.assigned_to !== user.user?.id) {
@@ -205,7 +238,11 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
 
       const { error } = await supabase.from('goals').update(payload).eq('id', id);
       if (error) throw error;
-      get().fetchGoals();
+
+      // Atualização Otimista Local
+      set(state => ({
+        goals: state.goals.map(g => g.id === id ? { ...g, ...updates, progress: updates.progress ?? g.progress } : g)
+      }));
 
       // Notify if achieved
       if (updates.status === 'achieved' && prevGoal?.status !== 'achieved') {
@@ -238,16 +275,131 @@ export const useGoalsStore = create<GoalsState>((set, get) => ({
         .eq('id', itemId);
       if (itemError) throw itemError;
 
-      // Calculate new progress locally to update Goal
-      const newChecklist = goal.checklist.map(i => i.id === itemId ? { ...i, checked: newChecked } : i);
-      const newGoal = { ...goal, checklist: newChecklist };
-      const newProgress = calculateProgress(newGoal);
+      // 1. Encontrar o checklist atualizado localmente para cálculo
+      const updatedChecklist = goal.checklist.map(i =>
+        i.id === itemId ? { ...i, checked: newChecked } : i
+      );
+
+      // 2. Calcular novo progresso
+      const newProgress = calculateProgress({ ...goal, checklist: updatedChecklist });
       const newStatus = newProgress >= 100 ? 'achieved' : 'in_progress';
 
-      await get().updateGoal(goalId, { progress: newProgress, status: newStatus as any });
+      // 3. Atualizar meta no banco
+      const { error: goalError } = await supabase
+        .from('goals')
+        .update({
+          progress: newProgress,
+          status: newStatus
+        })
+        .eq('id', goalId);
+
+      if (goalError) throw goalError;
+
+      // 4. Atualização Otimista Local
+      set(state => ({
+        goals: state.goals.map(g =>
+          g.id === goalId
+            ? { ...g, checklist: updatedChecklist, progress: newProgress, status: newStatus as any }
+            : g
+        )
+      }));
 
     } catch (error) {
       console.error('Error toggling check item:', error);
+    }
+  },
+
+  addCheckItem: async (goalId, label) => {
+    try {
+      const { data: newItem, error: itemError } = await supabase
+        .from('goal_checklist_items')
+        .insert({ goal_id: goalId, label, checked: false })
+        .select()
+        .single();
+
+      if (itemError) throw itemError;
+
+      const goal = get().goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      const newChecklist = [...(goal.checklist || []), { id: newItem.id, label: newItem.label, checked: newItem.checked }];
+      const newProgress = calculateProgress({ ...goal, checklist: newChecklist });
+      const newStatus = newProgress >= 100 ? 'achieved' : 'in_progress';
+
+      await supabase
+        .from('goals')
+        .update({ progress: newProgress, status: newStatus })
+        .eq('id', goalId);
+
+      // Atualização Otimista Local
+      set(state => ({
+        goals: state.goals.map(g =>
+          g.id === goalId
+            ? { ...g, checklist: newChecklist, progress: newProgress, status: newStatus as any }
+            : g
+        )
+      }));
+    } catch (error) {
+      console.error('Error adding check item:', error);
+    }
+  },
+
+  removeCheckItem: async (goalId, itemId) => {
+    try {
+      const { error: deleteError } = await supabase
+        .from('goal_checklist_items')
+        .delete()
+        .eq('id', itemId);
+
+      if (deleteError) throw deleteError;
+
+      const goal = get().goals.find(g => g.id === goalId);
+      if (!goal) return;
+
+      const newChecklist = (goal.checklist || []).filter(i => i.id !== itemId);
+      const newProgress = calculateProgress({ ...goal, checklist: newChecklist });
+      const newStatus = newProgress >= 100 ? 'achieved' : 'in_progress';
+
+      await supabase
+        .from('goals')
+        .update({ progress: newProgress, status: newStatus })
+        .eq('id', goalId);
+
+      // Atualização Otimista Local
+      set(state => ({
+        goals: state.goals.map(g =>
+          g.id === goalId
+            ? { ...g, checklist: newChecklist, progress: newProgress, status: newStatus as any }
+            : g
+        )
+      }));
+    } catch (error) {
+      console.error('Error removing check item:', error);
+    }
+  },
+
+  updateCheckItem: async (goalId, itemId, label) => {
+    try {
+      const { error: updateError } = await supabase
+        .from('goal_checklist_items')
+        .update({ label })
+        .eq('id', itemId);
+
+      if (updateError) throw updateError;
+
+      // Atualização Otimista Local
+      set(state => ({
+        goals: state.goals.map(g =>
+          g.id === goalId
+            ? {
+              ...g,
+              checklist: (g.checklist || []).map(i => i.id === itemId ? { ...i, label } : i)
+            }
+            : g
+        )
+      }));
+    } catch (error) {
+      console.error('Error updating check item:', error);
     }
   },
 
