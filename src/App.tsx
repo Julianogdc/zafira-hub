@@ -25,8 +25,10 @@ const Configuracoes = lazy(() => import("./pages/Configuracoes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Login = lazy(() => import("./pages/Login")); // Lazy load Login
 const AdminUsers = lazy(() => import("./pages/admin/Users"));
+const PublicReportPage = lazy(() => import("./pages/PublicReport")); // Página pública de relatório
 import { ProtectedRoute } from "@/components/ProtectedRoute"; // Import ProtectedRoute
 import AsanaAuthCallback from "./pages/AsanaAuthCallback";
+import { NewModuleModal } from "@/components/modals/NewModuleModal";
 
 const queryClient = new QueryClient();
 
@@ -87,6 +89,7 @@ const MainLayout = ({ children }: { children: React.ReactNode }) => {
               </Suspense>
             </GlobalErrorBoundary>
           </main>
+          <NewModuleModal />
         </SidebarInset>
       </div>
     </SidebarProvider>
@@ -147,6 +150,13 @@ const App = () => {
             } />
             <Route path="/auth/callback/asana" element={<AsanaAuthCallback />} />
 
+            {/* Rota pública para relatórios compartilhados */}
+            <Route path="/r/:slug" element={
+              <Suspense fallback={<LoadingFallback />}>
+                <PublicReportPage />
+              </Suspense>
+            } />
+
 
 
 
@@ -162,7 +172,7 @@ const App = () => {
                     <Route path="/financas" element={<ManagerRoute><Financas /></ManagerRoute>} />
                     <Route path="/clientes" element={<ManagerRoute><Clientes /></ManagerRoute>} />
                     <Route path="/crm" element={<ManagerRoute><CRM /></ManagerRoute>} />
-                    {/* <Route path="/performance" element={<ManagerRoute><Performance /></ManagerRoute>} /> */}
+                    <Route path="/performance" element={<ManagerRoute><Performance /></ManagerRoute>} />
 
                     {/* Operational Routes (All Authenticated Users) */}
                     <Route path="/ferramentas" element={<Ferramentas />} />

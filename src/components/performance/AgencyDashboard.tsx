@@ -1,181 +1,236 @@
 import { usePerformanceStore } from '../../store/usePerformanceStore';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useClientStore } from '../../store/useClientStore';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import {
     TrendingUp,
     Users,
     DollarSign,
     Target,
     Briefcase,
-    ArrowUpRight,
-    ArrowDownRight
+    Activity,
+    AlertCircle,
+    CheckCircle2,
+    BarChart3
 } from 'lucide-react';
 
 export const AgencyDashboard = () => {
-    const { trafficClients } = usePerformanceStore();
+    const { reports, getHealthData, trackedClientIds } = usePerformanceStore();
+    const { clients } = useClientStore();
 
-    // Calculate Agency Totals (using flatMap for all campaigns across all clients)
-    const allCampaigns = trafficClients.flatMap(c => c.campaigns);
+    // Get health data for tracked clients
+    const healthData = getHealthData();
 
-    // Total Spent across all active campaigns
-    const totalSpent = allCampaigns.reduce((acc, curr) => acc + curr.spent, 0);
+    // Aggregate metrics for the current/latest month
+    const latestMonth = reports.length > 0
+        ? [...new Set(reports.map(r => r.month))].sort().reverse()[0]
+        : new Date().toISOString().substring(0, 7);
 
-    // Total Budget
-    const totalBudget = allCampaigns.reduce((acc, curr) => acc + curr.budget, 0);
+    const latestReports = reports.filter(r => r.month === latestMonth);
 
-    // This is a simplification. Ideally we'd sum metrics from daily snapshots, but for V1 Mock/CSV we sum from campaign snapshots if available
-    // OR we sum from the clients' recent metrics if simpler.
-    // Let's rely on the client.metrics (historical) for accurate totals if available, otherwise fallback.
-    // For V1 Demo, let's sum up the `metrics` from the last available date for each client to get "Current Pace"
-    // Actually, let's map from Campaigns -> Ads -> Metrics for the most granular current data if we want "Active" performance.
-
-    // Let's use the Campaign Data for "Lifetime/Current Period" snapshot
-    let totalImpressions = 0;
-    let totalClicks = 0;
-    let totalLeads = 0;
-    let totalSales = 0;
-    let totalRevenue = 0; // Derived from ROAS * Spend approx? Or we need Revenue field.
-    // For V1, let's look at the ADS metrics which have ROAS.
-    // Revenue ~= Ad Spend * Ad ROAS
-
-    trafficClients.forEach(client => {
-        client.campaigns.forEach(camp => {
-            camp.ads.forEach(ad => {
-                // Approximate impact of this ad
-                // We don't have "Ad Spend" broken down in the mock type, only Campaign Spend.
-                // This is a limitation of the simple mock. 
-                // Let's use the CLIENT level aggregated metrics for history, or just sum Campaign Spends.
-
-                // For the sake of the Agency Dashboard demo, let's assume:
-                // We sum up the "metrics" array from each client (all time or last 30 days)
-                client.metrics.forEach(m => {
-                    totalImpressions += m.impressions;
-                    totalClicks += m.clicks;
-                    totalLeads += m.leads;
-                    totalSales += m.sales;
-                });
-            });
-        });
-    });
-
-    // Recalculate based on specific logic for V1 consistency:
-    // Let's just sum the Mock Data "metrics" array which represents daily logs.
-    const allMetrics = trafficClients.flatMap(c => c.metrics);
-    const agTotalSpend = allMetrics.reduce((acc, m) => acc + m.spend, 0);
-    const agTotalLeads = allMetrics.reduce((acc, m) => acc + m.leads, 0);
-    const agTotalSales = allMetrics.reduce((acc, m) => acc + m.sales, 0);
-    const agTotalClicks = allMetrics.reduce((acc, m) => acc + m.clicks, 0);
-
-    // Calculate Global ROAS (need Revenue, assumed from Sales? Or mocked ROAS?)
-    // Let's assume average ROAS from active ads for a "Health Score"
-    const activeAds = allCampaigns.flatMap(c => c.ads).filter(a => a.status === 'active');
-    const avgRoas = activeAds.length > 0
-        ? activeAds.reduce((acc, ad) => acc + ad.metrics.roas, 0) / activeAds.length
+    const totalSpend = latestReports.reduce((acc, r) => acc + r.totalSpend, 0);
+    const totalResults = latestReports.reduce((acc, r) => acc + r.totalResults, 0);
+    const avgCtr = latestReports.length > 0
+        ? latestReports.reduce((acc, r) => acc + r.avgCtr, 0) / latestReports.length
+        : 0;
+    const avgCpc = latestReports.length > 0
+        ? latestReports.reduce((acc, r) => acc + r.avgCpc, 0) / latestReports.length
         : 0;
 
-    const topClients = [...trafficClients].sort((a, b) => {
-        // Sort by total spend in metrics
-        const spendA = a.metrics.reduce((acc, m) => acc + m.spend, 0);
-        const spendB = b.metrics.reduce((acc, m) => acc + m.spend, 0);
-        return spendB - spendA;
-    }).slice(0, 5);
+    const criticalClients = healthData.filter(h => h.status === 'critical').length;
+    const warningClients = healthData.filter(h => h.status === 'warning').length;
+
+    // Highlights logic
+    const topClient = [...healthData].sort((a, b) => b.score - a.score)[0];
+    const worstClient = [...healthData].sort((a, b) => a.score - b.score)[0];
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Visão Geral da Agência</h2>
-                    <p className="text-muted-foreground">Resumo consolidado de todas as contas.</p>
+                    <h2 className="text-2xl font-bold tracking-tight">Painel da Agência</h2>
+                    <p className="text-muted-foreground">Visão consolidada de performance: {new Date(latestMonth + '-02').toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</p>
                 </div>
-                <Badge variant="outline" className="text-sm py-1 px-3">
-                    {trafficClients.length} Clientes Ativos
-                </Badge>
+                <div className="flex gap-2">
+                    <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20 py-1 px-3">
+                        {healthData.filter(h => h.status === 'healthy').length} Saudáveis
+                    </Badge>
+                    {warningClients > 0 && (
+                        <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/20 py-1 px-3">
+                            {warningClients} Alertas
+                        </Badge>
+                    )}
+                    {criticalClients > 0 && (
+                        <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20 py-1 px-3">
+                            {criticalClients} Críticos
+                        </Badge>
+                    )}
+                </div>
             </div>
 
             {/* Global KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <KpiCard
                     title="Investimento Total"
-                    value={`R$ ${agTotalSpend.toLocaleString('pt-BR')}`}
+                    value={`R$ ${totalSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                     icon={DollarSign}
-                    trend="+15%"
-                    trendUp={true}
+                    color="text-blue-500"
                 />
                 <KpiCard
-                    title="ROAS Global (Médio)"
-                    value={`${avgRoas.toFixed(2)}x`}
-                    icon={TrendingUp}
-                    trend="+0.2"
-                    trendUp={true}
-                />
-                <KpiCard
-                    title="Total de Leads"
-                    value={agTotalLeads}
-                    icon={Users}
-                    trend="+45"
-                    trendUp={true}
-                />
-                <KpiCard
-                    title="Custo / Lead (Médio)"
-                    value={`R$ ${(agTotalSpend / (agTotalLeads || 1)).toFixed(2)}`}
+                    title="Resultados Totais"
+                    value={totalResults.toLocaleString('pt-BR')}
                     icon={Target}
-                    trend="-R$ 0.50"
-                    trendUp={true} // Lower is better, but visually Green is good
+                    color="text-green-500"
+                />
+                <KpiCard
+                    title="CTR Médio Agência"
+                    value={`${avgCtr.toFixed(2)}%`}
+                    icon={TrendingUp}
+                    color="text-purple-500"
+                />
+                <KpiCard
+                    title="Contas Ativas"
+                    value={trackedClientIds.length}
+                    icon={Briefcase}
+                    color="text-orange-500"
                 />
             </div>
 
-            {/* Top Clients Table */}
-            <Card>
-                <CardHeader>
-                    <CardTitle>Top Clientes (Por Investimento)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-4">
-                        {topClients.map(client => {
-                            const clientSpend = client.metrics.reduce((acc, m) => acc + m.spend, 0);
-                            const clientLeads = client.metrics.reduce((acc, m) => acc + m.leads, 0);
-                            return (
-                                <div key={client.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/5 transition-colors">
-                                    <div className="flex items-center gap-4">
-                                        <div className="p-2 bg-primary/10 rounded-full text-primary">
-                                            <Briefcase className="h-5 w-5" />
-                                        </div>
-                                        <div>
-                                            <p className="font-semibold">{client.name}</p>
-                                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                <Badge variant="secondary" className="text-[10px] h-5 px-1 uppercase">{client.platform}</Badge>
-                                                <span>{client.campaigns.filter(c => c.status === 'active').length} Campanhas Ativas</span>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Client Health List */}
+                <Card className="lg:col-span-2">
+                    <CardHeader>
+                        <CardTitle>Saúde das Contas</CardTitle>
+                        <CardDescription>Status atual baseado em detecção de gargalos automáticos.</CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-4">
+                            {healthData.length === 0 ? (
+                                <div className="text-center py-10 text-muted-foreground border-2 border-dashed rounded-xl">
+                                    Nenhum cliente rastreado para performance. Utilize a barra lateral para adicionar.
+                                </div>
+                            ) : (
+                                healthData.map((health) => (
+                                    <div key={health.clientId} className="flex items-center justify-between p-4 border rounded-xl hover:bg-accent/5 transition-colors">
+                                        <div className="flex items-center gap-4">
+                                            <div className={`p-2 rounded-full ${health.status === 'healthy' ? 'bg-green-500/10 text-green-500' :
+                                                health.status === 'warning' ? 'bg-orange-500/10 text-orange-500' :
+                                                    'bg-destructive/10 text-destructive'
+                                                }`}>
+                                                {health.status === 'healthy' ? <CheckCircle2 className="h-5 w-5" /> :
+                                                    health.status === 'warning' ? <AlertCircle className="h-5 w-5" /> :
+                                                        <Activity className="h-5 w-5" />}
+                                            </div>
+                                            <div>
+                                                <p className="font-semibold text-sm">{health.clientName}</p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {health.alertCount} alertas detectados este mês
+                                                </p>
                                             </div>
                                         </div>
+                                        <div className="flex flex-col items-end gap-2">
+                                            <div className="flex items-center gap-2">
+                                                <span className="text-xs font-medium">Saúde: {health.score}%</span>
+                                                <Progress value={health.score} className="w-20 h-1.5" />
+                                            </div>
+                                            <Badge variant="secondary" className="text-[10px] uppercase">
+                                                Meta Ads
+                                            </Badge>
+                                        </div>
                                     </div>
-                                    <div className="text-right">
-                                        <p className="font-bold text-sm">R$ {clientSpend.toLocaleString('pt-BR')}</p>
-                                        <p className="text-xs text-muted-foreground">{clientLeads} Leads</p>
-                                    </div>
-                                </div>
-                            );
-                        })}
-                    </div>
-                </CardContent>
-            </Card>
+                                ))
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Agency Highlights */}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Destaques do Mês</CardTitle>
+                        <CardDescription>Insights baseados no volume de dados.</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">CTR Médio (Benchmark 1%)</span>
+                                <span className={`font-bold ${avgCtr >= 1 ? 'text-green-500' : 'text-orange-500'}`}>
+                                    {avgCtr.toFixed(2)}%
+                                </span>
+                            </div>
+                            <Progress value={Math.min(avgCtr * 100, 100)} className="h-1.5" />
+                        </div>
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between text-sm">
+                                <span className="text-muted-foreground">CPC Médio Agência</span>
+                                <span className="font-bold text-blue-500">R$ {avgCpc.toFixed(2)}</span>
+                            </div>
+                            <Progress value={avgCpc > 0 ? 100 - Math.min(avgCpc * 50, 100) : 0} className="h-1.5" />
+                        </div>
+
+                        <Separator />
+
+                        <div className="space-y-3">
+                            <h4 className="text-xs font-semibold uppercase text-muted-foreground">Observação Operacional</h4>
+                            <div className="p-3 bg-purple-500/5 border border-purple-500/20 rounded-lg space-y-2">
+                                {topClient && topClient.score > 80 ? (
+                                    <>
+                                        <div className="flex items-center gap-2 text-xs font-bold text-green-400">
+                                            <CheckCircle2 className="h-3 w-3" />
+                                            CASE DE SUCESSO
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                            <strong>{topClient.clientName}</strong> está com performance excelente (Saúde: {topClient.score}%).
+                                            Continue com as otimizações atuais.
+                                        </p>
+                                    </>
+                                ) : worstClient && worstClient.status === 'critical' ? (
+                                    <>
+                                        <div className="flex items-center gap-2 text-xs font-bold text-destructive">
+                                            <AlertCircle className="h-3 w-3" />
+                                            ATENÇÃO PRIORITÁRIA
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                            <strong>{worstClient.clientName}</strong> apresenta gargalos críticos ({worstClient.alertCount} alertas).
+                                            Recomendamos check-up técnico imediato.
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="flex items-center gap-2 text-xs font-bold text-purple-400">
+                                            <BarChart3 className="h-3 w-3" />
+                                            OPERAÇÃO ESTÁVEL
+                                        </div>
+                                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                            As contas rastreadas estão operando dentro da normalidade média da agência.
+                                        </p>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
     );
 };
 
-const KpiCard = ({ title, value, trend, trendUp, icon: Icon }: any) => (
-    <Card>
+const KpiCard = ({ title, value, icon: Icon, color }: any) => (
+    <Card className="bg-card">
         <CardContent className="p-6">
             <div className="flex items-center justify-between space-y-0 pb-2">
                 <span className="text-sm font-medium text-muted-foreground">{title}</span>
-                <Icon className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="flex items-end justify-between pt-2">
-                <div className="text-2xl font-bold">{value}</div>
-                <div className={`text-xs flex items-center ${trendUp ? 'text-green-500' : 'text-red-500'}`}>
-                    {trend}
-                    {trendUp ? <ArrowUpRight className="h-3 w-3 ml-0.5" /> : <ArrowDownRight className="h-3 w-3 ml-0.5" />}
+                <div className={`p-2 rounded-lg bg-accent/50 ${color}`}>
+                    <Icon className="h-4 w-4" />
                 </div>
+            </div>
+            <div className="pt-2">
+                <div className="text-2xl font-bold tracking-tight">{value}</div>
             </div>
         </CardContent>
     </Card>
 );
+
+const Separator = () => <div className="h-px w-full bg-border" />;
+

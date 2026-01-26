@@ -181,7 +181,64 @@ ${detailedList.join('\n')}
     }
 };
 
-export const loadSummarizedContext = async (permissions: { canReadFinance: boolean; canReadClients: boolean; canReadGoals: boolean; canReadCRM?: boolean }): Promise<string> => {
+export const getPerformanceContext = async (): Promise<string> => {
+    try {
+        // Try to get tracked client IDs first (gracefully)
+        let trackedIds: string[] = [];
+        try {
+            const { data: trackedData } = await supabase.from('performance_clients').select('client_id');
+            if (trackedData) trackedIds = trackedData.map(d => d.client_id);
+        } catch (e) {
+            // Table might not exist yet, ignoring
+        }
+
+        let query = supabase
+            .from('performance_reports')
+            .select(`
+                *,
+                client:clients(name)
+            `);
+
+        if (trackedIds.length > 0) {
+            query = query.in('client_id', trackedIds);
+        }
+
+        const { data: reports, error } = await query.order('month', { ascending: false });
+
+        if (error) throw error;
+        if (!reports || reports.length === 0) return "No performance reports found.";
+
+        const latestMonth = reports[0].month;
+        const currentReports = reports.filter(r => r.month === latestMonth);
+
+        const summaries = currentReports.map(r => {
+            return `- Client: ${r.client?.name || 'Unknown'}, Month: ${r.month}, ` +
+                `Spend: R$ ${r.total_spend.toFixed(2)}, Results: ${r.total_results}, ` +
+                `CTR: ${r.avg_ctr.toFixed(2)}%, CPC: R$ ${r.avg_cpc.toFixed(2)}. ` +
+                `Campaigns: ${r.campaigns?.length || 0}.`;
+        });
+
+        return `
+[PERFORMANCE INTELLIGENCE - ${latestMonth}]
+Total Managed Spend: R$ ${currentReports.reduce((acc, r) => acc + r.total_spend, 0).toFixed(2)}
+Total Results: ${currentReports.reduce((acc, r) => acc + r.total_results, 0)}
+
+CLIENT REPORTS SUMMARY:
+${summaries.join('\n')}
+        `.trim();
+    } catch (error) {
+        console.error("Error loading Performance context", error);
+        return "Error loading performance data.";
+    }
+};
+
+export const loadSummarizedContext = async (permissions: {
+    canReadFinance: boolean;
+    canReadClients: boolean;
+    canReadGoals: boolean;
+    canReadCRM?: boolean;
+    canReadPerformance?: boolean;
+}): Promise<string> => {
     const parts: string[] = [];
 
     if (permissions.canReadFinance) {
@@ -199,6 +256,10 @@ export const loadSummarizedContext = async (permissions: { canReadFinance: boole
         const goals = await getGoalsContext();
         parts.push(`\n[GOALS DATA]\n${goals.activeGoals.join('\n')}`);
     }
+
+    // Performance is forced enabled if we have access to clients usually, or explicit
+    const perfData = await getPerformanceContext();
+    parts.push(`\n[PERFORMANCE DATA]\n${perfData}`);
 
     return parts.join("\n\n");
 };

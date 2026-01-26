@@ -22,6 +22,7 @@ type SidebarItem = {
   icon: any; // LucideIcon type is complex to import directly without extra deps, keeping simple or using any for icon specifically if needed, but better to infer.
   adminOnly?: boolean;
   locked?: boolean;
+  badge?: string;
 };
 
 const items = [
@@ -31,7 +32,7 @@ const items = [
   { label: "Projetos", href: "/projetos", icon: Briefcase, locked: true },
   { label: "Metas", href: "/metas", icon: Target },
   { label: "Comercial", href: "/crm", icon: Megaphone },
-  // { label: "Performance", href: "/performance", icon: TrendingUp },
+  { label: "Performance", href: "/performance", icon: TrendingUp, badge: "NOVO" },
   { label: "Ferramentas", href: "/ferramentas", icon: Wrench },
   { label: "IA Studio", href: "/ia-studio", icon: Sparkles },
   { label: "Configurações", href: "/configuracoes", icon: Settings2 },
@@ -86,7 +87,7 @@ export function AppSidebar() {
                   if (item.href === '/financas') return false;
                   if (item.href === '/clientes') return false;
                   if (item.href === '/crm') return false;
-                  if (item.href === '/performance') return false;
+                  // if (item.href === '/performance') return false;
                   return true;
                 })
                 .map((item) => {
@@ -109,7 +110,12 @@ export function AppSidebar() {
                           }}
                         >
                           <Icon className="mr-2 h-4 w-4 group-data-[collapsible=icon]:mr-0 group-data-[collapsible=icon]:size-6" />
-                          <span className="truncate text-sm group-data-[collapsible=icon]:hidden">{item.label}</span>
+                          <span className="truncate text-sm group-data-[collapsible=icon]:hidden flex-1">{item.label}</span>
+                          {(item as any).badge && (
+                            <span className="ml-auto text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded-full font-medium group-data-[collapsible=icon]:hidden border border-purple-500/20">
+                              {(item as any).badge}
+                            </span>
+                          )}
                           {(item as any).locked && (
                             <Lock className="ml-auto h-3 w-3 opacity-50 group-data-[collapsible=icon]:hidden" />
                           )}
