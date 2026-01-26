@@ -169,6 +169,25 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
         }
     };
 
+    const handleDelete = async (linkId: string) => {
+        if (!confirm('Tem certeza que deseja excluir este link permanentemente? O histórico de visitas também será apagado.')) return;
+
+        try {
+            const { error } = await supabase
+                .from('public_reports')
+                .delete()
+                .eq('id', linkId);
+
+            if (error) throw error;
+
+            setLinks(prev => prev.filter(l => l.id !== linkId));
+            toast.success('Link excluído com sucesso.');
+        } catch (error) {
+            console.error('Error deleting link:', error);
+            toast.error('Erro ao excluir link');
+        }
+    };
+
     const copyLink = (slug: string) => {
         const url = `${window.location.origin}/r/${slug}`;
         navigator.clipboard.writeText(url);
@@ -265,6 +284,9 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                                                                         <Check className="mr-2 h-4 w-4" /> Reativar Link
                                                                     </>
                                                                 )}
+                                                            </DropdownMenuItem>
+                                                            <DropdownMenuItem onClick={() => handleDelete(link.id)} className="text-red-500 hover:text-red-600 hover:bg-red-100/10 focus:text-red-600 focus:bg-red-100/10">
+                                                                <Trash2 className="mr-2 h-4 w-4" /> Excluir
                                                             </DropdownMenuItem>
                                                         </DropdownMenuContent>
                                                     </DropdownMenu>
