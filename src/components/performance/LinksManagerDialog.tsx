@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
     Dialog,
     DialogContent,
@@ -233,8 +233,8 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                                 </TableRow>
                             ) : (
                                 links.map((link) => (
-                                    <>
-                                        <TableRow key={link.id} className="group">
+                                    <React.Fragment key={link.id}>
+                                        <TableRow className="group">
                                             <TableCell>
                                                 <div className="flex flex-col">
                                                     <span className="font-medium">{link.client_name}</span>
@@ -327,7 +327,7 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                                                 </TableCell>
                                             </TableRow>
                                         )}
-                                    </>
+                                    </React.Fragment>
                                 ))
                             )}
                         </TableBody>

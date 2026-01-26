@@ -58,7 +58,14 @@ const PublicReport = () => {
 
             if (fetchError) throw new Error('Relatório não encontrado');
 
-            if (!data.active) {
+            if (fetchError) throw new Error('Relatório não encontrado');
+
+            // Force check for active status being explicitly true or missing (backwards compatibility)
+            // But since we added default TRUE, it should be true.
+            // If it is false, we block.
+            console.log("Checking active status:", data.active, " ID:", data.id);
+
+            if (data.active === false) {
                 throw new Error('Este link foi desativado pelo remetente');
             }
 
