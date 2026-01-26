@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     Loader2,
@@ -79,6 +80,8 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
     const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null);
 
     const [linkToDelete, setLinkToDelete] = useState<string | null>(null);
+    const [selectedLinks, setSelectedLinks] = useState<Set<string>>(new Set());
+    const [bulkAction, setBulkAction] = useState<'delete' | null>(null);
 
     const fetchLinks = async () => {
         setLoading(true);
@@ -90,11 +93,72 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
 
             if (error) throw error;
             setLinks(data || []);
+            setSelectedLinks(new Set()); // Reset selection on refresh
         } catch (error) {
             console.error('Error fetching links:', error);
             toast.error('Erro ao carregar links');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // Selection Logic
+    const toggleSelectAll = () => {
+        if (selectedLinks.size === links.length && links.length > 0) {
+            setSelectedLinks(new Set());
+        } else {
+            setSelectedLinks(new Set(links.map(l => l.id)));
+        }
+    };
+
+    const toggleSelect = (id: string) => {
+        const newSelected = new Set(selectedLinks);
+        if (newSelected.has(id)) {
+            newSelected.delete(id);
+        } else {
+            newSelected.add(id);
+        }
+        setSelectedLinks(newSelected);
+    };
+
+    // Bulk Actions
+    const handleBulkRevoke = async () => {
+        try {
+            const ids = Array.from(selectedLinks);
+            const { error } = await supabase
+                .from('public_reports')
+                .update({ active: false })
+                .in('id', ids);
+
+            if (error) throw error;
+
+            setLinks(prev => prev.map(l => ids.includes(l.id) ? { ...l, active: false } : l));
+            toast.success(`${ids.length} links revogados com sucesso.`);
+            setSelectedLinks(new Set());
+        } catch (error) {
+            toast.error('Erro ao revogar links');
+        }
+    };
+
+    const handleBulkDelete = async () => {
+        if (!bulkAction) return;
+
+        try {
+            const ids = Array.from(selectedLinks);
+            const { error } = await supabase
+                .from('public_reports')
+                .delete()
+                .in('id', ids);
+
+            if (error) throw error;
+
+            setLinks(prev => prev.filter(l => !ids.includes(l.id)));
+            toast.success(`${ids.length} links excluídos com sucesso.`);
+            setSelectedLinks(new Set());
+        } catch (error) {
+            toast.error('Erro ao excluir links');
+        } finally {
+            setBulkAction(null);
         }
     };
 
@@ -229,10 +293,42 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex-1 overflow-auto mt-4 border rounded-md">
+                <div className="flex-1 overflow-auto mt-4 border rounded-md relative">
+                    {selectedLinks.size > 0 && (
+                        <div className="absolute top-0 left-0 right-0 z-10 bg-primary/10 backdrop-blur-sm p-2 flex items-center justify-between border-b border-primary/20 animate-in slide-in-from-top-2">
+                            <span className="text-sm font-medium px-2 text-primary">
+                                {selectedLinks.size} selecionado{selectedLinks.size > 1 ? 's' : ''}
+                            </span>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 border-orange-500/50 text-orange-500 hover:bg-orange-500/10 hover:text-orange-600"
+                                    onClick={handleBulkRevoke}
+                                >
+                                    Revogar
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-8"
+                                    onClick={() => setBulkAction('delete')}
+                                >
+                                    Excluir
+                                </Button>
+                            </div>
+                        </div>
+                    )}
                     <Table>
                         <TableHeader>
                             <TableRow>
+                                <TableHead className="w-[40px]">
+                                    <Checkbox
+                                        checked={links.length > 0 && selectedLinks.size === links.length}
+                                        onCheckedChange={toggleSelectAll}
+                                        aria-label="Select all"
+                                    />
+                                </TableHead>
                                 <TableHead>Cliente / Mês</TableHead>
                                 <TableHead>Criado</TableHead>
                                 <TableHead className="text-center">Visitas</TableHead>
@@ -243,13 +339,13 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                         <TableBody>
                             {loading ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center">
+                                    <TableCell colSpan={6} className="h-24 text-center">
                                         <Loader2 className="h-6 w-6 animate-spin mx-auto text-purple-500" />
                                     </TableCell>
                                 </TableRow>
                             ) : links.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
+                                    <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
                                         Nenhum link gerado ainda.
                                     </TableCell>
                                 </TableRow>
@@ -257,6 +353,13 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                                 links.map((link) => (
                                     <React.Fragment key={link.id}>
                                         <TableRow className="group">
+                                            <TableCell>
+                                                <Checkbox
+                                                    checked={selectedLinks.has(link.id)}
+                                                    onCheckedChange={() => toggleSelect(link.id)}
+                                                    aria-label={`Select ${link.client_name}`}
+                                                />
+                                            </TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
                                                     <span className="font-medium">{link.client_name}</span>
@@ -317,7 +420,7 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                                         </TableRow>
                                         {expandedLinkId === link.id && (
                                             <TableRow className="bg-muted/30">
-                                                <TableCell colSpan={5} className="p-0">
+                                                <TableCell colSpan={6} className="p-0">
                                                     <div className="p-4 border-l-2 border-purple-500/30 ml-4 my-2 space-y-3">
                                                         <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Histórico de Acessos</h4>
                                                         {!link.visits ? (
@@ -357,18 +460,25 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                 </div>
             </DialogContent>
 
-            <AlertDialog open={!!linkToDelete} onOpenChange={() => setLinkToDelete(null)}>
+            <AlertDialog open={!!linkToDelete || !!bulkAction} onOpenChange={() => { setLinkToDelete(null); setBulkAction(null); }}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                        <AlertDialogTitle>Excluir Link Permanentemente?</AlertDialogTitle>
+                        <AlertDialogTitle>
+                            {bulkAction
+                                ? `Excluir ${selectedLinks.size} links permanentemente?`
+                                : 'Excluir Link Permanentemente?'}
+                        </AlertDialogTitle>
                         <AlertDialogDescription>
-                            Esta ação não pode ser desfeita. O link será removido e todo o histórico de visitas será apagado.
+                            Esta ação não pode ser desfeita. {bulkAction ? 'Os links serão removidos' : 'O link será removido'} e todo o histórico de visitas será apagado.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                         <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
-                            Excluir
+                        <AlertDialogAction
+                            onClick={bulkAction ? handleBulkDelete : confirmDelete}
+                            className="bg-red-600 hover:bg-red-700"
+                        >
+                            Excluir {bulkAction ? 'Selecionados' : ''}
                         </AlertDialogAction>
                     </AlertDialogFooter>
                 </AlertDialogContent>
