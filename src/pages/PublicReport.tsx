@@ -57,18 +57,26 @@ const PublicReport = () => {
                 .single();
 
             if (fetchError) throw new Error('Relatório não encontrado');
+
+            if (!data.active) {
+                throw new Error('Este link foi desativado pelo remetente');
+            }
+
             if (data.expires_at && new Date(data.expires_at) < new Date()) {
                 throw new Error('Este relatório expirou');
             }
 
             setReport(data);
 
-            // Incrementar views
-            supabase
-                .from('public_reports')
-                .update({ views: (data.views || 0) + 1 })
-                .eq('id', data.id)
-                .then();
+            // Registrar Visita Detalhada (Trigger atualiza views automaticamente)
+            const registerVisit = async () => {
+                const { data: { user } } = await supabase.auth.getUser();
+                await supabase.from('public_report_visits').insert({
+                    report_id: data.id,
+                    user_id: user?.id || null
+                });
+            };
+            registerVisit();
 
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Erro ao carregar relatório');

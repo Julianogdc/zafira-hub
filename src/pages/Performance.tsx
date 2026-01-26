@@ -44,6 +44,7 @@ import { PerformanceGlossary } from '../components/performance/PerformanceGlossa
 import { generatePerformanceReport } from '../lib/exportUtils';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
+import { LinksManagerDialog } from '../components/performance/LinksManagerDialog';
 
 const getStatusInfo = (status: string | undefined) => {
     if (!status) return { label: 'Ativo', color: 'bg-green-500/10 text-green-500 border-green-500/20' };
@@ -72,6 +73,7 @@ const Performance = () => {
     const [lastAiResult, setLastAiResult] = useState<string | null>(null);
     const [includeAiInPdf, setIncludeAiInPdf] = useState(true);
     const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+    const [isLinksManagerOpen, setIsLinksManagerOpen] = useState(false);
     const [generatedLink, setGeneratedLink] = useState<string | null>(null);
     const [linkCopied, setLinkCopied] = useState(false);
     const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
@@ -360,6 +362,14 @@ const Performance = () => {
                                     >
                                         <Link2 className="h-4 w-4 text-purple-500" />
                                         {isGeneratingLink ? '...' : 'Link'}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="gap-1.5"
+                                        onClick={() => setIsLinksManagerOpen(true)}
+                                    >
+                                        <Activity className="h-4 w-4 text-muted-foreground" />
                                     </Button>
                                     <Button
                                         variant="ghost"
@@ -674,6 +684,11 @@ const Performance = () => {
                     </div>
                 </DialogContent>
             </Dialog>
+
+            <LinksManagerDialog
+                open={isLinksManagerOpen}
+                onOpenChange={setIsLinksManagerOpen}
+            />
         </TooltipProvider>
     );
 };
