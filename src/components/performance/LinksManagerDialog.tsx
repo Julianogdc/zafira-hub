@@ -7,6 +7,16 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog";
 import {
+    AlertDialog,
+    AlertDialogAction,
+    AlertDialogCancel,
+    AlertDialogContent,
+    AlertDialogDescription,
+    AlertDialogFooter,
+    AlertDialogHeader,
+    AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
     Table,
     TableBody,
     TableCell,
@@ -68,6 +78,8 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
     const [loading, setLoading] = useState(true);
     const [expandedLinkId, setExpandedLinkId] = useState<string | null>(null);
 
+    const [linkToDelete, setLinkToDelete] = useState<string | null>(null);
+
     const fetchLinks = async () => {
         setLoading(true);
         try {
@@ -83,6 +95,33 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
             toast.error('Erro ao carregar links');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // ... (fetchVisits logic remains the same)
+
+    const handleDelete = (linkId: string) => {
+        setLinkToDelete(linkId);
+    };
+
+    const confirmDelete = async () => {
+        if (!linkToDelete) return;
+
+        try {
+            const { error } = await supabase
+                .from('public_reports')
+                .delete()
+                .eq('id', linkToDelete);
+
+            if (error) throw error;
+
+            setLinks(prev => prev.filter(l => l.id !== linkToDelete));
+            toast.success('Link excluído com sucesso.');
+        } catch (error) {
+            console.error('Error deleting link:', error);
+            toast.error('Erro ao excluir link');
+        } finally {
+            setLinkToDelete(null);
         }
     };
 
@@ -169,24 +208,7 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
         }
     };
 
-    const handleDelete = async (linkId: string) => {
-        if (!confirm('Tem certeza que deseja excluir este link permanentemente? O histórico de visitas também será apagado.')) return;
 
-        try {
-            const { error } = await supabase
-                .from('public_reports')
-                .delete()
-                .eq('id', linkId);
-
-            if (error) throw error;
-
-            setLinks(prev => prev.filter(l => l.id !== linkId));
-            toast.success('Link excluído com sucesso.');
-        } catch (error) {
-            console.error('Error deleting link:', error);
-            toast.error('Erro ao excluir link');
-        }
-    };
 
     const copyLink = (slug: string) => {
         const url = `${window.location.origin}/r/${slug}`;
@@ -334,6 +356,23 @@ export function LinksManagerDialog({ open, onOpenChange }: { open: boolean; onOp
                     </Table>
                 </div>
             </DialogContent>
+
+            <AlertDialog open={!!linkToDelete} onOpenChange={() => setLinkToDelete(null)}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Excluir Link Permanentemente?</AlertDialogTitle>
+                        <AlertDialogDescription>
+                            Esta ação não pode ser desfeita. O link será removido e todo o histórico de visitas será apagado.
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                        <AlertDialogAction onClick={confirmDelete} className="bg-red-600 hover:bg-red-700">
+                            Excluir
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
         </Dialog>
     );
 }
