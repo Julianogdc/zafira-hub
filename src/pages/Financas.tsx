@@ -31,6 +31,7 @@ const Financas = () => {
     dateRange, setDateRange,
     filteredTransactions,
     receita, despesa, caixa,
+    previousBalance, totalBalance,
     yearTransactions,
     receitaAnual, despesaAnual, caixaAnual,
     currentYear,
@@ -60,6 +61,8 @@ const Financas = () => {
       receita,
       despesa,
       caixa,
+      previousBalance,
+      totalBalance,
       period: period === 'custom'
         ? 'Personalizado'
         : period === 'current-month' ? 'Mês Atual'
@@ -114,6 +117,8 @@ const Financas = () => {
         caixa={caixa}
         receita={receita}
         despesa={despesa}
+        previousBalance={previousBalance}
+        totalBalance={totalBalance}
         formatBRL={formatBRL}
       />
 

@@ -8,6 +8,8 @@ interface FilterSummary {
     receita: number;
     despesa: number;
     caixa: number;
+    previousBalance?: number;
+    totalBalance?: number;
     period: string;
 }
 
@@ -30,9 +32,22 @@ export function generateFinanceReport(transactions: Transaction[], summary: Filt
     yPos += 10;
 
     doc.setFontSize(12);
+
+    if (summary.previousBalance !== undefined) {
+        doc.text(`Caixa Anterior: ${summary.previousBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos);
+        yPos += 7;
+    }
+
     doc.text(`Receita Total: ${summary.receita.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos);
     doc.text(`Despesa Total: ${summary.despesa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos + 7);
-    doc.text(`Fluxo de Caixa: ${summary.caixa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos + 14);
+    doc.text(`Resultado do Período: ${summary.caixa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos + 14);
+
+    if (summary.totalBalance !== undefined) {
+        doc.text(`Caixa: ${summary.totalBalance.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`, 14, yPos + 21);
+        yPos += 28;
+    } else {
+        yPos += 21;
+    }
 
     yPos += 30;
 

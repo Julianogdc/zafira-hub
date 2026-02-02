@@ -18,6 +18,36 @@ export function useFinanceMetrics() {
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
+  // 1. Data de Início para Saldo Anterior
+  const startDate = useMemo(() => {
+    let date: Date | null = null;
+
+    if (period === "current-month") {
+      date = new Date(currentYear, currentMonth, 1);
+    } else if (period === "last-month") {
+      date = new Date(currentYear, currentMonth - 1, 1);
+    } else if (period === "current-year") {
+      date = new Date(currentYear, 0, 1);
+    } else if (period === "custom" && dateRange?.from) {
+      date = new Date(dateRange.from);
+      date.setHours(0, 0, 0, 0);
+    }
+
+    return date;
+  }, [period, dateRange, currentMonth, currentYear]);
+
+  // 2. Saldo Anterior (Transações antes da data de início)
+  const previousBalance = useMemo(() => {
+    if (!startDate) return 0;
+
+    return transactions
+      .filter((t) => new Date(t.date) < startDate)
+      .reduce((acc, t) => {
+        const val = t.type === 'income' ? t.amount : -t.amount;
+        return acc + val;
+      }, 0);
+  }, [transactions, startDate]);
+
   // 1. Filtragem Principal
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
@@ -58,7 +88,7 @@ export function useFinanceMetrics() {
     });
   }, [transactions, period, dateRange, currentMonth, currentYear]);
 
-  // 2. Cálculos Totais (Filtrados)
+  // 3. Cálculos Totais (Filtrados)
   const { receita, despesa, caixa } = useMemo(() => {
     const rec = filteredTransactions
       .filter((t) => t.type === "income")
@@ -71,7 +101,12 @@ export function useFinanceMetrics() {
     return { receita: rec, despesa: desp, caixa: rec - desp };
   }, [filteredTransactions]);
 
-  // 3. Cálculos Anuais (Sempre fixo no ano corrente para o Resumo Anual)
+  // 4. Saldo Atual (Saldo Anterior + Resultado do Período)
+  const totalBalance = useMemo(() => {
+    return previousBalance + caixa;
+  }, [previousBalance, caixa]);
+
+  // 5. Cálculos Anuais (Sempre fixo no ano corrente para o Resumo Anual)
   const yearTransactions = useMemo(() => {
     return transactions.filter((t) => new Date(t.date).getFullYear() === currentYear);
   }, [transactions, currentYear]);
@@ -103,6 +138,8 @@ export function useFinanceMetrics() {
     receita,
     despesa,
     caixa,
+    previousBalance,
+    totalBalance,
 
     // Dados Anuais
     yearTransactions,
