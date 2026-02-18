@@ -151,7 +151,7 @@ const PublicReport = () => {
             <header className="sticky top-0 z-50 bg-[#0a0a14]/80 backdrop-blur-xl border-b border-white/5">
                 <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
                     <img
-                        src="https://i.ibb.co/Y44FV9Kv/Ativo-1-2x.png"
+                        src="https://i.ibb.co/pr621rqg/Ativo-23.png"
                         alt="Zafira"
                         className="h-8 brightness-0 invert opacity-90"
                     />
@@ -524,7 +524,7 @@ const PublicReport = () => {
             <footer className="relative z-10 border-t border-white/5 py-12 bg-[#0a0a14]/80 print:bg-white print:border-gray-200">
                 <div className="max-w-7xl mx-auto px-6 text-center">
                     <img
-                        src="https://i.ibb.co/Y44FV9Kv/Ativo-1-2x.png"
+                        src="https://i.ibb.co/pr621rqg/Ativo-23.png"
                         alt="Zafira"
                         className="h-12 mx-auto mb-4 brightness-0 invert opacity-80 print:invert-0"
                     />

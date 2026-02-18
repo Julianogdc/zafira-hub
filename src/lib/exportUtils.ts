@@ -196,7 +196,7 @@ export async function generatePerformanceReport(
         await new Promise<void>((resolve, reject) => {
             img.onload = () => { logoImg = img; resolve(); };
             img.onerror = reject;
-            img.src = "https://i.ibb.co/Y44FV9Kv/Ativo-1-2x.png";
+            img.src = "https://i.ibb.co/pr621rqg/Ativo-23.png";
         });
     } catch (e) {
         console.error("Erro ao carregar logo:", e);
