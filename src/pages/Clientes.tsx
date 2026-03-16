@@ -44,10 +44,9 @@ export default function Clientes() {
   const { user } = useAuthStore();
 
   useEffect(() => {
-    if (!initialized) {
-      fetchClients();
-    }
-  }, [initialized, fetchClients]);
+    // Sempre recarrega ao montar a página para garantir dados atualizados do banco
+    fetchClients();
+  }, []);
 
   // Filter clients: Show all accessible clients (RLS handles security)
   const clients = allClients;
