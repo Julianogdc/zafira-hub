@@ -366,21 +366,31 @@ export function ClientList({ clients, onEdit, onViewHistory, selectedMonth, sele
                     </TableCell>
 
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      {isPaidThisMonth ? (
-                        <Badge className="bg-green-500/20 text-green-400 border-green-500/30 hover:bg-green-500/30 gap-1">
-                          <CheckCircle2 className="w-3 h-3" /> Pago
-                        </Badge>
-                      ) : (
-                        <Select onValueChange={(v) => handlePaymentChange(client, v)}>
-                          <SelectTrigger className="h-7 w-[110px] bg-zinc-900 border-white/10 text-xs">
+                      <Select 
+                        value={isPaidThisMonth ? 'paid' : 'pending'} 
+                        onValueChange={(v) => handlePaymentChange(client, v)}
+                      >
+                        <SelectTrigger 
+                          className={`h-7 w-[110px] text-xs transition-colors ${
+                            isPaidThisMonth 
+                              ? 'bg-green-500/10 text-emerald-400 border-emerald-500/20 hover:bg-green-500/20 focus:ring-emerald-500' 
+                              : 'bg-zinc-900 border-white/10'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5">
+                            {isPaidThisMonth && <CheckCircle2 className="w-3.5 h-3.5" />}
                             <SelectValue placeholder="Pendente" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="pending" className="text-yellow-500">Pendente</SelectItem>
-                            <SelectItem value="paid" className="text-emerald-500 font-medium">Confirmar Pgto</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent className="bg-zinc-900 border-white/10">
+                          <SelectItem value="pending" className="text-yellow-500 focus:bg-zinc-800">Pendente</SelectItem>
+                          <SelectItem value="paid" className="text-emerald-500 font-medium focus:bg-zinc-800">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-3.5 h-3.5" /> Pago
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
 
                     <TableCell>
