@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 import { Upload, FileSpreadsheet, AlertCircle, Loader2, Clipboard } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -28,7 +30,28 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
     const [error, setError] = useState<string | null>(null);
     const [pastedData, setPastedData] = useState('');
     const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
+    const [importMode, setImportMode] = useState<'sum' | 'replace'>('replace');
+    const [platform, setPlatform] = useState<'meta' | 'google'>('meta');
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    // Mapeamentos Google Ads
+    const GOOGLE_COLUMN_MAPPINGS: Record<string, string[]> = {
+        name: ['Campaign', 'Campaign name', 'Nome da campanha', 'Campanha'],
+        spend: ['Cost', 'Spend', 'Custo', 'Gasto'],
+        impressions: ['Impr.', 'Impressions', 'Impressões'],
+        reach: ['Reach'],
+        frequency: ['Frequency'],
+        clicks: ['Clicks', 'Cliques'],
+        ctr: ['CTR', 'Click-through rate (CTR)'],
+        cpc: ['Avg. CPC', 'CPC', 'Custo por clique méd.'],
+        cpm: ['Avg. CPM', 'CPM'],
+        results: ['Conversions', 'Conv.', 'Conversões', 'All conversions'],
+        costPerResult: ['Cost / conv.', 'Cost per conversion', 'Custo / conv.'],
+        resultType: ['Conversion action', 'Tipo de conversão'],
+        status: ['Campaign status', 'Status', 'Estado'],
+        date: ['Day', 'Day of week', 'Date'],
+        dateEnd: [],
+    };
 
     const COLUMN_MAPPINGS: Record<string, string[]> = {
         name: ['Nome da campanha', 'Campaign Name', 'Campanha', 'Nome'],
@@ -48,9 +71,12 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
         dateEnd: ['Término dos relatórios', 'Reporting Ends', 'Data de término']
     };
 
+    const getColumnMappings = () => platform === 'google' ? GOOGLE_COLUMN_MAPPINGS : COLUMN_MAPPINGS;
+
     const findColumnIndex = (headers: any[], keys: string[]) => {
         if (!headers || !Array.isArray(headers) || !keys) return -1;
         const normalizedHeaders = headers.map(h => h ? String(h).trim().toLowerCase() : '');
+        const effectiveMappings = getColumnMappings();
 
         const exactIdx = normalizedHeaders.findIndex(h =>
             keys.some(key => key && key.toLowerCase() === h)
@@ -70,31 +96,47 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
         if (typeof val === 'number') return val;
         if (!val) return 0;
         let s = String(val).trim();
+        // Remover percentual e moeda
         s = s.replace(/[^\d,.-]/g, '');
+        if (!s || s === '-' || s === '--') return 0;
 
         const hasComma = s.includes(',');
         const hasDot = s.includes('.');
 
         if (hasComma && hasDot) {
             if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+                // Formato europeu: 1.234,56 → remove pontos, troca vírgula por ponto
                 s = s.replace(/\./g, '').replace(',', '.');
             } else {
+                // Formato americano: 1,234.56 → remove vírgulas
                 s = s.replace(/,/g, '');
             }
         } else if (hasComma) {
             if (s.lastIndexOf(',') >= s.length - 3) s = s.replace(',', '.');
             else s = s.replace(',', '');
         } else if (hasDot) {
-            // Se o ponto estiver na terceira posição do fim, é decimal (ex: 12.34)
-            // mas se estiver antes disso e tiver 3 dígitos depois, é milhar (ex: 1.000)
+            // Google Ads exporta 120.00 (decimal) e 1.000 (milhar BR)
+            // Só trata como milhar se tiver EXATAMENTE 3 dígitos depois E houver dígitos antes
             const parts = s.split('.');
             const lastPart = parts[parts.length - 1];
-            if (lastPart.length === 3 && parts.length > 1) {
-                // Provável milhar: 1.000 ou 63.571
+            if (lastPart.length === 3 && parts.length > 1 && parts[0].length > 0) {
                 s = s.replace(/\./g, '');
             }
         }
 
+        return parseFloat(s) || 0;
+    };
+
+    // Parser específico para Google Ads: formato americano padrão (vírgula=milhar, ponto=decimal)
+    const parseNumGoogle = (val: any): number => {
+        if (typeof val === 'number') return val;
+        if (!val) return 0;
+        let s = String(val).trim();
+        // Remover símbolos de moeda, % e espaços
+        s = s.replace(/[^\d,.-]/g, '');
+        if (!s || s === '-' || s === '--') return 0;
+        // Vírgula é sempre separador de milhar no formato americano
+        s = s.replace(/,/g, '');
         return parseFloat(s) || 0;
     };
 
@@ -131,7 +173,8 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
 
         jsonData = autoSplit(jsonData);
 
-        const getIdx = (headerRow: any[], key: string) => findColumnIndex(headerRow, COLUMN_MAPPINGS[key]);
+        const activeMappings = getColumnMappings();
+        const getIdx = (headerRow: any[], key: string) => findColumnIndex(headerRow, activeMappings[key]);
 
         let headerRowIndex = -1;
         let maxScore = -1;
@@ -140,9 +183,9 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
             const row = jsonData[i];
             if (!row || !Array.isArray(row)) continue;
             let score = 0;
-            if (findColumnIndex(row, COLUMN_MAPPINGS.name) !== -1) score += 2;
-            if (findColumnIndex(row, COLUMN_MAPPINGS.spend) !== -1) score++;
-            if (findColumnIndex(row, COLUMN_MAPPINGS.results) !== -1) score++;
+            if (findColumnIndex(row, activeMappings.name) !== -1) score += 2;
+            if (findColumnIndex(row, activeMappings.spend) !== -1) score++;
+            if (findColumnIndex(row, activeMappings.results) !== -1) score++;
             if (score > maxScore) {
                 maxScore = score;
                 headerRowIndex = i;
@@ -152,6 +195,11 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
 
         if (headerRowIndex === -1 && jsonData.length > 0) headerRowIndex = 0;
         const headers = jsonData[headerRowIndex] || [];
+
+        // === DEBUG - abrir DevTools (F12) para ver ===
+        console.group(`[Importer Debug] Plataforma: ${platform}`);
+        console.log('Headers detectados:', headers);
+        console.log('Linha do header (index):', headerRowIndex);
 
         let idxName = getIdx(headers, 'name');
         let idxSpend = getIdx(headers, 'spend');
@@ -210,7 +258,8 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
         }
 
         if (idxName === -1 || idxSpend === -1) {
-            throw new Error("Não detectamos 'Campanha' ou 'Gasto'. Verifique as colunas do seu relatório.");
+            const platformLabel = platform === 'google' ? 'Google Ads' : 'Meta Ads';
+            throw new Error(`Não encontramos as colunas de Campanha ou Custo no relatório de ${platformLabel}. Verifique se o arquivo está correto.`);
         }
 
         const idxReach = getIdx(headers, 'reach');
@@ -220,6 +269,23 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
         const idxCpm = getIdx(headers, 'cpm');
         const idxCpr = getIdx(headers, 'costPerResult');
         const idxResultType = getIdx(headers, 'resultType');
+
+        const parseFn = platform === 'google' ? parseNumGoogle : parseNum;
+
+        // Log de colunas detectadas
+        console.log('Mapeamento de colunas:', {
+            name: idxName, spend: idxSpend, results: idxResults,
+            impressions: idxImpressions, clicks: idxClicks,
+            ctr: idxCtr, cpc: idxCpc, cpm: idxCpm, costPerResult: idxCpr
+        });
+        const firstDataRow = jsonData[headerRowIndex + 1];
+        if (firstDataRow) {
+            console.log('Primeira linha de dados (raw):', firstDataRow);
+            console.log('Nome:', firstDataRow[idxName]);
+            console.log('Custo (raw):', firstDataRow[idxSpend], '→ parsed:', parseFn(firstDataRow[idxSpend]));
+            console.log('Conversões (raw):', firstDataRow[idxResults], '→ parsed:', parseFn(firstDataRow[idxResults]));
+        }
+        console.groupEnd();
 
         const campaigns: PerformanceCampaign[] = [];
         let totalSpendSum = 0;
@@ -238,17 +304,17 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
             if (!nameValue || nameValue.toLowerCase() === 'null' || nameValue.toLowerCase().includes('total') || nameValue.toLowerCase().includes('resumo')) continue;
             if (headers.some(h => h && String(h).trim() === nameValue)) continue;
 
-            const spend = parseNum(row[idxSpend]);
-            const results = parseNum(row[idxResults]);
-            const clicks = parseNum(row[idxClicks]);
-            const impressions = parseNum(row[idxImpressions]);
+            const spend = parseFn(row[idxSpend]);
+            const results = parseFn(row[idxResults]);
+            const clicks = parseFn(row[idxClicks]);
+            const impressions = parseFn(row[idxImpressions]);
             const status = idxStatus !== -1 ? String(row[idxStatus] || '').trim() : undefined;
 
             if (!reportStartDate && idxDateStart !== -1) reportStartDate = String(row[idxDateStart] || '');
             if (!reportEndDate && idxDateEnd !== -1) reportEndDate = String(row[idxDateEnd] || '');
 
-            let ctr = parseNum(row[idxCtr]);
-            let cpc = parseNum(row[idxCpc]);
+            let ctr = parseFn(row[idxCtr]);
+            let cpc = parseFn(row[idxCpc]);
 
             // Forçar cálculo se estiver zerado
             if (ctr === 0 && impressions > 0 && clicks > 0) ctr = (clicks / impressions) * 100;
@@ -259,17 +325,16 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
                 name: nameValue,
                 spend,
                 impressions,
-                reach: parseNum(row[idxReach]),
-                frequency: parseNum(row[idxFreq]),
+                reach: parseFn(row[idxReach]),
+                frequency: parseFn(row[idxFreq]),
                 clicks,
                 ctr,
                 cpc,
-                cpm: parseNum(row[idxCpm]),
+                cpm: parseFn(row[idxCpm]),
                 results,
-                costPerResult: parseNum(row[idxCpr]),
+                costPerResult: parseFn(row[idxCpr]) || (results > 0 ? spend / results : 0),
                 status,
-                // Limpeza agressiva de parênteses e colchetes
-                resultType: String(row[idxResultType] || 'Resultados').replace(/\s*[\(\[].*?[\)\]]/g, '').trim(),
+                resultType: String(row[idxResultType] || (platform === 'google' ? 'Conversão' : 'Resultados')).replace(/\s*[\(\[].*?[\)\]]/g, '').trim(),
             });
 
             totalSpendSum += spend;
@@ -286,6 +351,7 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
             clientId,
             month: selectedMonth,
             fileName: sourceName,
+            source: platform,
             campaigns,
             totalSpend: totalSpendSum,
             totalResults: totalResultsSum,
@@ -293,7 +359,7 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
             avgCpc: campaigns.length > 0 ? sumCpcVal / campaigns.length : 0,
             startDate: reportStartDate,
             endDate: reportEndDate
-        });
+        }, importMode);
 
         setStoreMonth(selectedMonth);
         toast.success("Dados importados com sucesso!");
@@ -376,6 +442,41 @@ export const PerformanceImporter = ({ clientId }: PerformanceImporterProps) => {
                                 })}
                             </SelectContent>
                         </Select>
+                    </div>
+
+                    {/* Seletor de Plataforma */}
+                    <div className="space-y-2">
+                        <Label className="text-sm font-medium">Plataforma de Anúncios</Label>
+                        <RadioGroup value={platform} onValueChange={(v) => setPlatform(v as 'meta' | 'google')} className="grid grid-cols-2 gap-2">
+                            <div
+                                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer select-none transition-all ${platform === 'meta' ? 'bg-purple-500/10 border-purple-500/40 text-purple-500' : 'border-border hover:bg-accent/50'}`}
+                                onClick={() => setPlatform('meta')}
+                            >
+                                <RadioGroupItem value="meta" id="plat-meta" />
+                                <Label htmlFor="plat-meta" className="cursor-pointer font-medium">Meta Ads</Label>
+                            </div>
+                            <div
+                                className={`flex items-center gap-2 p-3 rounded-lg border cursor-pointer select-none transition-all ${platform === 'google' ? 'bg-blue-500/10 border-blue-500/40 text-blue-500' : 'border-border hover:bg-accent/50'}`}
+                                onClick={() => setPlatform('google')}
+                            >
+                                <RadioGroupItem value="google" id="plat-google" />
+                                <Label htmlFor="plat-google" className="cursor-pointer font-medium">Google Ads</Label>
+                            </div>
+                        </RadioGroup>
+                    </div>
+
+                    <div className="space-y-3 p-4 bg-muted/10 border rounded-lg">
+                        <Label className="text-sm font-medium">Como importar os dados destas campanhas?</Label>
+                        <RadioGroup value={importMode} onValueChange={(val) => setImportMode(val as 'sum' | 'replace')} className="flex flex-col space-y-1">
+                            <div className="flex items-center space-x-2">
+                                <RadioGroupItem value="replace" id="replace" className="text-purple-600" />
+                                <Label htmlFor="replace" className="font-normal cursor-pointer">Substituir o Mês Atual (Limpa as antigas)</Label>
+                            </div>
+                            <div className="flex items-center space-x-2 mt-1">
+                                <RadioGroupItem value="sum" id="sum" className="text-purple-600" />
+                                <Label htmlFor="sum" className="font-normal cursor-pointer">Somar com o Mês Atual (Mescla dados)</Label>
+                            </div>
+                        </RadioGroup>
                     </div>
 
                     <Tabs defaultValue="file" className="w-full">

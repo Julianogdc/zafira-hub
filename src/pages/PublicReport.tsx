@@ -5,7 +5,7 @@ import { PublicReport as PublicReportType } from '@/types/publicReport';
 import {
     Loader2, TrendingUp, TrendingDown, DollarSign, MousePointer,
     Target, BarChart3, Users, Eye, Zap, ArrowRight, ChevronDown,
-    Sparkles, ChevronRight, PieChart
+    Sparkles, ChevronRight, PieChart, Calculator, Brain, CheckCircle2, AlertTriangle
 } from 'lucide-react';
 
 /**
@@ -123,6 +123,7 @@ const PublicReport = () => {
     }
 
     const data = report.report_data;
+    const v2Config = (data as any).v2_config || null;
     const cpa = data.totalResults > 0 ? data.totalSpend / data.totalResults : 0;
     const totalClicks = data.campaigns.reduce((sum, c) => sum + (c.clicks || 0), 0);
     const totalImpressions = totalClicks > 0 ? Math.round(totalClicks / (data.avgCtr / 100)) : 0;
@@ -450,7 +451,14 @@ const PublicReport = () => {
                                             style={{ transitionDelay: `${idx * 50}ms` }}
                                         >
                                             <td className="p-4">
-                                                <span className="font-medium text-white/90 print:text-gray-800">{campaign.name}</span>
+                                                <div className="flex items-center gap-1.5">
+                                                    <span className="font-medium text-white/90 print:text-gray-800">{campaign.name}</span>
+                                                    {(data as any).source === 'google' ? (
+                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/20 shrink-0">Google</span>
+                                                    ) : (
+                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/20 text-purple-400 border border-purple-500/20 shrink-0">Meta</span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="p-4 text-right text-white/70 print:text-gray-600">{fmtCurrency(campaign.spend)}</td>
                                             <td className="p-4 text-right">
@@ -485,6 +493,164 @@ const PublicReport = () => {
                                     {report.ai_insight.replace(/\*\*/g, '').replace(/###/g, '').replace(/#/g, '')}
                                 </div>
                             </div>
+                        </div>
+                    </section>
+                )}
+
+                {/* V2 Widgets: Meta, Calculadora, IA Acionável */}
+                {v2Config && (
+                    <section
+                        id="v2-widgets"
+                        data-animate
+                        className={`mb-16 transition-all duration-1000 delay-600 ${visibleSections.has('v2-widgets') ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-10'}`}
+                    >
+                        <h2 className="text-2xl font-bold mb-6 flex items-center gap-3">
+                            <div className="w-1 h-8 bg-gradient-to-b from-purple-500 to-purple-700 rounded-full" />
+                            <Sparkles className="w-6 h-6 text-purple-400" />
+                            Análise Avançada V2
+                        </h2>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                            {/* Widget: Tracking de Meta */}
+                            {v2Config.showGoal && v2Config.snapshotGoal && (
+                                <div className="bg-gradient-to-br from-blue-600/10 to-blue-900/10 backdrop-blur-xl rounded-3xl border border-blue-500/20 p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <Target className="w-5 h-5 text-blue-400" />
+                                        <h3 className="text-lg font-semibold text-blue-300">Meta do Mês</h3>
+                                    </div>
+                                    {(() => {
+                                        const goal = v2Config.snapshotGoal as number;
+                                        const current = data.totalResults || 0;
+                                        const pct = Math.min(Math.round((current / goal) * 100), 100);
+                                        const r = 60;
+                                        const circumference = 2 * Math.PI * r;
+                                        const offset = circumference - (pct / 100) * circumference;
+                                        const strokeColor = pct >= 100 ? '#10b981' : pct > 50 ? '#3b82f6' : '#f59e0b';
+                                        return (
+                                            <div className="flex flex-col items-center gap-4">
+                                                <div className="relative w-36 h-36 flex items-center justify-center">
+                                                    <svg className="w-full h-full transform -rotate-90">
+                                                        <circle cx="72" cy="72" r={r} strokeWidth="8" stroke="rgba(255,255,255,0.08)" fill="none" />
+                                                        <circle cx="72" cy="72" r={r} strokeWidth="8" stroke={strokeColor} fill="none"
+                                                            strokeDasharray={circumference}
+                                                            strokeDashoffset={offset}
+                                                            strokeLinecap="round"
+                                                            style={{ transition: 'stroke-dashoffset 1s ease-out' }}
+                                                        />
+                                                    </svg>
+                                                    <div className="absolute flex flex-col items-center">
+                                                        <span className="text-3xl font-bold text-white">{pct}%</span>
+                                                        <span className="text-xs text-white/50">{current} / {goal}</span>
+                                                    </div>
+                                                </div>
+                                                <p className="text-center text-sm">
+                                                    {pct >= 100
+                                                        ? <span className="text-emerald-400 font-semibold">Meta de {goal} batida! 🎉</span>
+                                                        : <span className="text-white/60">Faltaram <span className="font-bold text-white">{goal - current}</span> resultados</span>
+                                                    }
+                                                </p>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+
+                            {/* Widget: Calculadora CVR/CPA */}
+                            {v2Config.showCalc && v2Config.snapshotSales !== null && (
+                                <div className="bg-gradient-to-br from-pink-600/10 to-pink-900/10 backdrop-blur-xl rounded-3xl border border-pink-500/20 p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <Calculator className="w-5 h-5 text-pink-400" />
+                                        <h3 className="text-lg font-semibold text-pink-300">Conversão & CPA</h3>
+                                    </div>
+                                    {(() => {
+                                        const sales = v2Config.snapshotSales as number;
+                                        const leads = data.totalResults || 0;
+                                        const spend = data.totalSpend || 0;
+                                        const cvr = leads > 0 && sales > 0 ? (sales / leads) * 100 : 0;
+                                        const cpaV = sales > 0 ? spend / sales : 0;
+                                        const cpl = leads > 0 ? spend / leads : 0;
+                                        return (
+                                            <div className="space-y-4">
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-white/60">Leads / Resultados</span>
+                                                    <span className="font-bold">{leads.toLocaleString('pt-BR')}</span>
+                                                </div>
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-white/60">Custo p/ Lead</span>
+                                                    <span className="font-bold text-white/70">{fmtCurrency(cpl)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-sm">
+                                                    <span className="text-white/60">Vendas Fechadas</span>
+                                                    <span className="font-bold text-pink-300">{sales}</span>
+                                                </div>
+                                                <div className="border-t border-white/10 pt-3 grid grid-cols-2 gap-3">
+                                                    <div className="bg-white/5 rounded-xl p-3">
+                                                        <p className="text-[10px] text-white/40 uppercase tracking-wider">Taxa Conv.</p>
+                                                        <p className="text-xl font-bold text-pink-400 mt-1">{cvr.toFixed(2)}%</p>
+                                                    </div>
+                                                    <div className="bg-white/5 rounded-xl p-3">
+                                                        <p className="text-[10px] text-white/40 uppercase tracking-wider">CPA</p>
+                                                        <p className="text-xl font-bold text-pink-400 mt-1">{fmtCurrency(cpaV)}</p>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
+
+                            {/* Widget: IA Acionável */}
+                            {v2Config.showAI && (
+                                <div className="bg-gradient-to-br from-purple-600/10 to-purple-900/10 backdrop-blur-xl rounded-3xl border border-purple-500/20 p-6 md:col-span-2 lg:col-span-1">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <Brain className="w-5 h-5 text-purple-400" />
+                                        <h3 className="text-lg font-semibold text-purple-300">Inteligência Acionável</h3>
+                                    </div>
+                                    {(() => {
+                                        const camps = data.campaigns;
+                                        const converting = camps.filter(c => c.results > 0);
+                                        const best = converting.length > 0
+                                            ? converting.reduce((a, b) => a.costPerResult < b.costPerResult ? a : b)
+                                            : null;
+                                        const highSpendNoResult = camps.filter(c => c.results === 0 && c.spend > 0);
+                                        const worst = highSpendNoResult.length > 0
+                                            ? highSpendNoResult.reduce((a, b) => a.spend > b.spend ? a : b)
+                                            : (converting.length > 1 ? converting.reduce((a, b) => a.costPerResult > b.costPerResult ? a : b) : null);
+                                        return (
+                                            <div className="space-y-3">
+                                                {best && (
+                                                    <div className="flex gap-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
+                                                        <CheckCircle2 className="w-5 h-5 text-emerald-400 mt-0.5 shrink-0" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-emerald-400 uppercase tracking-wider">Melhor desempenho</p>
+                                                            <p className="text-sm text-white/80 mt-0.5 font-medium">{best.name}</p>
+                                                            <p className="text-xs text-white/50">CPA: {fmtCurrency(best.costPerResult)}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {worst && (
+                                                    <div className="flex gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+                                                        <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+                                                        <div>
+                                                            <p className="text-xs font-bold text-amber-400 uppercase tracking-wider">Ponto de atenção</p>
+                                                            <p className="text-sm text-white/80 mt-0.5 font-medium">{worst.name}</p>
+                                                            <p className="text-xs text-white/50">
+                                                                {worst.results === 0
+                                                                    ? `Sem conversões — R$ ${worst.spend.toFixed(2)} investido`
+                                                                    : `CPA elevado: ${fmtCurrency(worst.costPerResult)}`
+                                                                }
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {!best && !worst && (
+                                                    <p className="text-sm text-white/40 text-center py-4">Dados insuficientes para análise.</p>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+                            )}
                         </div>
                     </section>
                 )}

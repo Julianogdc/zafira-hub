@@ -1,4 +1,5 @@
 export type ResultType = 'Lead' | 'Compra' | 'Mensagem' | 'Visualização' | 'Outro';
+export type AdSource = 'meta' | 'google';
 
 export interface PerformanceCampaign {
     id: string; // Internal ID or hash
@@ -26,6 +27,7 @@ export interface PerformanceReport {
     month: string; // YYYY-MM
     uploadDate: string;
     fileName: string;
+    source?: AdSource; // 'meta' | 'google'
     campaigns: PerformanceCampaign[];
     totalSpend: number;
     avgCtr: number;

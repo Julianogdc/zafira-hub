@@ -12,6 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Tooltip,
     TooltipContent,
@@ -36,7 +37,9 @@ import {
     Link2,
     Copy,
     Check,
-    ExternalLink
+    ExternalLink,
+    Sparkles,
+    Settings2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { AddPerformanceClientDialog } from '../components/performance/AddPerformanceClientDialog';
@@ -45,6 +48,7 @@ import { generatePerformanceReport } from '../lib/exportUtils';
 import { supabase } from '@/lib/supabase';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LinksManagerDialog } from '../components/performance/LinksManagerDialog';
+import { PerformanceV2Dashboard } from '../components/performance/v2/PerformanceV2Dashboard';
 
 const getStatusInfo = (status: string | undefined) => {
     if (!status) return { label: 'Ativo', color: 'bg-green-500/10 text-green-500 border-green-500/20' };
@@ -70,6 +74,7 @@ const getStatusInfo = (status: string | undefined) => {
 };
 
 const Performance = () => {
+    const [isV2Active, setIsV2Active] = useState(false);
     const [lastAiResult, setLastAiResult] = useState<string | null>(null);
     const [includeAiInPdf, setIncludeAiInPdf] = useState(true);
     const [isGeneratingLink, setIsGeneratingLink] = useState(false);
@@ -77,6 +82,11 @@ const Performance = () => {
     const [generatedLink, setGeneratedLink] = useState<string | null>(null);
     const [linkCopied, setLinkCopied] = useState(false);
     const [selectedCampaignIds, setSelectedCampaignIds] = useState<string[]>([]);
+    // Modal de configuração de link
+    const [isLinkConfigOpen, setIsLinkConfigOpen] = useState(false);
+    const [v2ShowAI, setV2ShowAI] = useState(true);
+    const [v2ShowGoal, setV2ShowGoal] = useState(true);
+    const [v2ShowCalc, setV2ShowCalc] = useState(true);
     const { user } = useAuthStore();
     const { clients, fetchClients } = useClientStore();
     const {
@@ -137,6 +147,17 @@ const Performance = () => {
         };
     }, [currentReport, selectedCampaignIds]);
 
+    const previousReport = useMemo(() => {
+        if (!selectedClientId || !selectedMonth) return null;
+
+        // Calcular mês anterior no formato YYYY-MM
+        const currDate = new Date(`${selectedMonth}-05`); // Dia 5 pra evitar problema de fuso e pular de mês
+        currDate.setMonth(currDate.getMonth() - 1);
+        const prevMonthStr = currDate.toISOString().substring(0, 7);
+
+        return reports.find(r => r.clientId === selectedClientId && r.month === prevMonthStr);
+    }, [reports, selectedClientId, selectedMonth]);
+
     const toggleAllCampaigns = () => {
         if (!currentReport) return;
         if (selectedCampaignIds.length === currentReport.campaigns.length) {
@@ -154,8 +175,12 @@ const Performance = () => {
         }
     };
 
-    // Função para gerar link público do relatório
-    const handleGeneratePublicLink = async () => {
+    // Gera o link com os dados de configuração V2 coletados
+    const handleGeneratePublicLink = async (config: {
+        showAI: boolean;
+        showGoal: boolean;
+        showCalc: boolean;
+    }) => {
         if (!filteredReport || !filteredClient) return;
 
         setIsGeneratingLink(true);
@@ -163,29 +188,38 @@ const Performance = () => {
             // Gerar slug curto e único
             const slug = Math.random().toString(36).substring(2, 8) + Math.random().toString(36).substring(2, 6);
 
-            const { data, error } = await supabase
+            // Capturar snapshots do localStorage para a visão pública
+            const goalKey = `zafira_goal_${filteredClient.id}_${filteredReport.month}`;
+            const salesKey = `zafira_sales_${filteredClient.id}_${filteredReport.month}`;
+            const snapshotGoal = localStorage.getItem(goalKey);
+            const snapshotSales = localStorage.getItem(salesKey);
+
+            const v2Config = {
+                showAI: config.showAI,
+                showGoal: config.showGoal,
+                showCalc: config.showCalc,
+                snapshotGoal: snapshotGoal ? Number(snapshotGoal) : null,
+                snapshotSales: snapshotSales ? Number(snapshotSales) : null,
+            };
+
+            const { error } = await supabase
                 .from('public_reports')
                 .insert({
                     slug,
                     client_name: filteredClient.name,
                     report_month: filteredReport.month,
-                    report_data: filteredReport,
+                    report_data: { ...filteredReport, v2_config: v2Config },
                     ai_insight: includeAiInPdf ? lastAiResult : null,
                     created_by: user?.id || null,
-                    expires_at: null // Sem expiração por padrão
-                })
-                .select()
-                .single();
+                    expires_at: null
+                });
 
             if (error) throw error;
 
-            // Gerar URL completa
             const publicUrl = `${window.location.origin}/r/${slug}`;
-
-            // Mostrar modal com link
             setGeneratedLink(publicUrl);
             setLinkCopied(false);
-
+            setIsLinkConfigOpen(false);
             toast.success('Link gerado com sucesso!');
 
         } catch (error) {
@@ -323,6 +357,15 @@ const Performance = () => {
                                     </p>
                                 </div>
                                 <div className="flex items-center gap-2">
+                                    <Button
+                                        variant={isV2Active ? "default" : "outline"}
+                                        size="sm"
+                                        onClick={() => setIsV2Active(!isV2Active)}
+                                        className={isV2Active ? "bg-purple-600 hover:bg-purple-700 gap-1.5" : "gap-1.5 border-purple-500/30 text-purple-600 hover:bg-purple-500/10"}
+                                    >
+                                        <Sparkles className="h-4 w-4" />
+                                        {isV2Active ? 'Voltar ao Padrão' : 'Ver V2 (Beta)'}
+                                    </Button>
                                     <div className="flex items-center gap-2">
                                         <Calendar className="h-4 w-4 text-muted-foreground" />
                                         <Select value={selectedMonth || ''} onValueChange={selectMonth}>
@@ -358,7 +401,7 @@ const Performance = () => {
                                         size="sm"
                                         disabled={!filteredReport || isGeneratingLink}
                                         className="gap-1.5"
-                                        onClick={handleGeneratePublicLink}
+                                        onClick={() => setIsLinkConfigOpen(true)}
                                     >
                                         <Link2 className="h-4 w-4 text-purple-500" />
                                         {isGeneratingLink ? '...' : 'Link'}
@@ -392,7 +435,7 @@ const Performance = () => {
                             {currentReport ? (
                                 <>
                                     {/* KPIs */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                                         <KpiCard
                                             title="Investimento Mensal"
                                             value={`R$ ${filteredReport?.totalSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2 }) || '0,00'}`}
@@ -422,6 +465,13 @@ const Performance = () => {
                                             description="Custo por Clique (Cost Per Click). Valor médio pago por cada clique no link."
                                         />
                                     </div>
+
+                                    {/* V2 Dashboard */}
+                                    {isV2Active && filteredClient && filteredReport && (
+                                        <div className="mb-6">
+                                            <PerformanceV2Dashboard report={filteredReport} client={filteredClient} previousReport={previousReport} />
+                                        </div>
+                                    )}
 
                                     {/* Tabs */}
                                     <Tabs defaultValue="campaigns" className="space-y-4">
@@ -504,7 +554,14 @@ const Performance = () => {
                                                                         </td>
                                                                         <td className="px-4 py-3 font-medium">
                                                                             <div className="flex flex-col">
-                                                                                <span>{camp.name}</span>
+                                                                                <div className="flex items-center gap-1.5">
+                                                                                    <span>{camp.name}</span>
+                                                                                    {currentReport?.source === 'google' ? (
+                                                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-blue-500/15 text-blue-500 border border-blue-500/20 shrink-0">Google</span>
+                                                                                    ) : (
+                                                                                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-500/15 text-purple-500 border border-purple-500/20 shrink-0">Meta</span>
+                                                                                    )}
+                                                                                </div>
                                                                                 <span className="text-[10px] text-muted-foreground uppercase">{camp.resultType}</span>
                                                                             </div>
                                                                         </td>
@@ -679,6 +736,76 @@ const Performance = () => {
                             >
                                 <ExternalLink className="h-4 w-4" />
                                 Abrir Link
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Modal de Configuração do Link Público */}
+            <Dialog open={isLinkConfigOpen} onOpenChange={setIsLinkConfigOpen}>
+                <DialogContent className="sm:max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2">
+                            <Settings2 className="h-5 w-5 text-purple-500" />
+                            Configurar Relatório Público
+                        </DialogTitle>
+                        <DialogDescription>
+                            Escolha quais widgets do Dashboard V2 serão exibidos no relatório compartilhado.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 py-2">
+                        <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3 border">
+                            💡 O relatório irá capturar um <strong>snapshot</strong> atual dos seus valores de Meta e Vendas para exibição estática no link público.
+                        </p>
+                        <div className="space-y-3">
+                            <p className="text-sm font-semibold">Widgets V2 a exibir:</p>
+                            <div className="space-y-2.5">
+                                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20">
+                                    <Checkbox
+                                        id="v2-ai"
+                                        checked={v2ShowAI}
+                                        onCheckedChange={(v) => setV2ShowAI(Boolean(v))}
+                                    />
+                                    <div className="flex flex-col">
+                                        <label htmlFor="v2-ai" className="text-sm font-medium cursor-pointer">Inteligência Acionável</label>
+                                        <span className="text-xs text-muted-foreground">Análise e recomendações automáticas por campanha</span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20">
+                                    <Checkbox
+                                        id="v2-goal"
+                                        checked={v2ShowGoal}
+                                        onCheckedChange={(v) => setV2ShowGoal(Boolean(v))}
+                                    />
+                                    <div className="flex flex-col">
+                                        <label htmlFor="v2-goal" className="text-sm font-medium cursor-pointer">Tracking de Meta</label>
+                                        <span className="text-xs text-muted-foreground">Gauge circular com progresso da meta do mês</span>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20">
+                                    <Checkbox
+                                        id="v2-calc"
+                                        checked={v2ShowCalc}
+                                        onCheckedChange={(v) => setV2ShowCalc(Boolean(v))}
+                                    />
+                                    <div className="flex flex-col">
+                                        <label htmlFor="v2-calc" className="text-sm font-medium cursor-pointer">Calculadora CVR / CPA</label>
+                                        <span className="text-xs text-muted-foreground">Taxa de conversão e custo por venda</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-2 pt-2">
+                            <Button variant="ghost" size="sm" onClick={() => setIsLinkConfigOpen(false)}>Cancelar</Button>
+                            <Button
+                                size="sm"
+                                className="gap-1.5 bg-purple-600 hover:bg-purple-700"
+                                disabled={isGeneratingLink}
+                                onClick={() => handleGeneratePublicLink({ showAI: v2ShowAI, showGoal: v2ShowGoal, showCalc: v2ShowCalc })}
+                            >
+                                <Link2 className="h-4 w-4" />
+                                {isGeneratingLink ? 'Gerando...' : 'Gerar Link'}
                             </Button>
                         </div>
                     </div>

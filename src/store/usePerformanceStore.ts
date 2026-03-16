@@ -16,7 +16,7 @@ interface PerformanceState {
     fetchTrackedClients: () => Promise<void>;
     addTrackedClient: (clientId: string) => Promise<void>;
     removeTrackedClient: (clientId: string) => Promise<void>;
-    addReport: (report: Omit<PerformanceReport, 'id' | 'uploadDate'>) => Promise<void>;
+    addReport: (report: Omit<PerformanceReport, 'id' | 'uploadDate'>, importMode?: 'sum' | 'replace') => Promise<void>;
     deleteReport: (id: string) => Promise<void>;
     selectClient: (id: string | null) => void;
     selectMonth: (month: string | null) => void;
@@ -53,6 +53,7 @@ export const usePerformanceStore = create<PerformanceState>((set, get) => ({
                 fileName: r.file_name?.includes('|') ? r.file_name.split('|')[0] : r.file_name,
                 startDate: r.file_name?.includes('|') ? r.file_name.split('|')[1] : undefined,
                 endDate: r.file_name?.includes('|') ? r.file_name.split('|')[2] : undefined,
+                source: (r.source as 'meta' | 'google') || 'meta',
                 campaigns: r.campaigns as PerformanceCampaign[],
                 totalSpend: r.total_spend,
                 totalResults: r.total_results,
@@ -116,7 +117,7 @@ export const usePerformanceStore = create<PerformanceState>((set, get) => ({
         }
     },
 
-    addReport: async (reportData) => {
+    addReport: async (reportData, importMode = 'replace') => {
         try {
             const { data: userData } = await supabase.auth.getUser();
             if (!userData.user) throw new Error("Usuário não autenticado");
@@ -133,57 +134,102 @@ export const usePerformanceStore = create<PerformanceState>((set, get) => ({
 
             if (existingReport) {
                 // 2. Lógica de Merge (Smart Update)
-                const existingCampaigns = existingReport.campaigns as PerformanceCampaign[];
-                const newCampaigns = reportData.campaigns;
+                if (importMode === 'replace') {
+                    // Substitui completamente as campanhas
+                    const newCampaigns = reportData.campaigns;
+                    const totalSpend = newCampaigns.reduce((sum, c) => sum + (c.spend || 0), 0);
+                    const totalResults = newCampaigns.reduce((sum, c) => sum + (c.results || 0), 0);
+                    const sumCtr = newCampaigns.reduce((sum, c) => sum + (c.ctr || 0), 0);
+                    const sumCpc = newCampaigns.reduce((sum, c) => sum + (c.cpc || 0), 0);
+                    const count = newCampaigns.length;
+                    const avgCtr = count > 0 ? sumCtr / count : 0;
+                    const avgCpc = count > 0 ? sumCpc / count : 0;
 
-                // Mapa para acesso rápido por nome (normalizado)
-                const campaignMap = new Map<string, PerformanceCampaign>();
-                existingCampaigns.forEach(c => campaignMap.set(c.name.trim(), c));
+                    const newFileName = reportData.startDate ?
+                        `${reportData.fileName}|${reportData.startDate}|${reportData.endDate}` :
+                        reportData.fileName;
 
-                // Atualizar ou adicionar novas campanhas
-                newCampaigns.forEach(newCamp => {
-                    // Preservar o ID da campanha existente para manter consistência, se desejado
-                    // Aqui optamos por manter o ID da existente e atualizar os dados
-                    const existing = campaignMap.get(newCamp.name.trim());
-                    if (existing) {
-                        campaignMap.set(newCamp.name.trim(), { ...newCamp, id: existing.id });
-                    } else {
-                        campaignMap.set(newCamp.name.trim(), newCamp);
-                    }
-                });
+                    const { error: updateError } = await supabase
+                        .from('performance_reports')
+                        .update({
+                            campaigns: newCampaigns,
+                            total_spend: totalSpend,
+                            total_results: totalResults,
+                            avg_ctr: avgCtr,
+                            avg_cpc: avgCpc,
+                            file_name: newFileName
+                        })
+                        .eq('id', existingReport.id);
 
-                const mergedCampaigns = Array.from(campaignMap.values());
+                    if (updateError) throw updateError;
+                } else {
+                    // Soma as campanhas
+                    const existingCampaigns = existingReport.campaigns as PerformanceCampaign[];
+                    const newCampaigns = reportData.campaigns;
 
-                // Recalcular Totais
-                const totalSpend = mergedCampaigns.reduce((sum, c) => sum + (c.spend || 0), 0);
-                const totalResults = mergedCampaigns.reduce((sum, c) => sum + (c.results || 0), 0);
+                    // Mapa para acesso rápido por nome (normalizado)
+                    const campaignMap = new Map<string, PerformanceCampaign>();
+                    existingCampaigns.forEach(c => campaignMap.set(c.name.trim(), c));
 
-                // Recalcular médias (mantendo lógica de média simples do importador)
-                const sumCtr = mergedCampaigns.reduce((sum, c) => sum + (c.ctr || 0), 0);
-                const sumCpc = mergedCampaigns.reduce((sum, c) => sum + (c.cpc || 0), 0);
-                const count = mergedCampaigns.length;
+                    // Atualizar ou adicionar novas campanhas somando
+                    newCampaigns.forEach(newCamp => {
+                        const existing = campaignMap.get(newCamp.name.trim());
+                        if (existing) {
+                            // Somar métricas absolutas
+                            const mergedSpend = existing.spend + newCamp.spend;
+                            const mergedResults = existing.results + newCamp.results;
+                            const mergedClicks = existing.clicks + newCamp.clicks;
+                            const mergedImpressions = existing.impressions + newCamp.impressions;
 
-                const avgCtr = count > 0 ? sumCtr / count : 0;
-                const avgCpc = count > 0 ? sumCpc / count : 0;
+                            // Recalcular métricas relativas (CPA, CTR, CPC)
+                            const mergedCtr = mergedImpressions > 0 ? (mergedClicks / mergedImpressions) * 100 : 0;
+                            const mergedCpc = mergedClicks > 0 ? mergedSpend / mergedClicks : 0;
+                            const mergedCpr = mergedResults > 0 ? mergedSpend / mergedResults : 0;
 
-                // Nome do arquivo combinado
-                const newFileName = reportData.startDate ?
-                    `${reportData.fileName}|${reportData.startDate}|${reportData.endDate}` :
-                    reportData.fileName;
+                            campaignMap.set(newCamp.name.trim(), {
+                                ...newCamp,
+                                id: existing.id,
+                                spend: mergedSpend,
+                                results: mergedResults,
+                                clicks: mergedClicks,
+                                impressions: mergedImpressions,
+                                ctr: mergedCtr,
+                                cpc: mergedCpc,
+                                costPerResult: mergedCpr,
+                            });
+                        } else {
+                            campaignMap.set(newCamp.name.trim(), newCamp);
+                        }
+                    });
 
-                const { error: updateError } = await supabase
-                    .from('performance_reports')
-                    .update({
-                        campaigns: mergedCampaigns,
-                        total_spend: totalSpend,
-                        total_results: totalResults,
-                        avg_ctr: avgCtr,
-                        avg_cpc: avgCpc,
-                        file_name: newFileName
-                    })
-                    .eq('id', existingReport.id);
+                    const mergedCampaigns = Array.from(campaignMap.values());
 
-                if (updateError) throw updateError;
+                    // Recalcular Totais
+                    const totalSpend = mergedCampaigns.reduce((sum, c) => sum + (c.spend || 0), 0);
+                    const totalResults = mergedCampaigns.reduce((sum, c) => sum + (c.results || 0), 0);
+                    const count = mergedCampaigns.length;
+                    const avgCtr = count > 0 ? mergedCampaigns.reduce((sum, c) => sum + (c.ctr || 0), 0) / count : 0;
+                    const avgCpc = count > 0 ? mergedCampaigns.reduce((sum, c) => sum + (c.cpc || 0), 0) / count : 0;
+
+                    // Nome do arquivo combinado
+                    const newFileName = reportData.startDate ?
+                        `${reportData.fileName}|${reportData.startDate}|${reportData.endDate} (Merge)` :
+                        `${reportData.fileName} (Merge)`;
+
+                    const { error: updateError } = await supabase
+                        .from('performance_reports')
+                        .update({
+                            campaigns: mergedCampaigns,
+                            total_spend: totalSpend,
+                            total_results: totalResults,
+                            avg_ctr: avgCtr,
+                            avg_cpc: avgCpc,
+                            file_name: newFileName
+                        })
+                        .eq('id', existingReport.id);
+
+                    if (updateError) throw updateError;
+                }
 
             } else {
                 // 3. Insert Normal (Se não existir)
@@ -196,6 +242,7 @@ export const usePerformanceStore = create<PerformanceState>((set, get) => ({
                     total_results: reportData.totalResults,
                     avg_ctr: reportData.avgCtr,
                     avg_cpc: reportData.avgCpc,
+                    source: reportData.source || 'meta',
                     owner_id: userData.user.id
                 });
 

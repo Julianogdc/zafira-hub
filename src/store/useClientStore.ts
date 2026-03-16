@@ -148,13 +148,32 @@ export const useClientStore = create<ClientState>((set, get) => ({
   },
 
   setPaymentStatus: async (clientId, month, status) => {
-    try {
-      // First check if exists to update, or insert new
-      // We can use upsert? 
-      // But we need to know the ID if we want to update precisely, or we assume (client_id + month) is unique.
-      // My schema didn't enforce unique constraint on (client_id, month), but functionality implies it.
-      // I'll search first.
+    // Optimistic update: atualiza o estado local imediatamente
+    set(state => ({
+      clients: state.clients.map(client => {
+        if (client.id !== clientId) return client;
 
+        const existingEntry = client.paymentHistory?.find(p => p.month === month);
+        let updatedHistory;
+
+        if (existingEntry) {
+          updatedHistory = client.paymentHistory.map(p =>
+            p.month === month
+              ? { ...p, status, paidAt: status === 'paid' ? new Date().toISOString() : undefined }
+              : p
+          );
+        } else {
+          updatedHistory = [
+            ...(client.paymentHistory || []),
+            { month, status, paidAt: status === 'paid' ? new Date().toISOString() : undefined }
+          ];
+        }
+
+        return { ...client, paymentHistory: updatedHistory };
+      })
+    }));
+
+    try {
       const { data: existing } = await supabase
         .from('client_payments')
         .select('id')
@@ -175,9 +194,13 @@ export const useClientStore = create<ClientState>((set, get) => ({
           paid_at: status === 'paid' ? new Date().toISOString() : null
         });
       }
+
+      // Resync com o servidor para garantir consistência
       get().fetchClients();
     } catch (error) {
       console.error('Error setting payment:', error);
+      // Em caso de erro, refaz o fetch para reverter o estado otimista
+      get().fetchClients();
     }
   },
 
