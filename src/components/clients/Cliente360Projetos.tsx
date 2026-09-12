@@ -67,6 +67,71 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   // Desvinculação
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
 
+  // Conexão OAuth
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  // Escuta mensagem de sucesso disparada pelo popup OAuth do Asana
+  useEffect(() => {
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'ASANA_AUTH_SUCCESS') {
+        toast.success('Asana conectado com sucesso!');
+        setIsConnecting(false);
+        loadData();
+      } else if (event.data?.type === 'ASANA_AUTH_ERROR') {
+        toast.error(`Falha na autorização do Asana: ${event.data?.error || 'Erro desconhecido'}`);
+        setIsConnecting(false);
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => {
+      window.removeEventListener('message', handleOAuthMessage);
+    };
+  }, [loadData]);
+
+  const handleConnectAsana = async () => {
+    try {
+      setIsConnecting(true);
+      const res = await asanaIntegrationService.getOAuthAuthorizeUrl();
+      if (!res?.url) {
+        throw new Error('A API não retornou uma URL de autorização válida.');
+      }
+
+      // Abre popup centrado na tela
+      const width = 640;
+      const height = 720;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+
+      const popup = window.open(
+        res.url,
+        'AsanaOAuthAuthorization',
+        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes,scrollbars=yes`
+      );
+
+      if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+        toast.error('O navegador bloqueou a abertura do popup. Por favor, permita popups neste site.');
+        setIsConnecting(false);
+        return;
+      }
+
+      popup.focus();
+
+      // Monitoramento periódico caso a janela seja fechada pelo usuário
+      const checkInterval = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkInterval);
+          setIsConnecting(false);
+          loadData();
+        }
+      }, 1000);
+    } catch (err: any) {
+      console.error('Erro ao conectar Asana:', err);
+      toast.error(err?.data?.message || err?.message || 'Falha ao iniciar conexão com o Asana.');
+      setIsConnecting(false);
+    }
+  };
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -197,19 +262,32 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
             A conexão do Asana com a organização ainda não foi estabelecida ou as credenciais precisam ser configuradas no servidor.
           </p>
         </div>
-        {canManage && (
-          <div className="pt-2">
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
+          {canManage && (
             <Button
-              variant="outline"
-              size="sm"
-              onClick={loadData}
-              className="border-white/10 text-zinc-300 hover:text-white hover:bg-white/5 gap-2"
+              onClick={handleConnectAsana}
+              disabled={isConnecting}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2 shadow-sm shadow-emerald-900/20 text-xs font-medium h-9 px-4"
             >
-              <RefreshCw className="w-4 h-4" />
-              Verificar Conexão
+              {isConnecting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <ExternalLink className="w-4 h-4" />
+              )}
+              Conectar Asana
             </Button>
-          </div>
-        )}
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={loadData}
+            disabled={loading}
+            className="border-white/10 text-zinc-300 hover:text-white hover:bg-white/5 gap-2 text-xs h-9 px-4"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Verificar Conexão
+          </Button>
+        </div>
       </Card>
     );
   }

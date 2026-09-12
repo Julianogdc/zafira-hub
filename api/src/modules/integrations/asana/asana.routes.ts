@@ -164,6 +164,10 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
+  function getOAuthRedirectUri(): string {
+    return process.env.ASANA_REDIRECT_URI || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
+  }
+
   // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com state seguro e assinado)
   app.get(
     '/integrations/asana/oauth/authorize',
@@ -186,16 +190,14 @@ export async function asanaRoutes(app: FastifyInstance) {
 
         const isProduction = process.env.NODE_ENV === 'production';
         reply.setCookie('asana_oauth_nonce', cookieNonce, {
-          path: '/api/integrations/asana/oauth',
+          path: '/',
           httpOnly: true,
           secure: isProduction,
           sameSite: 'lax',
           maxAge: 600, // 10 minutos
         });
 
-        const protocol = request.protocol;
-        const host = request.headers.host || 'localhost:5173';
-        const redirectUri = `${protocol}://${host}/api/integrations/asana/oauth/callback`;
+        const redirectUri = getOAuthRedirectUri();
 
         const params = new URLSearchParams({
           response_type: 'code',
@@ -213,71 +215,140 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
-  // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
-  app.get(
-    '/integrations/asana/oauth/callback',
-    async (
-      request: FastifyRequest<{ Querystring: { code?: string; state?: string; error?: string } }>,
-      reply: FastifyReply
-    ) => {
-      const { code, state: stateParam, error } = request.query;
-      const cookieNonce = request.cookies.asana_oauth_nonce;
+  const callbackHandler = async (
+    request: FastifyRequest<{ Querystring: { code?: string; state?: string; error?: string } }>,
+    reply: FastifyReply
+  ) => {
+    const { code, state: stateParam, error } = request.query;
+    const cookieNonce = request.cookies.asana_oauth_nonce;
 
-      // Limpa imediatamente o cookie de nonce (uso único)
-      reply.clearCookie('asana_oauth_nonce', {
-        path: '/api/integrations/asana/oauth',
-      });
+    // Limpa imediatamente o cookie de nonce (uso único)
+    reply.clearCookie('asana_oauth_nonce', {
+      path: '/',
+    });
 
-      if (error || !code || !stateParam) {
-        return reply.type('text/html').send(`
-          <html>
-            <body>
-              <script>
-                window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${error || 'canceled'}' }, '*') : null;
-                window.close();
-              </script>
-              <p>Falha ou cancelamento na autorização do Asana. Você pode fechar esta janela.</p>
-            </body>
-          </html>
-        `);
-      }
-
-      try {
-        // Validação estrita do state: assinatura HMAC, expiração de 10 min e nonce da sessão
-        const verified = verifyOAuthState(stateParam, cookieNonce);
-        const organizationId = verified.organizationId;
-
-        const protocol = request.protocol;
-        const host = request.headers.host || 'localhost:5173';
-        const redirectUri = `${protocol}://${host}/api/integrations/asana/oauth/callback`;
-
-        // Executa a troca do código por tokens cifrados com AES-256-GCM
-        await asanaService.exchangeOAuthCode(organizationId, code, redirectUri);
-
-        return reply.type('text/html').send(`
-          <html>
-            <body>
-              <script>
-                window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, '*') : null;
-                window.close();
-              </script>
-              <p>Asana conectado com sucesso! Esta janela será fechada automaticamente.</p>
-            </body>
-          </html>
-        `);
-      } catch (err: any) {
-        return reply.type('text/html').send(`
-          <html>
-            <body>
-              <script>
-                window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${err?.message || 'Falha na validação de segurança'}' }, '*') : null;
-                window.close();
-              </script>
-              <p>Erro de segurança ou validação: ${err?.message || 'Acesso negado'}</p>
-            </body>
-          </html>
-        `);
-      }
+    if (error || !code || !stateParam) {
+      const errDescription = error || 'Autorização cancelada ou recusada.';
+      return reply.type('text/html').send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+          <head>
+            <meta charset="utf-8">
+            <title>Autorização Asana - Zafira Hub</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
+              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+              p { margin: 0 0 20px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
+              button { background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+              button:hover { background: #3f3f46; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">✕</div>
+              <h2>Conexão não concluída</h2>
+              <p>${errDescription}</p>
+              <button onclick="window.close()">Fechar Janela</button>
+            </div>
+            <script>
+              try {
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errDescription}' }, '*');
+                }
+              } catch (e) {}
+            </script>
+          </body>
+        </html>
+      `);
     }
-  );
+
+    try {
+      // Validação estrita do state: assinatura HMAC, expiração de 10 min e nonce da sessão
+      const verified = verifyOAuthState(stateParam, cookieNonce);
+      const organizationId = verified.organizationId;
+      const redirectUri = getOAuthRedirectUri();
+
+      // Executa a troca do código por tokens cifrados com AES-256-GCM
+      await asanaService.exchangeOAuthCode(organizationId, code, redirectUri);
+
+      return reply.type('text/html').send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+          <head>
+            <meta charset="utf-8">
+            <title>Asana Conectado - Zafira Hub</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #10b981; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
+              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+              p { margin: 0 0 16px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
+              .badge { display: inline-block; padding: 4px 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; font-size: 12px; color: #71717a; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">✓</div>
+              <h2>Asana Conectado!</h2>
+              <p>A autorização foi validada com sucesso. O Zafira Hub já está sincronizado com seu Asana.</p>
+              <div class="badge">Fechando esta janela em instantes...</div>
+            </div>
+            <script>
+              try {
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, '*');
+                }
+              } catch (e) {
+                console.error(e);
+              }
+              setTimeout(function() {
+                window.close();
+              }, 1200);
+            </script>
+          </body>
+        </html>
+      `);
+    } catch (err: any) {
+      const errMsg = err?.message || 'Falha na validação de segurança';
+      return reply.type('text/html').send(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+          <head>
+            <meta charset="utf-8">
+            <title>Erro de Conexão - Zafira Hub</title>
+            <style>
+              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
+              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+              p { margin: 0 0 20px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
+              button { background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
+              button:hover { background: #3f3f46; }
+            </style>
+          </head>
+          <body>
+            <div class="card">
+              <div class="icon">✕</div>
+              <h2>Erro de Validação</h2>
+              <p>${errMsg}</p>
+              <button onclick="window.close()">Fechar Janela</button>
+            </div>
+            <script>
+              try {
+                if (window.opener) {
+                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errMsg}' }, '*');
+                }
+              } catch (e) {}
+            </script>
+          </body>
+        </html>
+      `);
+    }
+  };
+
+  // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
+  app.get('/integrations/asana/oauth/callback', callbackHandler);
+  app.get('/api/integrations/asana/oauth/callback', callbackHandler);
 }
