@@ -32,6 +32,8 @@ import {
   ApiClientStatus,
   UpdateClientDTO,
 } from '@/services/clients';
+import { useAuthStore } from '@/store/useAuthStore';
+import { Cliente360Projetos } from '@/components/clients/Cliente360Projetos';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -58,6 +60,8 @@ import {
 export default function Cliente360() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const canManage = user?.role === 'admin' || user?.role === 'manager';
 
   const [client, setClient] = useState<HubClient | null>(null);
   const [loading, setLoading] = useState(true);
@@ -439,15 +443,9 @@ export default function Cliente360() {
           </Card>
         </TabsContent>
 
-        {/* 4. ABA: PROJETOS (PLACEHOLDER) */}
+        {/* 4. ABA: PROJETOS (INTEGRAÇÃO ASANA REAL) */}
         <TabsContent value="projetos" className="outline-none">
-          <Card className="bg-zinc-950/40 border-white/10 p-12 text-center space-y-3">
-            <FolderGit2 className="w-10 h-10 text-zinc-600 mx-auto opacity-50" />
-            <h3 className="text-base font-semibold text-white">Gestão de Projetos</h3>
-            <p className="text-sm text-zinc-400 max-w-md mx-auto">
-              Projetos será integrado ao Asana.
-            </p>
-          </Card>
+          <Cliente360Projetos clientId={client.id} canManage={canManage} />
         </TabsContent>
 
         {/* 5. ABA: CONTEÚDO (PLACEHOLDER) */}

@@ -41,8 +41,9 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members OrganizationMember[]
-  clients Client[]
+  members      OrganizationMember[]
+  clients      Client[]
+  integrations OrganizationIntegration[]
 
   @@map("organizations")
 }
@@ -121,4 +122,23 @@ model ClientIntegration {
   @@unique([clientId, provider, externalId])
   @@index([provider, externalId])
   @@map("client_integrations")
+}
+
+model OrganizationIntegration {
+  id             String              @id @default(uuid())
+  organizationId String
+  provider       IntegrationProvider
+  accessToken    String?             @db.Text
+  refreshToken   String?             @db.Text
+  expiresAt      DateTime?
+  workspaceId    String?
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@index([provider])
+  @@map("organization_integrations")
 }
