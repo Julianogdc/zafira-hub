@@ -114,22 +114,7 @@ const App = () => {
   const checkSession = useAuthStore((state) => state.checkSession);
 
   useEffect(() => {
-    if (checkSession) {
-      checkSession();
-
-      // Setup auth listener
-      const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
-        if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-          checkSession();
-        } else if (event === 'SIGNED_OUT') {
-          useAuthStore.getState().logout();
-        }
-      });
-
-      return () => {
-        authListener.subscription.unsubscribe();
-      };
-    }
+    checkSession();
   }, [checkSession]);
 
   return (
