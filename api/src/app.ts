@@ -2,6 +2,7 @@ import 'dotenv/config';
 import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import { healthRoutes } from './routes/health.js';
+import { clientRoutes } from './modules/clients/clients.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -13,6 +14,7 @@ export function buildApp(): FastifyInstance {
   });
 
   app.register(healthRoutes);
+  app.register(clientRoutes);
 
   return app;
 }

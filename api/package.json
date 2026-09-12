@@ -9,13 +9,18 @@
     "build": "prisma generate && tsup src --out-dir dist --format esm --clean",
     "start": "node dist/server.js",
     "db:migrate": "prisma migrate deploy",
-    "db:status": "prisma migrate status"
+    "db:status": "prisma migrate status",
+    "db:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
     "@prisma/client": "^6.4.1",
     "dotenv": "^16.4.7",
-    "fastify": "^5.2.1"
+    "fastify": "^5.2.1",
+    "zod": "^4.6.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.9",
