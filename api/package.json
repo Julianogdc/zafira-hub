@@ -6,7 +6,7 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsup src --out-dir dist --format esm --clean",
+    "build": "prisma generate && tsup src --out-dir dist --format esm --clean",
     "start": "node dist/server.js"
   },
   "dependencies": {
