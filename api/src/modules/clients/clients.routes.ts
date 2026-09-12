@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
+import { authenticate, requireRole } from '../../middleware/auth.js';
 import {
   clientIdParamSchema,
   createClientSchema,
@@ -10,6 +11,9 @@ import { AppError, ClientsService } from './clients.service.js';
 
 export async function clientRoutes(app: FastifyInstance) {
   const clientsService = new ClientsService();
+
+  // Exige autenticação (sessão ou API Key) para todas as rotas de clientes
+  app.addHook('preHandler', authenticate);
 
   function handleError(error: unknown, reply: FastifyReply) {
     if (error instanceof ZodError) {
@@ -34,7 +38,7 @@ export async function clientRoutes(app: FastifyInstance) {
     });
   }
 
-  // GET /clients
+  // GET /clients (ADMIN, MANAGER, MEMBER, API Key)
   app.get('/clients', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const filters = listClientsQuerySchema.parse(request.query);
@@ -45,7 +49,7 @@ export async function clientRoutes(app: FastifyInstance) {
     }
   });
 
-  // GET /clients/:id
+  // GET /clients/:id (ADMIN, MANAGER, MEMBER, API Key)
   app.get('/clients/:id', async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = clientIdParamSchema.parse(request.params);
@@ -56,26 +60,39 @@ export async function clientRoutes(app: FastifyInstance) {
     }
   });
 
-  // POST /clients
-  app.post('/clients', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const body = createClientSchema.parse(request.body);
-      const client = await clientsService.createClient(body);
-      return reply.status(201).send(client);
-    } catch (error) {
-      return handleError(error, reply);
+  // POST /clients (ADMIN, MANAGER, API Key)
+  app.post(
+    '/clients',
+    {
+      preHandler: [requireRole(['ADMIN', 'MANAGER'])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const body = createClientSchema.parse(request.body);
+        const client = await clientsService.createClient(body);
+        return reply.status(201).send(client);
+      } catch (error) {
+        return handleError(error, reply);
+      }
     }
-  });
+  );
 
-  // PATCH /clients/:id
-  app.patch('/clients/:id', async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const { id } = clientIdParamSchema.parse(request.params);
-      const body = updateClientSchema.parse(request.body);
-      const client = await clientsService.updateClient(id, body);
-      return reply.status(200).send(client);
-    } catch (error) {
-      return handleError(error, reply);
+  // PATCH /clients/:id (ADMIN, MANAGER, API Key)
+  app.patch(
+    '/clients/:id',
+    {
+      preHandler: [requireRole(['ADMIN', 'MANAGER'])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { id } = clientIdParamSchema.parse(request.params);
+        const body = updateClientSchema.parse(request.body);
+        const client = await clientsService.updateClient(id, body);
+        return reply.status(200).send(client);
+      } catch (error) {
+        return handleError(error, reply);
+      }
     }
-  });
+  );
 }
+
