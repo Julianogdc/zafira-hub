@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,9 +14,17 @@ const Login = () => {
     const [password, setPassword] = useState('');
     const navigate = useNavigate();
     const location = useLocation();
+    const { isAuthenticated, loading: authLoading } = useAuthStore();
 
     // Rota de destino após autenticação
     const from = location.state?.from?.pathname || '/';
+
+    useEffect(() => {
+        if (!authLoading && isAuthenticated) {
+            const target = from === '/login' ? '/' : from;
+            navigate(target, { replace: true });
+        }
+    }, [isAuthenticated, authLoading, navigate, from]);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();

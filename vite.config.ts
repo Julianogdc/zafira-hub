@@ -9,4 +9,25 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://zafira-hub-v2-api.hvrb9d.easypanel.host',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyRes', (proxyRes) => {
+            const setCookie = proxyRes.headers['set-cookie'];
+            if (setCookie) {
+              // Em ambiente de desenvolvimento local (HTTP), remove a flag Secure para que o navegador não descarte o cookie
+              proxyRes.headers['set-cookie'] = setCookie.map((cookie) =>
+                cookie.replace(/;\s*Secure/gi, '')
+              );
+            }
+          });
+        },
+      },
+    },
+  },
 });

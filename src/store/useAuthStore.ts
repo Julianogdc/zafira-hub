@@ -87,6 +87,9 @@ export const useAuthStore = create<ExtendedAuthStore>((set, get) => ({
       await api.post('/auth/login', credentials);
       // Após o login bem-sucedido, carrega a sessão via /auth/me
       await get().checkSession();
+      if (!get().isAuthenticated) {
+        throw new Error('Não foi possível estabelecer a sessão após o login.');
+      }
     } catch (error) {
       set({ loading: false, isLoading: false });
       throw error;

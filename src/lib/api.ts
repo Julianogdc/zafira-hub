@@ -1,4 +1,8 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host';
+// Em desenvolvimento local, usa o proxy do Vite (/api) para evitar problemas de cookies cross-site em HTTP
+const isDev = import.meta.env.DEV;
+const API_BASE_URL = isDev
+  ? '/api'
+  : (import.meta.env.VITE_API_URL || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host');
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public data?: any) {
