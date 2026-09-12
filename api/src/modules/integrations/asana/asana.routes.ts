@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { authenticate, requireRole } from '../../../middleware/auth.js';
 import { AsanaService, AsanaIntegrationError } from './asana.service.js';
+import { generateOAuthState, verifyOAuthState } from '../../../lib/oauthState.js';
 
 const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
@@ -163,7 +164,7 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
-  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana)
+  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com state seguro e assinado)
   app.get(
     '/integrations/asana/oauth/authorize',
     {
@@ -176,6 +177,22 @@ export async function asanaRoutes(app: FastifyInstance) {
           throw new AsanaIntegrationError(500, 'ASANA_CLIENT_ID não configurado no servidor.');
         }
 
+        const auth = request.authContext;
+        const userId = auth?.type === 'user' ? auth.userId : 'system';
+        const organizationId = getOrganizationId(request);
+
+        // Gera state criptograficamente seguro e assinado via HMAC com TTL de 10 min
+        const { stateParam, cookieNonce } = generateOAuthState(organizationId, userId);
+
+        const isProduction = process.env.NODE_ENV === 'production';
+        reply.setCookie('asana_oauth_nonce', cookieNonce, {
+          path: '/api/integrations/asana/oauth',
+          httpOnly: true,
+          secure: isProduction,
+          sameSite: 'lax',
+          maxAge: 600, // 10 minutos
+        });
+
         const protocol = request.protocol;
         const host = request.headers.host || 'localhost:5173';
         const redirectUri = `${protocol}://${host}/api/integrations/asana/oauth/callback`;
@@ -184,7 +201,7 @@ export async function asanaRoutes(app: FastifyInstance) {
           response_type: 'code',
           client_id: clientId,
           redirect_uri: redirectUri,
-          state: getOrganizationId(request),
+          state: stateParam,
           scope: 'default',
         });
 
@@ -196,16 +213,22 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
-  // 8. GET /integrations/asana/oauth/callback (Recebe o code do Asana e troca no backend)
+  // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
   app.get(
     '/integrations/asana/oauth/callback',
     async (
       request: FastifyRequest<{ Querystring: { code?: string; state?: string; error?: string } }>,
       reply: FastifyReply
     ) => {
-      const { code, state: organizationId, error } = request.query;
+      const { code, state: stateParam, error } = request.query;
+      const cookieNonce = request.cookies.asana_oauth_nonce;
 
-      if (error || !code || !organizationId) {
+      // Limpa imediatamente o cookie de nonce (uso único)
+      reply.clearCookie('asana_oauth_nonce', {
+        path: '/api/integrations/asana/oauth',
+      });
+
+      if (error || !code || !stateParam) {
         return reply.type('text/html').send(`
           <html>
             <body>
@@ -213,17 +236,22 @@ export async function asanaRoutes(app: FastifyInstance) {
                 window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${error || 'canceled'}' }, '*') : null;
                 window.close();
               </script>
-              <p>Falha na autenticação com o Asana. Você pode fechar esta janela.</p>
+              <p>Falha ou cancelamento na autorização do Asana. Você pode fechar esta janela.</p>
             </body>
           </html>
         `);
       }
 
       try {
+        // Validação estrita do state: assinatura HMAC, expiração de 10 min e nonce da sessão
+        const verified = verifyOAuthState(stateParam, cookieNonce);
+        const organizationId = verified.organizationId;
+
         const protocol = request.protocol;
         const host = request.headers.host || 'localhost:5173';
         const redirectUri = `${protocol}://${host}/api/integrations/asana/oauth/callback`;
 
+        // Executa a troca do código por tokens cifrados com AES-256-GCM
         await asanaService.exchangeOAuthCode(organizationId, code, redirectUri);
 
         return reply.type('text/html').send(`
@@ -233,7 +261,7 @@ export async function asanaRoutes(app: FastifyInstance) {
                 window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, '*') : null;
                 window.close();
               </script>
-              <p>Asana conectado com sucesso! Redirecionando...</p>
+              <p>Asana conectado com sucesso! Esta janela será fechada automaticamente.</p>
             </body>
           </html>
         `);
@@ -242,10 +270,10 @@ export async function asanaRoutes(app: FastifyInstance) {
           <html>
             <body>
               <script>
-                window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${err?.message || 'error'}' }, '*') : null;
+                window.opener ? window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${err?.message || 'Falha na validação de segurança'}' }, '*') : null;
                 window.close();
               </script>
-              <p>Erro ao processar tokens do Asana: ${err?.message || 'Erro interno'}</p>
+              <p>Erro de segurança ou validação: ${err?.message || 'Acesso negado'}</p>
             </body>
           </html>
         `);

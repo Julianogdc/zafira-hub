@@ -3,28 +3,6 @@ import { AsanaUser, AsanaProject, AsanaTask, AsanaStory, AsanaSection, AsanaNoti
 
 import { useAuthStore } from '@/store/useAuthStore';
 
-// PKCE Helpers
-function generateCodeVerifier() {
-  const array = new Uint8Array(32);
-  window.crypto.getRandomValues(array);
-  return base64UrlEncode(array);
-}
-
-function generateCodeChallenge(verifier: string) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(verifier);
-  return window.crypto.subtle.digest('SHA-256', data).then(buffer => {
-    return base64UrlEncode(new Uint8Array(buffer));
-  });
-}
-
-function base64UrlEncode(array: Uint8Array) {
-  return btoa(String.fromCharCode.apply(null, Array.from(array)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
-
 const asanaApi = axios.create({
   baseURL: 'https://app.asana.com/api/1.0',
   headers: {
@@ -32,9 +10,8 @@ const asanaApi = axios.create({
   },
 });
 
-// OAuth Constants
+// OAuth Constants (somente Client ID público no frontend)
 const CLIENT_ID = import.meta.env.VITE_ASANA_CLIENT_ID;
-const CLIENT_SECRET = import.meta.env.VITE_ASANA_CLIENT_SECRET;
 const REDIRECT_URI = window.location.origin + '/auth/callback/asana';
 
 
@@ -299,68 +276,41 @@ export const asanaService = {
     } catch (e) { return null; }
   },
 
-  // --- OAUTH FLOW ---
+  // --- OAUTH FLOW SEGURO VIA API DO HUB 2.0 ---
   initiateAuth: async () => {
-    const verifier = generateCodeVerifier();
-    const challenge = await generateCodeChallenge(verifier);
-
-    // Store verifier for later
-    localStorage.setItem('asana_code_verifier', verifier);
+    try {
+      const response = await fetch('/api/integrations/asana/oauth/authorize', {
+        credentials: 'include',
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.url) {
+          window.open(data.url, '_blank', 'width=600,height=700');
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('Iniciando fallback direto para autorização Asana');
+    }
 
     const params = new URLSearchParams({
       response_type: 'code',
-      client_id: import.meta.env.VITE_ASANA_CLIENT_ID,
+      client_id: CLIENT_ID || '',
       redirect_uri: REDIRECT_URI,
-      state: 'state_token_random',
-      code_challenge: challenge,
-      code_challenge_method: 'S256',
-      // 'default' = Usa a configuração do Console (que agora é 'Permissões Completas')
       scope: 'default',
     });
 
-    // Open in new window for popup experience (OOB)
     window.open(`https://app.asana.com/-/oauth_authorize?${params.toString()}`, '_blank', 'width=600,height=700');
   },
 
-  exchangeCode: async (code: string) => {
-    const verifier = localStorage.getItem('asana_code_verifier');
-    if (!verifier) throw new Error("No code verifier found");
-
-    const params = new URLSearchParams();
-    params.append('grant_type', 'authorization_code');
-    params.append('client_id', CLIENT_ID);
-    params.append('redirect_uri', REDIRECT_URI);
-    params.append('code', code);
-    params.append('code_verifier', verifier);
-
-    if (CLIENT_SECRET) {
-      params.append('client_secret', CLIENT_SECRET);
-    }
-
-    // Required by Asana endpoint
-    const response = await axios.post('https://app.asana.com/-/oauth_token', params, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-
-    localStorage.removeItem('asana_code_verifier');
-    return response.data; // { access_token, refresh_token, data: { ...user } }
+  exchangeCode: async () => {
+    // No Hub 2.0, o token exchange é executado exclusivamente no backend em /api/integrations/asana/oauth/callback
+    return { success: true };
   },
 
-  refreshToken: async (refreshToken: string) => {
-    const params = new URLSearchParams();
-    params.append('grant_type', 'refresh_token');
-    params.append('client_id', CLIENT_ID);
-    params.append('redirect_uri', REDIRECT_URI);
-    params.append('refresh_token', refreshToken);
-
-    if (CLIENT_SECRET) {
-      params.append('client_secret', CLIENT_SECRET);
-    }
-
-    const response = await axios.post('https://app.asana.com/-/oauth_token', params, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-    });
-    return response.data;
+  refreshToken: async () => {
+    // No Hub 2.0, a renovação de tokens é executada automaticamente no backend
+    return { success: true };
   }
 };
 

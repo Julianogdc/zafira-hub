@@ -1,4 +1,5 @@
 import { prisma } from '../../../lib/prisma.js';
+import { encryptToken, decryptToken } from '../../../lib/crypto.js';
 
 export class AsanaIntegrationError extends Error {
   constructor(public statusCode: number, message: string, public details?: any) {
@@ -65,8 +66,8 @@ export class AsanaService {
   /**
    * Obtém token de acesso válido para a organização.
    * Prioridade:
-   * 1. Banco de dados (organization_integrations)
-   * 2. Variável de ambiente ASANA_ACCESS_TOKEN (fallback de sistema/PAT)
+   * 1. Banco de dados (organization_integrations com criptografia AES-256-GCM)
+   * 2. Fallback estrito de desenvolvimento (apenas se NODE_ENV !== 'production')
    */
   async getValidToken(organizationId: string): Promise<{ token: string; source: 'organization' | 'env'; workspaceId?: string | null }> {
     // 1. Consulta no banco
@@ -80,18 +81,23 @@ export class AsanaService {
     });
 
     if (orgIntegration?.accessToken) {
+      const plainAccessToken = decryptToken(orgIntegration.accessToken);
+      const plainRefreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
+
       // Verifica se o token expirou e possui refresh token
-      if (orgIntegration.expiresAt && orgIntegration.expiresAt < new Date() && orgIntegration.refreshToken) {
-        const refreshed = await this.refreshToken(orgIntegration.id, orgIntegration.refreshToken);
+      if (orgIntegration.expiresAt && orgIntegration.expiresAt < new Date() && plainRefreshToken) {
+        const refreshed = await this.refreshToken(orgIntegration.id, plainRefreshToken);
         return { token: refreshed.accessToken, source: 'organization', workspaceId: orgIntegration.workspaceId };
       }
-      return { token: orgIntegration.accessToken, source: 'organization', workspaceId: orgIntegration.workspaceId };
+      return { token: plainAccessToken, source: 'organization', workspaceId: orgIntegration.workspaceId };
     }
 
-    // 2. Fallback por variável de ambiente
-    const envToken = process.env.ASANA_ACCESS_TOKEN;
-    if (envToken) {
-      return { token: envToken, source: 'env' };
+    // 2. Fallback estrito para ambiente de desenvolvimento local (NUNCA em produção)
+    if (process.env.NODE_ENV !== 'production') {
+      const devToken = process.env.ASANA_DEV_PAT || process.env.ASANA_ACCESS_TOKEN;
+      if (devToken) {
+        return { token: devToken, source: 'env' };
+      }
     }
 
     throw new AsanaIntegrationError(400, 'A integração com o Asana não está configurada para esta organização.');
@@ -511,8 +517,8 @@ export class AsanaService {
     await prisma.organizationIntegration.update({
       where: { id: integrationId },
       data: {
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || refreshToken,
+        accessToken: encryptToken(data.access_token),
+        refreshToken: data.refresh_token ? encryptToken(data.refresh_token) : encryptToken(refreshToken),
         expiresAt,
         updatedAt: new Date(),
       },
@@ -548,12 +554,15 @@ export class AsanaService {
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
-      throw new AsanaIntegrationError(response.status, err.error_description || 'Falha ao autenticar com o Asana.', err);
+      throw new AsanaIntegrationError(response.status, err.error_description || 'Falha ao autenticar com o Asana.');
     }
 
     const tokenData = await response.json();
     const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
     const workspaceId = tokenData.data?.workspaces?.[0]?.gid || null;
+
+    const encryptedAccessToken = encryptToken(tokenData.access_token);
+    const encryptedRefreshToken = tokenData.refresh_token ? encryptToken(tokenData.refresh_token) : null;
 
     await prisma.organizationIntegration.upsert({
       where: {
@@ -565,8 +574,8 @@ export class AsanaService {
       create: {
         organizationId,
         provider: 'ASANA',
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || null,
+        accessToken: encryptedAccessToken,
+        refreshToken: encryptedRefreshToken,
         expiresAt,
         workspaceId,
         metadata: {
@@ -577,8 +586,8 @@ export class AsanaService {
         },
       },
       update: {
-        accessToken: tokenData.access_token,
-        refreshToken: tokenData.refresh_token || undefined,
+        accessToken: encryptedAccessToken,
+        refreshToken: encryptedRefreshToken || undefined,
         expiresAt,
         workspaceId,
         metadata: {

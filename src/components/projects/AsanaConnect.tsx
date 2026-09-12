@@ -20,12 +20,13 @@ export function AsanaConnect() {
         setIsWaitingCode(true);
         // Add listener for popup message
         const handleMessage = async (event: MessageEvent) => {
-            if (event.origin !== window.location.origin) return;
-            if (event.data.type === 'ASANA_AUTH_CODE' && event.data.code) {
+            if (event.data?.type === 'ASANA_AUTH_SUCCESS') {
+                toast.success("Asana conectado com sucesso!");
                 window.removeEventListener('message', handleMessage);
-                await performExchange(event.data.code);
-            } else if (event.data.type === 'ASANA_AUTH_ERROR') {
-                toast.error(`Erro: ${event.data.error}`);
+                setIsWaitingCode(false);
+                setTimeout(() => window.location.reload(), 1000);
+            } else if (event.data?.type === 'ASANA_AUTH_ERROR') {
+                toast.error(`Erro na conexão: ${event.data.error || 'Cancelado ou falhou'}`);
                 window.removeEventListener('message', handleMessage);
                 setIsWaitingCode(false);
             }
