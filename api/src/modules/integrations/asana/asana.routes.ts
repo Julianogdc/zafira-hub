@@ -10,6 +10,15 @@ const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
 });
 
+const updateTaskSchema = z.object({
+  name: z.string().min(1, 'O nome da tarefa não pode estar vazio').optional(),
+  notes: z.string().nullable().optional(),
+  completed: z.boolean().optional(),
+  due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
+  due_at: z.string().nullable().optional(),
+  assignee: z.string().nullable().optional(),
+});
+
 export const ASANA_OAUTH_SCOPES = [
   'attachments:read',
   'attachments:write',
@@ -154,6 +163,32 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
+  // 2.1 GET /integrations/asana/users (Lista membros válidos do workspace Asana para atribuição)
+  const getUsersHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const users = await asanaService.getWorkspaceUsers(organizationId);
+      return reply.status(200).send(users);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/integrations/asana/users',
+    {
+      preHandler: [authenticate],
+    },
+    getUsersHandler
+  );
+  app.get(
+    '/api/integrations/asana/users',
+    {
+      preHandler: [authenticate],
+    },
+    getUsersHandler
+  );
+
   // 3. GET /clients/:id/asana/projects
   app.get(
     '/clients/:id/asana/projects',
@@ -269,6 +304,41 @@ export async function asanaRoutes(app: FastifyInstance) {
       preHandler: [authenticate],
     },
     getSingleTaskHandler
+  );
+
+  // 6.2 PATCH /clients/:id/asana/tasks/:taskGid (Edição de tarefa com RBAC ADMIN/MANAGER)
+  const patchSingleTaskHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const parsedBody = updateTaskSchema.parse(request.body);
+      const updated = await asanaService.updateClientTask(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        parsedBody
+      );
+      return reply.status(200).send(updated);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.patch(
+    '/clients/:id/asana/tasks/:taskGid',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    patchSingleTaskHandler
+  );
+  app.patch(
+    '/api/clients/:id/asana/tasks/:taskGid',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    patchSingleTaskHandler
   );
 
   function getOAuthRedirectUri(): string {

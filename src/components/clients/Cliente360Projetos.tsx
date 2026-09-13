@@ -23,7 +23,9 @@ import {
   ClientAsanaTask,
   AsanaStatus,
   AsanaProjectSummary,
+  AsanaUser,
 } from '@/services/asana';
+import { AsanaTaskDetailSheet } from './AsanaTaskDetailSheet';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -93,6 +95,11 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   // Estados de sincronização em tempo real / segundo plano
   const [isSilentSyncing, setIsSilentSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
+  // Estados para Detalhe e Edição de Tarefa (Etapa 2A)
+  const [selectedTask, setSelectedTask] = useState<ClientAsanaTask | null>(null);
+  const [isDetailSheetOpen, setIsDetailSheetOpen] = useState(false);
+  const [workspaceUsers, setWorkspaceUsers] = useState<AsanaUser[]>([]);
 
   // Carregamento de dados (inicial e refetch geral)
   const loadData = useCallback(async (isInitial = false) => {
@@ -194,6 +201,18 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     }
   }, [status?.connected, projects.length]);
 
+  // Carrega membros válidos do workspace Asana para atribuição de responsável
+  useEffect(() => {
+    if (status?.connected) {
+      asanaIntegrationService
+        .getWorkspaceUsers()
+        .then(setWorkspaceUsers)
+        .catch((err) => {
+          console.warn('[Cliente360Projetos] Falha ao listar membros do workspace:', err);
+        });
+    }
+  }, [status?.connected]);
+
   // Conexão SSE em tempo real: recebe eventos da organização e atualiza silenciosamente
   useEffect(() => {
     if (!status?.connected) return;
@@ -210,6 +229,10 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
 
         try {
           const updatedTask = await asanaIntegrationService.getSingleTask(clientId, event.resourceGid);
+
+          if (updatedTask) {
+            setSelectedTask((curr) => (curr && curr.gid === updatedTask.gid ? updatedTask : curr));
+          }
 
           setTasks((prev) => {
             let nextTasks: ClientAsanaTask[];
@@ -767,7 +790,14 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
                   </TableHeader>
                   <TableBody>
                     {tasks.map((task) => (
-                      <TableRow key={task.gid} className="border-white/5 hover:bg-zinc-900/40">
+                      <TableRow
+                        key={task.gid}
+                        onClick={() => {
+                          setSelectedTask(task);
+                          setIsDetailSheetOpen(true);
+                        }}
+                        className="border-white/5 hover:bg-zinc-900/50 cursor-pointer transition-colors group"
+                      >
                         {/* Nome da Tarefa */}
                         <TableCell className="font-medium text-white max-w-xs truncate py-3">
                           {task.name}
@@ -850,7 +880,7 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
                         </TableCell>
 
                         {/* Link externo */}
-                        <TableCell className="text-right py-3">
+                        <TableCell className="text-right py-3" onClick={(e) => e.stopPropagation()}>
                           {task.permalinkUrl && (
                             <a
                               href={task.permalinkUrl}
@@ -984,6 +1014,39 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Drawer / Sheet de Detalhes e Edição de Tarefa Asana (Etapa 2A) */}
+      <AsanaTaskDetailSheet
+        isOpen={isDetailSheetOpen}
+        onClose={() => {
+          setIsDetailSheetOpen(false);
+          setSelectedTask(null);
+        }}
+        task={selectedTask}
+        clientId={clientId}
+        canManage={canManage}
+        workspaceUsers={workspaceUsers}
+        onTaskUpdated={(updatedTask) => {
+          setTasks((prev) => {
+            const next = prev.map((t) => (t.gid === updatedTask.gid ? updatedTask : t));
+            return sortTasks(next);
+          });
+          setSelectedTask(updatedTask);
+          setProjects((prevProjects) =>
+            prevProjects.map((p) => {
+              if (p.projectGid === updatedTask.projectGid) {
+                const nextTasks = tasks.map((t) => (t.gid === updatedTask.gid ? updatedTask : t));
+                const projTasks = nextTasks.filter((t) => t.projectGid === p.projectGid);
+                const totalTasks = projTasks.length;
+                const completedTasks = projTasks.filter((t) => t.completed).length;
+                const pendingTasks = projTasks.filter((t) => !t.completed).length;
+                const overdueTasks = projTasks.filter((t) => t.isOverdue).length;
+                return { ...p, totalTasks, completedTasks, pendingTasks, overdueTasks };
+              }
+              return p;
+            })
+          );
+        }}
+      />
     </div>
   );
 }

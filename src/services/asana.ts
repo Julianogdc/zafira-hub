@@ -34,14 +34,44 @@ export interface ClientAsanaProject {
   createdAt: string;
 }
 
+export interface AsanaTag {
+  gid: string;
+  name: string;
+}
+
+export interface AsanaCustomField {
+  gid: string;
+  name: string;
+  value: string;
+  type: string;
+}
+
+export interface AsanaUser {
+  gid: string;
+  name: string;
+  email?: string | null;
+  photoUrl?: string | null;
+}
+
+export interface UpdateAsanaTaskInput {
+  name?: string;
+  notes?: string | null;
+  completed?: boolean;
+  due_on?: string | null;
+  due_at?: string | null;
+  assignee?: string | null;
+}
+
 export interface ClientAsanaTask {
   gid: string;
   name: string;
+  notes?: string | null;
   completed: boolean;
   dueOn: string | null;
   dueAt: string | null;
   isOverdue: boolean;
   sectionName?: string | null;
+  sectionGid?: string | null;
   assignee?: {
     gid: string;
     name: string;
@@ -50,6 +80,8 @@ export interface ClientAsanaTask {
   permalinkUrl?: string | null;
   projectGid: string;
   projectName: string;
+  tags?: AsanaTag[];
+  customFields?: AsanaCustomField[];
 }
 
 export const asanaIntegrationService = {
@@ -100,6 +132,20 @@ export const asanaIntegrationService = {
    */
   async getSingleTask(clientId: string, taskGid: string): Promise<ClientAsanaTask | null> {
     return api.get<ClientAsanaTask | null>(`/clients/${clientId}/asana/tasks/${taskGid}`);
+  },
+
+  /**
+   * Atualiza os dados de uma tarefa existente no Asana (name, notes, completed, due_on, due_at, assignee)
+   */
+  async updateTask(clientId: string, taskGid: string, data: UpdateAsanaTaskInput): Promise<ClientAsanaTask> {
+    return api.patch<ClientAsanaTask>(`/clients/${clientId}/asana/tasks/${taskGid}`, data);
+  },
+
+  /**
+   * Retorna os membros válidos do workspace Asana para seleção de responsável
+   */
+  async getWorkspaceUsers(): Promise<AsanaUser[]> {
+    return api.get<AsanaUser[]>('/integrations/asana/users');
   },
 
   /**

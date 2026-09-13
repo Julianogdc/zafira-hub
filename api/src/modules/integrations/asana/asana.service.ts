@@ -44,14 +44,35 @@ export interface ClientAsanaProject {
   createdAt: Date;
 }
 
+export interface AsanaTag {
+  gid: string;
+  name: string;
+}
+
+export interface AsanaCustomField {
+  gid: string;
+  name: string;
+  value: string;
+  type: string;
+}
+
+export interface AsanaUser {
+  gid: string;
+  name: string;
+  email?: string | null;
+  photoUrl?: string | null;
+}
+
 export interface ClientAsanaTask {
   gid: string;
   name: string;
+  notes?: string | null;
   completed: boolean;
   dueOn: string | null;
   dueAt: string | null;
   isOverdue: boolean;
   sectionName?: string | null;
+  sectionGid?: string | null;
   assignee?: {
     gid: string;
     name: string;
@@ -60,6 +81,8 @@ export interface ClientAsanaTask {
   permalinkUrl?: string | null;
   projectGid: string;
   projectName: string;
+  tags?: AsanaTag[];
+  customFields?: AsanaCustomField[];
 }
 
 export class AsanaService {
@@ -507,7 +530,8 @@ export class AsanaService {
   }
 
   /**
-   * Busca os dados atualizados de uma única tarefa no Asana para atualização pontual e ultra rápida.
+   * Busca os dados detalhados de uma única tarefa no Asana.
+   * Valida estritamente se a tarefa pertence a um dos projetos vinculados ao cliente.
    */
   async getClientSingleTask(
     clientId: string,
@@ -532,11 +556,19 @@ export class AsanaService {
 
     try {
       const t = await this.fetchAsana<any>(
-        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo,memberships.section.name,permalink_url,projects.gid,projects.name`,
+        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype`,
         token
       );
 
       if (!t || !t.gid) return null;
+
+      const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+      const matchingProject = t.projects?.find((p: any) => clientProjectGids.has(p.gid));
+
+      // Validação estrita de pertencimento: impede acesso a tarefas fora dos projetos vinculados ao cliente
+      if (!matchingProject) {
+        throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos Asana vinculados a este cliente.');
+      }
 
       let isOverdue = false;
       if (!t.completed && (t.due_on || t.due_at)) {
@@ -548,21 +580,37 @@ export class AsanaService {
 
       const sectionMembership = t.memberships?.find((m: any) => m.section?.name);
       const sectionName = sectionMembership?.section?.name || null;
+      const sectionGid = sectionMembership?.section?.gid || null;
 
-      const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
-      const matchingProject = t.projects?.find((p: any) => clientProjectGids.has(p.gid));
-      const projectGid = matchingProject?.gid || client.integrations[0].externalId;
+      const projectGid = matchingProject.gid;
       const meta = (client.integrations.find((i) => i.externalId === projectGid)?.metadata as any) || {};
-      const projectName = matchingProject?.name || meta.projectName || `Projeto ${projectGid}`;
+      const projectName = matchingProject.name || meta.projectName || `Projeto ${projectGid}`;
+
+      const tags: AsanaTag[] = Array.isArray(t.tags)
+        ? t.tags.map((tag: any) => ({ gid: tag.gid, name: tag.name }))
+        : [];
+
+      const customFields: AsanaCustomField[] = Array.isArray(t.custom_fields)
+        ? t.custom_fields
+            .filter((cf: any) => cf.display_value !== null && cf.display_value !== undefined && cf.display_value !== '')
+            .map((cf: any) => ({
+              gid: cf.gid,
+              name: cf.name,
+              value: String(cf.display_value),
+              type: cf.resource_subtype || 'text',
+            }))
+        : [];
 
       return {
         gid: t.gid,
         name: t.name,
+        notes: t.notes || null,
         completed: t.completed || false,
         dueOn: t.due_on || null,
         dueAt: t.due_at || null,
         isOverdue,
         sectionName,
+        sectionGid,
         assignee: t.assignee
           ? {
               gid: t.assignee.gid,
@@ -573,12 +621,123 @@ export class AsanaService {
         permalinkUrl: t.permalink_url || `https://app.asana.com/0/${projectGid}/${t.gid}`,
         projectGid,
         projectName,
+        tags,
+        customFields,
       };
     } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) {
+        throw err;
+      }
       if (err?.statusCode === 404) {
         return null;
       }
       throw err;
+    }
+  }
+
+  /**
+   * Atualiza uma tarefa existente no Asana.
+   * Validação prévia de pertencimento obrigatória (ADMIN/MANAGER).
+   */
+  async updateClientTask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    data: {
+      name?: string;
+      notes?: string | null;
+      completed?: boolean;
+      due_on?: string | null;
+      due_at?: string | null;
+      assignee?: string | null;
+    }
+  ): Promise<ClientAsanaTask> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Cliente ou projetos vinculados não encontrados.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+
+    // Validação de pertencimento no Asana
+    const existing = await this.fetchAsana<any>(`/tasks/${taskGid}?opt_fields=projects.gid`, token);
+    if (!existing || !existing.gid) {
+      throw new AsanaIntegrationError(404, 'Tarefa não encontrada no Asana.');
+    }
+
+    const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+    const belongsToClient = existing.projects?.some((p: any) => clientProjectGids.has(p.gid));
+
+    if (!belongsToClient) {
+      throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos vinculados a este cliente.');
+    }
+
+    const payloadData: Record<string, any> = {};
+    if (data.name !== undefined) payloadData.name = data.name;
+    if (data.notes !== undefined) payloadData.notes = data.notes ?? '';
+    if (data.completed !== undefined) payloadData.completed = data.completed;
+    if (data.due_on !== undefined) payloadData.due_on = data.due_on;
+    if (data.due_at !== undefined) payloadData.due_at = data.due_at;
+    if (data.assignee !== undefined) payloadData.assignee = data.assignee;
+
+    if (Object.keys(payloadData).length > 0) {
+      await this.fetchAsana(`/tasks/${taskGid}`, token, {
+        method: 'PUT',
+        body: JSON.stringify({ data: payloadData }),
+      });
+    }
+
+    const updated = await this.getClientSingleTask(clientId, organizationId, taskGid);
+    if (!updated) {
+      throw new AsanaIntegrationError(500, 'Não foi possível recuperar a tarefa atualizada do Asana.');
+    }
+
+    return updated;
+  }
+
+  /**
+   * Retorna os membros do workspace Asana para atribuição de responsável.
+   */
+  async getWorkspaceUsers(organizationId: string): Promise<AsanaUser[]> {
+    const { token, workspaceId: storedWorkspaceId } = await this.getValidToken(organizationId);
+
+    let workspaceId = storedWorkspaceId;
+    if (!workspaceId) {
+      const workspaces = await this.fetchAsana<any[]>('/workspaces', token);
+      workspaceId = workspaces?.[0]?.gid;
+    }
+
+    if (!workspaceId) {
+      return [];
+    }
+
+    try {
+      const users = await this.fetchAsana<any[]>(
+        `/workspaces/${workspaceId}/users?opt_fields=name,email,photo.image_60x60`,
+        token
+      );
+
+      if (!Array.isArray(users)) return [];
+
+      return users
+        .map((u) => ({
+          gid: u.gid,
+          name: u.name,
+          email: u.email || null,
+          photoUrl: u.photo?.image_60x60 || null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      console.warn('[AsanaService] Falha ao obter usuários do workspace:', err);
+      return [];
     }
   }
 
