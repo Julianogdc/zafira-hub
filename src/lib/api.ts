@@ -14,21 +14,42 @@ export class ApiError extends Error {
 /**
  * Cliente HTTP central para comunicação com a API do Zafira Hub 2.0.
  * Utiliza credentials: 'include' para envio e recepção segura de cookies HTTP-only.
+ * Gerencia Content-Type dinamicamente, evitando cabeçalhos desnecessários em requisições sem body.
  */
 export async function apiFetch<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL.replace(/\/$/, '')}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
-  const defaultHeaders: HeadersInit = {
-    'Content-Type': 'application/json',
-  };
+  const headers: Record<string, string> = {};
+
+  // Detecta tipos especiais onde o navegador deve definir o Content-Type (ex: multipart com boundary)
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const isUrlSearchParams = typeof URLSearchParams !== 'undefined' && options.body instanceof URLSearchParams;
+  const isBlob = typeof Blob !== 'undefined' && options.body instanceof Blob;
+
+  // Apenas define Content-Type: application/json se houver body presente e não for tipo especial
+  if (options.body !== undefined && options.body !== null && !isFormData && !isUrlSearchParams && !isBlob) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  // Mescla headers customizados informados na chamada
+  if (options.headers) {
+    if (options.headers instanceof Headers) {
+      options.headers.forEach((value, key) => {
+        headers[key] = value;
+      });
+    } else if (Array.isArray(options.headers)) {
+      options.headers.forEach(([key, value]) => {
+        headers[key] = value;
+      });
+    } else {
+      Object.assign(headers, options.headers);
+    }
+  }
 
   const config: RequestInit = {
     ...options,
     credentials: 'include', // Obrigatório para cookies HTTP-only de sessão
-    headers: {
-      ...defaultHeaders,
-      ...options.headers,
-    },
+    headers,
   };
 
   try {
@@ -57,24 +78,45 @@ export async function apiFetch<T = any>(endpoint: string, options: RequestInit =
 export const api = {
   get: <T = any>(endpoint: string, options?: RequestInit) =>
     apiFetch<T>(endpoint, { ...options, method: 'GET' }),
-  post: <T = any>(endpoint: string, body?: any, options?: RequestInit) =>
-    apiFetch<T>(endpoint, {
+  post: <T = any>(endpoint: string, body?: any, options?: RequestInit) => {
+    const isSpecialBody =
+      (typeof FormData !== 'undefined' && body instanceof FormData) ||
+      (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+      (typeof Blob !== 'undefined' && body instanceof Blob) ||
+      typeof body === 'string';
+
+    return apiFetch<T>(endpoint, {
       ...options,
       method: 'POST',
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }),
-  patch: <T = any>(endpoint: string, body?: any, options?: RequestInit) =>
-    apiFetch<T>(endpoint, {
+      body: body !== undefined ? (isSpecialBody ? body : JSON.stringify(body)) : undefined,
+    });
+  },
+  patch: <T = any>(endpoint: string, body?: any, options?: RequestInit) => {
+    const isSpecialBody =
+      (typeof FormData !== 'undefined' && body instanceof FormData) ||
+      (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+      (typeof Blob !== 'undefined' && body instanceof Blob) ||
+      typeof body === 'string';
+
+    return apiFetch<T>(endpoint, {
       ...options,
       method: 'PATCH',
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }),
-  put: <T = any>(endpoint: string, body?: any, options?: RequestInit) =>
-    apiFetch<T>(endpoint, {
+      body: body !== undefined ? (isSpecialBody ? body : JSON.stringify(body)) : undefined,
+    });
+  },
+  put: <T = any>(endpoint: string, body?: any, options?: RequestInit) => {
+    const isSpecialBody =
+      (typeof FormData !== 'undefined' && body instanceof FormData) ||
+      (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) ||
+      (typeof Blob !== 'undefined' && body instanceof Blob) ||
+      typeof body === 'string';
+
+    return apiFetch<T>(endpoint, {
       ...options,
       method: 'PUT',
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    }),
+      body: body !== undefined ? (isSpecialBody ? body : JSON.stringify(body)) : undefined,
+    });
+  },
   delete: <T = any>(endpoint: string, options?: RequestInit) =>
     apiFetch<T>(endpoint, { ...options, method: 'DELETE' }),
 };
