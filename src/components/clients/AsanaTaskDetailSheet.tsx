@@ -106,6 +106,17 @@ export function AsanaTaskDetailSheet({
   const [newCommentText, setNewCommentText] = useState('');
   const [isPostingComment, setIsPostingComment] = useState(false);
 
+  // Tags do workspace e gerenciamento
+  const [workspaceTags, setWorkspaceTags] = useState<AsanaTag[]>([]);
+  const [isAddingTag, setIsAddingTag] = useState(false);
+
+  // Dependências da Tarefa
+  const [dependencies, setDependencies] = useState<AsanaDependency[]>([]);
+  const [isLoadingDependencies, setIsLoadingDependencies] = useState(false);
+
+  // Valores de Campos Personalizados editados
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
+
   // Aba ativa
   const [activeTab, setActiveTab] = useState<'geral' | 'subtarefas' | 'anexos' | 'atividades'>('geral');
 
@@ -125,6 +136,21 @@ export function AsanaTaskDetailSheet({
       setDueOn(task.dueOn ? task.dueOn.split('T')[0] : '');
       setAssigneeGid(task.assignee?.gid || 'unassigned');
       setSectionGid(task.sectionGid || 'none');
+      setCustomFieldValues({});
+
+      // Busca tags do workspace
+      asanaIntegrationService
+        .getWorkspaceTags()
+        .then((tags) => setWorkspaceTags(tags))
+        .catch(() => {});
+
+      // Busca dependências da tarefa
+      setIsLoadingDependencies(true);
+      asanaIntegrationService
+        .getTaskDependencies(clientId, task.gid)
+        .then((deps) => setDependencies(deps))
+        .catch(() => {})
+        .finally(() => setIsLoadingDependencies(false));
 
       // Busca seções do projeto correspondente
       if (task.projectGid) {
@@ -305,6 +331,7 @@ export function AsanaTaskDetailSheet({
       notes: notes.trim(),
       due_on: dueOn || null,
       assignee: assigneeGid === 'unassigned' ? null : assigneeGid,
+      custom_fields: Object.keys(customFieldValues).length > 0 ? customFieldValues : undefined,
     };
 
     try {
@@ -325,6 +352,72 @@ export function AsanaTaskDetailSheet({
       toast.error(`Falha ao salvar alterações: ${err?.message || 'Erro no Asana'}`);
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  // Adicionar Tag à Tarefa
+  const handleAddTag = async (tagGid: string) => {
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem vincular tags.');
+      return;
+    }
+    if (!tagGid) return;
+    const tagToAdd = workspaceTags.find((t) => t.gid === tagGid);
+    if (!tagToAdd) return;
+
+    if (currentTask.tags?.some((t) => t.gid === tagGid)) {
+      toast.info('Esta tag já está vinculada à tarefa.');
+      return;
+    }
+
+    const previousTags = currentTask.tags || [];
+    const newTags = [...previousTags, tagToAdd];
+
+    // Optimistic update
+    const optimisticTask = { ...currentTask, tags: newTags };
+    setFullTask(optimisticTask);
+    onTaskUpdated(optimisticTask);
+
+    try {
+      setIsAddingTag(true);
+      await asanaIntegrationService.addTagToTask(clientId, currentTask.gid, tagGid);
+      toast.success(`Tag #${tagToAdd.name} vinculada!`);
+    } catch (err: any) {
+      // Rollback
+      const rollbackTask = { ...currentTask, tags: previousTags };
+      setFullTask(rollbackTask);
+      onTaskUpdated(rollbackTask);
+      toast.error(`Falha ao vincular tag: ${err?.message || 'Erro no Asana'}`);
+    } finally {
+      setIsAddingTag(false);
+    }
+  };
+
+  // Remover Tag da Tarefa
+  const handleRemoveTag = async (tagGid: string) => {
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem remover tags.');
+      return;
+    }
+
+    const previousTags = currentTask.tags || [];
+    const targetTag = previousTags.find((t) => t.gid === tagGid);
+    const newTags = previousTags.filter((t) => t.gid !== tagGid);
+
+    // Optimistic update
+    const optimisticTask = { ...currentTask, tags: newTags };
+    setFullTask(optimisticTask);
+    onTaskUpdated(optimisticTask);
+
+    try {
+      await asanaIntegrationService.removeTagFromTask(clientId, currentTask.gid, tagGid);
+      toast.success(`Tag #${targetTag?.name || ''} removida!`);
+    } catch (err: any) {
+      // Rollback
+      const rollbackTask = { ...currentTask, tags: previousTags };
+      setFullTask(rollbackTask);
+      onTaskUpdated(rollbackTask);
+      toast.error(`Falha ao remover tag: ${err?.message || 'Erro no Asana'}`);
     }
   };
 
@@ -777,41 +870,197 @@ export function AsanaTaskDetailSheet({
               </div>
 
               {/* Tags */}
-              {currentTask.tags && currentTask.tags.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-white/5">
+              <div className="space-y-2 pt-2 border-t border-white/5">
+                <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                     <Tag className="w-3.5 h-3.5 text-zinc-500" />
-                    Tags ({currentTask.tags.length})
+                    Tags ({currentTask.tags?.length || 0})
                   </label>
-                  <div className="flex flex-wrap gap-1.5">
-                    {currentTask.tags.map((tag) => (
+
+                  {/* Seletor de adição de Tag */}
+                  {canManage && workspaceTags.length > 0 && (
+                    <Select
+                      value=""
+                      onValueChange={(tagGid) => handleAddTag(tagGid)}
+                      disabled={isAddingTag}
+                    >
+                      <SelectTrigger className="bg-zinc-800/60 border-white/10 text-zinc-300 text-[11px] h-6 px-2 gap-1 font-normal hover:bg-zinc-800 w-auto">
+                        <Plus className="w-3 h-3 text-emerald-400" />
+                        <span>Adicionar tag</span>
+                        {isAddingTag && <Loader2 className="w-2.5 h-2.5 animate-spin text-emerald-400 ml-1" />}
+                      </SelectTrigger>
+                      <SelectContent className="bg-zinc-900 border-white/10 text-zinc-200">
+                        {workspaceTags
+                          .filter((wt) => !currentTask.tags?.some((t) => t.gid === wt.gid))
+                          .map((wt) => (
+                            <SelectItem key={wt.gid} value={wt.gid} className="text-xs">
+                              #{wt.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {currentTask.tags && currentTask.tags.length > 0 ? (
+                    currentTask.tags.map((tag) => (
                       <Badge
                         key={tag.gid}
                         variant="outline"
-                        className="bg-white/5 border-white/10 text-zinc-300 text-[11px] py-0.5 px-2 font-normal"
+                        className="bg-white/5 border-white/10 text-zinc-300 text-[11px] py-0.5 pl-2 pr-1 font-normal flex items-center gap-1"
                       >
                         #{tag.name}
+                        {canManage && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveTag(tag.gid)}
+                            className="text-zinc-500 hover:text-red-400 rounded p-0.5 transition-colors"
+                            title="Remover tag"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        )}
                       </Badge>
-                    ))}
-                  </div>
+                    ))
+                  ) : (
+                    <span className="text-zinc-500 text-xs italic">Nenhuma tag vinculada.</span>
+                  )}
                 </div>
-              )}
+              </div>
 
-              {/* Campos Personalizados */}
+              {/* Campos Personalizados (Editáveis) */}
               {currentTask.customFields && currentTask.customFields.length > 0 && (
                 <div className="space-y-2 pt-2 border-t border-white/5">
                   <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                     <Sliders className="w-3.5 h-3.5 text-zinc-500" />
                     Campos Personalizados ({currentTask.customFields.length})
                   </label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {currentTask.customFields.map((cf) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {currentTask.customFields.map((cf) => {
+                      const hasEnumOptions = Array.isArray(cf.enumOptions) && cf.enumOptions.length > 0;
+                      const currentValue =
+                        customFieldValues[cf.gid] !== undefined
+                          ? customFieldValues[cf.gid]
+                          : hasEnumOptions
+                          ? cf.enumValue?.gid || 'none'
+                          : cf.value || '';
+
+                      return (
+                        <div
+                          key={cf.gid}
+                          className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 space-y-1.5"
+                        >
+                          <p className="text-[11px] font-medium text-zinc-400 truncate">{cf.name}</p>
+
+                          {hasEnumOptions && canManage ? (
+                            <Select
+                              value={currentValue}
+                              onValueChange={(val) => {
+                                const targetOpt = cf.enumOptions?.find((o) => o.gid === val);
+                                setCustomFieldValues((prev) => ({
+                                  ...prev,
+                                  [cf.gid]: val === 'none' ? null : val,
+                                }));
+                                if (fullTask) {
+                                  const updatedFields = fullTask.customFields?.map((f) =>
+                                    f.gid === cf.gid
+                                      ? {
+                                          ...f,
+                                          value: targetOpt?.name || '',
+                                          enumValue: targetOpt
+                                            ? { gid: targetOpt.gid, name: targetOpt.name }
+                                            : null,
+                                        }
+                                      : f
+                                  );
+                                  setFullTask({ ...fullTask, customFields: updatedFields });
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="bg-zinc-900 border-white/10 text-xs h-8 text-zinc-200">
+                                <SelectValue placeholder="Selecione uma opção" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-zinc-900 border-white/10 text-zinc-200">
+                                <SelectItem value="none" className="text-zinc-500 text-xs">
+                                  Nenhum
+                                </SelectItem>
+                                {cf.enumOptions?.map((opt) => (
+                                  <SelectItem key={opt.gid} value={opt.gid} className="text-xs">
+                                    {opt.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : canManage ? (
+                            <Input
+                              value={currentValue}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setCustomFieldValues((prev) => ({ ...prev, [cf.gid]: val }));
+                                if (fullTask) {
+                                  const updatedFields = fullTask.customFields?.map((f) =>
+                                    f.gid === cf.gid ? { ...f, value: val } : f
+                                  );
+                                  setFullTask({ ...fullTask, customFields: updatedFields });
+                                }
+                              }}
+                              placeholder="Valor do campo"
+                              className="bg-zinc-900 border-white/10 text-xs h-8 text-zinc-200 px-2"
+                            />
+                          ) : (
+                            <p className="text-xs text-zinc-200 font-medium truncate">
+                              {cf.value || <span className="text-zinc-600 italic">Não preenchido</span>}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Dependências de Tarefa */}
+              {dependencies.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-zinc-500" />
+                    Dependências ({dependencies.length})
+                  </label>
+                  <div className="space-y-1.5">
+                    {dependencies.map((dep) => (
                       <div
-                        key={cf.gid}
-                        className="p-2.5 rounded-lg bg-zinc-900/40 border border-white/5 space-y-0.5"
+                        key={dep.gid}
+                        className="flex items-center justify-between p-2 rounded-lg bg-zinc-900/40 border border-white/5 text-xs"
                       >
-                        <p className="text-[10px] text-zinc-500 truncate">{cf.name}</p>
-                        <p className="text-xs font-medium text-zinc-200 truncate">{cf.value}</p>
+                        <div className="flex items-center gap-2">
+                          <Badge
+                            variant="outline"
+                            className={
+                              dep.relationship === 'blocking'
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px]'
+                                : 'bg-blue-500/10 text-blue-400 border-blue-500/20 text-[10px]'
+                            }
+                          >
+                            {dep.relationship === 'blocking' ? 'Bloqueia esta' : 'Bloqueada por esta'}
+                          </Badge>
+                          <span
+                            className={`truncate ${
+                              dep.completed ? 'line-through text-zinc-500' : 'text-zinc-200'
+                            }`}
+                          >
+                            {dep.name}
+                          </span>
+                        </div>
+                        {dep.completed ? (
+                          <Badge variant="outline" className="text-emerald-400 border-emerald-500/20 text-[10px]">
+                            Concluída
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-zinc-400 border-white/10 text-[10px]">
+                            Pendente
+                          </Badge>
+                        )}
                       </div>
                     ))}
                   </div>

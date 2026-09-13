@@ -18,6 +18,7 @@ const updateTaskSchema = z.object({
   due_at: z.string().nullable().optional(),
   assignee: z.string().nullable().optional(),
   sectionGid: z.string().nullable().optional(),
+  custom_fields: z.record(z.string(), z.any()).optional(),
 });
 
 export const ASANA_OAUTH_SCOPES = [
@@ -630,6 +631,131 @@ export async function asanaRoutes(app: FastifyInstance) {
       preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
     },
     postAttachmentHandler
+  );
+
+  // 6.8 Tags: GET workspace tags, POST add tag, DELETE remove tag
+  const getWorkspaceTagsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const tags = await asanaService.getWorkspaceTags(organizationId);
+      return reply.status(200).send(tags);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/integrations/asana/tags',
+    {
+      preHandler: [authenticate],
+    },
+    getWorkspaceTagsHandler
+  );
+  app.get(
+    '/api/integrations/asana/tags',
+    {
+      preHandler: [authenticate],
+    },
+    getWorkspaceTagsHandler
+  );
+
+  const addTagSchema = z.object({
+    tagGid: z.string().min(1, 'O gid da tag é obrigatório'),
+  });
+
+  const postTagHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const { tagGid } = addTagSchema.parse(request.body);
+      await asanaService.addTagToTask(request.params.id, organizationId, request.params.taskGid, tagGid);
+      return reply.status(200).send({ status: 'ok', message: 'Tag vinculada com sucesso.' });
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks/:taskGid/tags',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postTagHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks/:taskGid/tags',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postTagHandler
+  );
+
+  const deleteTagHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string; tagGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      await asanaService.removeTagFromTask(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        request.params.tagGid
+      );
+      return reply.status(200).send({ status: 'ok', message: 'Tag desvinculada com sucesso.' });
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.delete(
+    '/clients/:id/asana/tasks/:taskGid/tags/:tagGid',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    deleteTagHandler
+  );
+  app.delete(
+    '/api/clients/:id/asana/tasks/:taskGid/tags/:tagGid',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    deleteTagHandler
+  );
+
+  // 6.9 Dependências: GET
+  const getDependenciesHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const dependencies = await asanaService.getTaskDependencies(
+        request.params.id,
+        organizationId,
+        request.params.taskGid
+      );
+      return reply.status(200).send(dependencies);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/clients/:id/asana/tasks/:taskGid/dependencies',
+    {
+      preHandler: [authenticate],
+    },
+    getDependenciesHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks/:taskGid/dependencies',
+    {
+      preHandler: [authenticate],
+    },
+    getDependenciesHandler
   );
 
   function getOAuthRedirectUri(): string {

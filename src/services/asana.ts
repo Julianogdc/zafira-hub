@@ -39,11 +39,29 @@ export interface AsanaTag {
   name: string;
 }
 
+export interface AsanaEnumOption {
+  gid: string;
+  name: string;
+  color?: string | null;
+  enabled?: boolean;
+}
+
 export interface AsanaCustomField {
   gid: string;
   name: string;
   value: string;
   type: string;
+  textValue?: string | null;
+  numberValue?: number | null;
+  enumOptions?: AsanaEnumOption[];
+  enumValue?: { gid: string; name: string; color?: string | null } | null;
+}
+
+export interface AsanaDependency {
+  gid: string;
+  name: string;
+  completed: boolean;
+  relationship: 'blocking' | 'dependent';
 }
 
 export interface AsanaUser {
@@ -103,6 +121,7 @@ export interface UpdateAsanaTaskInput {
   due_at?: string | null;
   assignee?: string | null;
   sectionGid?: string | null;
+  custom_fields?: Record<string, any>;
 }
 
 export interface ClientAsanaTask {
@@ -244,6 +263,34 @@ export const asanaIntegrationService = {
     const formData = new FormData();
     formData.append('file', file);
     return api.post<AsanaAttachment>(`/clients/${clientId}/asana/tasks/${taskGid}/attachments`, formData);
+  },
+
+  /**
+   * Busca tags do workspace Asana
+   */
+  async getWorkspaceTags(): Promise<AsanaTag[]> {
+    return api.get<AsanaTag[]>('/integrations/asana/tags');
+  },
+
+  /**
+   * Adiciona uma tag à tarefa no Asana
+   */
+  async addTagToTask(clientId: string, taskGid: string, tagGid: string): Promise<void> {
+    return api.post(`/clients/${clientId}/asana/tasks/${taskGid}/tags`, { tagGid });
+  },
+
+  /**
+   * Remove uma tag de uma tarefa no Asana
+   */
+  async removeTagFromTask(clientId: string, taskGid: string, tagGid: string): Promise<void> {
+    return api.delete(`/clients/${clientId}/asana/tasks/${taskGid}/tags/${tagGid}`);
+  },
+
+  /**
+   * Busca dependências da tarefa (bloqueantes e dependentes)
+   */
+  async getTaskDependencies(clientId: string, taskGid: string): Promise<AsanaDependency[]> {
+    return api.get<AsanaDependency[]>(`/clients/${clientId}/asana/tasks/${taskGid}/dependencies`);
   },
 
   /**

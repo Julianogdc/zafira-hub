@@ -54,11 +54,29 @@ export interface AsanaSection {
   name: string;
 }
 
+export interface AsanaEnumOption {
+  gid: string;
+  name: string;
+  color?: string | null;
+  enabled?: boolean;
+}
+
 export interface AsanaCustomField {
   gid: string;
   name: string;
   value: string;
   type: string;
+  textValue?: string | null;
+  numberValue?: number | null;
+  enumOptions?: AsanaEnumOption[];
+  enumValue?: { gid: string; name: string; color?: string | null } | null;
+}
+
+export interface AsanaDependency {
+  gid: string;
+  name: string;
+  completed: boolean;
+  relationship: 'blocking' | 'dependent';
 }
 
 export interface AsanaSubtask {
@@ -600,7 +618,7 @@ export class AsanaService {
 
     try {
       const t = await this.fetchAsana<any>(
-        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype`,
+        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_options.name,custom_fields.enum_options.color,custom_fields.enum_options.enabled,custom_fields.enum_value.name,custom_fields.enum_value.color`,
         token
       );
 
@@ -635,14 +653,29 @@ export class AsanaService {
         : [];
 
       const customFields: AsanaCustomField[] = Array.isArray(t.custom_fields)
-        ? t.custom_fields
-            .filter((cf: any) => cf.display_value !== null && cf.display_value !== undefined && cf.display_value !== '')
-            .map((cf: any) => ({
-              gid: cf.gid,
-              name: cf.name,
-              value: String(cf.display_value),
-              type: cf.resource_subtype || 'text',
-            }))
+        ? t.custom_fields.map((cf: any) => ({
+            gid: cf.gid,
+            name: cf.name,
+            value: cf.display_value !== null && cf.display_value !== undefined ? String(cf.display_value) : '',
+            type: cf.resource_subtype || 'text',
+            textValue: cf.text_value ?? null,
+            numberValue: typeof cf.number_value === 'number' ? cf.number_value : null,
+            enumOptions: Array.isArray(cf.enum_options)
+              ? cf.enum_options.map((opt: any) => ({
+                  gid: opt.gid,
+                  name: opt.name,
+                  color: opt.color || null,
+                  enabled: opt.enabled ?? true,
+                }))
+              : undefined,
+            enumValue: cf.enum_value
+              ? {
+                  gid: cf.enum_value.gid,
+                  name: cf.enum_value.name,
+                  color: cf.enum_value.color || null,
+                }
+              : null,
+          }))
         : [];
 
       return {
@@ -694,6 +727,8 @@ export class AsanaService {
       due_on?: string | null;
       due_at?: string | null;
       assignee?: string | null;
+      sectionGid?: string | null;
+      custom_fields?: Record<string, any>;
     }
   ): Promise<ClientAsanaTask> {
     const client = await prisma.client.findFirst({
@@ -731,6 +766,9 @@ export class AsanaService {
     if (data.due_on !== undefined) payloadData.due_on = data.due_on;
     if (data.due_at !== undefined) payloadData.due_at = data.due_at;
     if (data.assignee !== undefined) payloadData.assignee = data.assignee;
+    if (data.custom_fields && typeof data.custom_fields === 'object') {
+      payloadData.custom_fields = data.custom_fields;
+    }
 
     if (Object.keys(payloadData).length > 0) {
       await this.fetchAsana(`/tasks/${taskGid}`, token, {
@@ -1146,6 +1184,105 @@ export class AsanaService {
       size: typeof att.size === 'number' ? att.size : fileBuffer.length,
       createdAt: att.created_at || new Date().toISOString(),
     };
+  }
+
+  /**
+   * Adiciona uma tag a uma tarefa no Asana
+   */
+  async addTagToTask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    tagGid: string
+  ): Promise<void> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+    await this.fetchAsana(`/tasks/${taskGid}/addTag`, token, {
+      method: 'POST',
+      body: JSON.stringify({ data: { tag: tagGid } }),
+    });
+  }
+
+  /**
+   * Remove uma tag de uma tarefa no Asana
+   */
+  async removeTagFromTask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    tagGid: string
+  ): Promise<void> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+    await this.fetchAsana(`/tasks/${taskGid}/removeTag`, token, {
+      method: 'POST',
+      body: JSON.stringify({ data: { tag: tagGid } }),
+    });
+  }
+
+  /**
+   * Lista tags disponíveis no workspace do Asana
+   */
+  async getWorkspaceTags(organizationId: string): Promise<AsanaTag[]> {
+    const { token, workspaceId: storedWorkspaceId } = await this.getValidToken(organizationId);
+    let workspaceId = storedWorkspaceId;
+    if (!workspaceId) {
+      const workspaces = await this.fetchAsana<any[]>('/workspaces', token);
+      workspaceId = workspaces?.[0]?.gid;
+    }
+    if (!workspaceId) return [];
+
+    try {
+      const tags = await this.fetchAsana<any[]>(`/workspaces/${workspaceId}/tags?opt_fields=name`, token);
+      if (!Array.isArray(tags)) return [];
+      return tags.map((t) => ({ gid: t.gid, name: t.name }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Lista dependências (tarefas que bloqueiam e tarefas bloqueadas por esta)
+   */
+  async getTaskDependencies(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaDependency[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const [dependencies, dependents] = await Promise.all([
+        this.fetchAsana<any[]>(`/tasks/${taskGid}/dependencies?opt_fields=name,completed`, token).catch(() => []),
+        this.fetchAsana<any[]>(`/tasks/${taskGid}/dependents?opt_fields=name,completed`, token).catch(() => []),
+      ]);
+
+      const result: AsanaDependency[] = [];
+
+      if (Array.isArray(dependencies)) {
+        for (const dep of dependencies) {
+          result.push({
+            gid: dep.gid,
+            name: dep.name || 'Tarefa sem nome',
+            completed: Boolean(dep.completed),
+            relationship: 'blocking',
+          });
+        }
+      }
+
+      if (Array.isArray(dependents)) {
+        for (const dep of dependents) {
+          result.push({
+            gid: dep.gid,
+            name: dep.name || 'Tarefa sem nome',
+            completed: Boolean(dep.completed),
+            relationship: 'dependent',
+          });
+        }
+      }
+
+      return result;
+    } catch {
+      return [];
+    }
   }
 
   /**
