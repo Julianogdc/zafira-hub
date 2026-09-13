@@ -631,6 +631,14 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
         </Card>
       ) : (
         <>
+          {/* BANNER DISCRETO DE GESTÃO / SINCRONIZAÇÃO */}
+          <div className="flex items-center gap-2.5 px-3.5 py-2 rounded-lg bg-zinc-900/50 border border-white/5 text-xs text-zinc-400">
+            <Briefcase className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              Operação gerenciada no Asana. Os dados abaixo são sincronizados automaticamente com o Hub.
+            </span>
+          </div>
+
           {/* CARDS DE RESUMO (KPIs DO ASANA) */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <Card className="bg-zinc-950/40 border-white/10">
@@ -774,16 +782,6 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
                   </span>
                 )}
               </div>
-              {canManage && projects.length > 0 && (
-                <Button
-                  size="sm"
-                  onClick={() => setIsCreateTaskOpen(true)}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8 gap-1.5 shadow-sm"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  Nova Demanda
-                </Button>
-              )}
             </div>
 
             <div className="rounded-xl border border-white/10 overflow-hidden bg-zinc-950/40">
@@ -1057,32 +1055,6 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
                 const pendingTasks = projTasks.filter((t) => !t.completed).length;
                 const overdueTasks = projTasks.filter((t) => t.isOverdue).length;
                 return { ...p, totalTasks, completedTasks, pendingTasks, overdueTasks };
-              }
-              return p;
-            })
-          );
-        }}
-      />
-
-      {/* MODAL DE CRIAÇÃO DE NOVA DEMANDA (ETAPA 2B.5) */}
-      <CreateAsanaTaskModal
-        isOpen={isCreateTaskOpen}
-        onClose={() => setIsCreateTaskOpen(false)}
-        clientId={clientId}
-        projects={projects}
-        onTaskCreated={(newTask) => {
-          setTasks((prev) => {
-            const next = [newTask, ...prev];
-            return sortTasks(next);
-          });
-          setProjects((prevProjects) =>
-            prevProjects.map((p) => {
-              if (p.projectGid === newTask.projectGid) {
-                return {
-                  ...p,
-                  totalTasks: p.totalTasks + 1,
-                  pendingTasks: p.pendingTasks + 1,
-                };
               }
               return p;
             })

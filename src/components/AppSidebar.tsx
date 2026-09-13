@@ -28,7 +28,7 @@ const items = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
   { label: "Finanças", href: "/financas", icon: Wallet2 },
   { label: "Clientes", href: "/clientes", icon: Users2 },
-  { label: "Projetos", href: "/projetos", icon: Briefcase, locked: true },
+  // { label: "Projetos", href: "/projetos", icon: Briefcase, locked: true }, // Operação oficial centralizada no Asana e Cliente 360
   { label: "Metas", href: "/metas", icon: Target },
   { label: "Comercial", href: "/crm", icon: Megaphone },
   // { label: "Performance", href: "/performance", icon: TrendingUp },
