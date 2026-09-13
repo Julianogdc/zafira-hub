@@ -108,5 +108,42 @@ export const asanaIntegrationService = {
   async disconnect(): Promise<{ status: string; message: string }> {
     return api.delete('/integrations/asana/disconnect');
   },
+
+  /**
+   * Conecta ao stream Server-Sent Events (SSE) do Asana para receber atualizações da organização
+   */
+  subscribeToEvents(onEvent: (event: AsanaRealtimeEvent) => void, onError?: (err: any) => void): () => void {
+    const url = '/api/integrations/asana/events';
+    const eventSource = new EventSource(url, { withCredentials: true });
+
+    eventSource.addEventListener('asana_event', (e: MessageEvent) => {
+      try {
+        const parsed = JSON.parse(e.data);
+        onEvent(parsed);
+      } catch (err) {
+        console.warn('[AsanaSSE] Falha no parse do evento recebido:', err);
+      }
+    });
+
+    eventSource.onerror = (err) => {
+      if (onError) onError(err);
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  },
 };
+
+export interface AsanaRealtimeEvent {
+  type: string;
+  organizationId: string;
+  projectGid: string;
+  resourceGid?: string;
+  resourceType?: string;
+  action?: string;
+  timestamp: string;
+  details?: any;
+}
+
 

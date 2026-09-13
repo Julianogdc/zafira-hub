@@ -90,10 +90,18 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   const [isDisconnectDialogOpen, setIsDisconnectDialogOpen] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
 
-  // Carregamento de dados
-  const loadData = useCallback(async () => {
+  // Estados de sincronização em tempo real / segundo plano
+  const [isSilentSyncing, setIsSilentSyncing] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+
+  // Carregamento de dados (inicial e refetch geral)
+  const loadData = useCallback(async (isInitial = false) => {
     try {
-      setLoading(true);
+      if (isInitial) {
+        setLoading(true);
+      } else {
+        setIsSilentSyncing(true);
+      }
       setError(null);
 
       // 1. Checa status e projetos vinculados em paralelo
@@ -107,24 +115,88 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
 
       // 2. Se houver projetos vinculados e o Asana estiver conectado, carrega as tarefas
       if (projectsData.length > 0 && statusData.connected) {
-        setLoadingTasks(true);
+        if (isInitial) setLoadingTasks(true);
         const tasksData = await asanaIntegrationService.getClientTasks(clientId).catch(() => []);
         setTasks(tasksData);
-        setLoadingTasks(false);
+        if (isInitial) setLoadingTasks(false);
       } else {
         setTasks([]);
       }
+      setLastSyncedAt(new Date());
     } catch (err: any) {
       console.error('Erro ao carregar dados do Asana:', err);
       setError(err?.message || 'Falha ao carregar dados da integração Asana.');
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      } else {
+        setIsSilentSyncing(false);
+      }
     }
   }, [clientId]);
 
+  // Atualização em segundo plano (silenciosa, sem desmontar UI nem acionar spinners invasivos)
+  const silentRefresh = useCallback(async () => {
+    try {
+      setIsSilentSyncing(true);
+      const [projectsData, tasksData] = await Promise.all([
+        asanaIntegrationService.getClientProjects(clientId).catch(() => null),
+        asanaIntegrationService.getClientTasks(clientId).catch(() => null),
+      ]);
+
+      if (projectsData) {
+        setProjects(projectsData);
+      }
+      if (tasksData) {
+        setTasks(tasksData);
+      }
+      setLastSyncedAt(new Date());
+    } catch (err) {
+      console.warn('[Cliente360Projetos] Erro ao sincronizar dados silenciosamente:', err);
+    } finally {
+      setIsSilentSyncing(false);
+    }
+  }, [clientId]);
+
+  // Preparação de arquitetura para futuras ações com atualização otimista (Etapa 2)
+  const optimisticUpdateTask = useCallback((taskGid: string, updates: Partial<ClientAsanaTask>) => {
+    setTasks((prev) => prev.map((t) => (t.gid === taskGid ? { ...t, ...updates } : t)));
+  }, []);
+
+  // Carregamento inicial
   useEffect(() => {
-    loadData();
+    loadData(true);
   }, [loadData]);
+
+  // Conexão SSE em tempo real: recebe eventos da organização e atualiza silenciosamente
+  useEffect(() => {
+    if (!status?.connected) return;
+
+    const unsubscribe = asanaIntegrationService.subscribeToEvents((event) => {
+      // Quando chega evento referente a projetos ou tarefas, sincroniza silenciosamente
+      silentRefresh();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [status?.connected, silentRefresh]);
+
+  // Polling de segurança leve e não invasivo a cada 3 minutos (como contingência para webhooks)
+  useEffect(() => {
+    if (!status?.connected) return;
+
+    const interval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) {
+        return; // Não executa se a aba do navegador estiver em segundo plano
+      }
+      silentRefresh();
+    }, 180000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [status?.connected, silentRefresh]);
 
   // Escuta mensagem de sucesso disparada pelo popup OAuth do Asana
   useEffect(() => {
@@ -296,7 +368,7 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     }
   };
 
-  if (loading) {
+  if (loading && !status) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-zinc-400 gap-3">
         <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
@@ -336,11 +408,11 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
           <Button
             variant="outline"
             size="sm"
-            onClick={loadData}
-            disabled={loading}
+            onClick={() => loadData(false)}
+            disabled={isSilentSyncing}
             className="border-white/10 text-zinc-300 hover:text-white hover:bg-white/5 gap-2 text-xs h-9 px-4"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${isSilentSyncing ? 'animate-spin text-emerald-400' : ''}`} />
             Verificar Conexão
           </Button>
         </div>
@@ -380,14 +452,22 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
         </div>
 
         <div className="flex items-center gap-3">
+          {lastSyncedAt && (
+            <span className="text-[11px] text-zinc-400 hidden sm:inline-flex items-center gap-1.5 bg-zinc-900/80 px-2.5 py-1 rounded-md border border-white/5">
+              <span className={`w-1.5 h-1.5 rounded-full ${isSilentSyncing ? 'bg-emerald-400 animate-ping' : 'bg-emerald-500'}`} />
+              {isSilentSyncing ? 'Sincronizando...' : 'Sincronizado'}
+            </span>
+          )}
+
           <Button
             variant="outline"
             size="sm"
-            onClick={loadData}
-            className="border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 h-8"
+            onClick={() => silentRefresh()}
+            disabled={isSilentSyncing}
+            className="border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 h-8 gap-1.5"
             title="Atualizar dados do Asana"
           >
-            <RefreshCw className="w-3.5 h-3.5" />
+            <RefreshCw className={`w-3.5 h-3.5 ${isSilentSyncing ? 'animate-spin text-emerald-400' : ''}`} />
           </Button>
 
           {canManage && (

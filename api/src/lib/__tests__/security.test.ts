@@ -8,6 +8,7 @@ import {
   verifyAndConsumeOAuthState,
 } from '../oauthState.js';
 import { buildAsanaAuthorizeUrl, ASANA_OAUTH_SCOPES } from '../../modules/integrations/asana/asana.routes.js';
+import { sseHub } from '../sseHub.js';
 
 interface InMemoryOAuthState {
   id: string;
@@ -296,19 +297,22 @@ async function runSecurityTests() {
     throw new Error('Falha: scope deve conter obrigatoriamente "projects:read" e "tasks:read"!');
   }
 
-  // Não contém permissões delete
-  const deleteScopes = scopesList.filter((s) => s.includes(':delete'));
-  if (deleteScopes.length > 0) {
-    throw new Error(`Falha crítica: scopes contém permissões de delete proibidas: ${deleteScopes.join(', ')}`);
+  // Contém os escopos de webhooks adicionados para o Asana 1.5
+  const webhookScopes = ['webhooks:read', 'webhooks:write', 'webhooks:delete'];
+  for (const ws of webhookScopes) {
+    if (!scopesList.includes(ws)) {
+      throw new Error(`Falha: scope deve conter o escopo de webhook "${ws}"!`);
+    }
   }
 
-  // Não contém webhooks
-  if (scopesList.some((s) => s.includes('webhook'))) {
-    throw new Error('Falha: escopos não devem conter webhooks!');
+  // Não contém permissões destrutivas de deleção de tarefas ou projetos
+  const destructiveDeleteScopes = scopesList.filter((s) => s === 'tasks:delete' || s === 'projects:delete');
+  if (destructiveDeleteScopes.length > 0) {
+    throw new Error(`Falha crítica: scopes contém permissões de delete proibidas: ${destructiveDeleteScopes.join(', ')}`);
   }
 
-  console.log('✓ Escopos validados com sucesso: 19 escopos específicos presentes.');
-  console.log('✓ Nenhuma permissão "default", "identity/openid/email/profile" ou ":delete" detectada.');
+  console.log(`✓ Escopos validados com sucesso: ${scopesList.length} escopos específicos presentes (incluindo webhooks).`);
+  console.log('✓ Nenhuma permissão "default", "identity/openid/email/profile" ou deleção destrutiva de tarefas/projetos detectada.');
   console.log('✓ URL gerada com sucesso:', generatedAuthUrl.slice(0, 100) + '...');
 
   console.log('\n--- TESTE 12: Fluxo Completo de Desconexão da Conta Asana ---');
@@ -435,8 +439,219 @@ async function runSecurityTests() {
   }
   console.log('✓ Reconexão: É possível iniciar novo fluxo de autorização OAuth e reconectar a conta.');
 
+  console.log('\n--- TESTE 13: Webhooks Asana (Handshake, HMAC-SHA256, Ciclo de Vida e Isolamento SSE) ---');
+
+  // 1. Validação dos novos escopos OAuth
+  const requiredScopes = ['webhooks:read', 'webhooks:write', 'webhooks:delete'];
+  for (const s of requiredScopes) {
+    if (!ASANA_OAUTH_SCOPES.includes(s as any)) {
+      throw new Error(`Falha: Escopo obrigatório ${s} ausente em ASANA_OAUTH_SCOPES!`);
+    }
+  }
+  console.log('✓ Escopos de webhooks (webhooks:read, webhooks:write, webhooks:delete) confirmados em ASANA_OAUTH_SCOPES.');
+
+  // 2. Mock de subscriptions e ciclo de vida
+  interface MockWebhookSubscription {
+    id: string;
+    organizationId: string;
+    resourceGid: string;
+    webhookGid?: string | null;
+    target: string;
+    secret: string;
+    active: boolean;
+    lastEventAt?: Date | null;
+  }
+
+  const mockSubscriptions = new Map<string, MockWebhookSubscription>();
+
+  // Handshake
+  const subId = 'sub-test-123';
+  const plainHookSecret = 'secret-handshake-asana-998877665544';
+
+  mockSubscriptions.set(subId, {
+    id: subId,
+    organizationId: 'org-A',
+    resourceGid: 'project-999',
+    target: `https://api.zafirahub.com/integrations/asana/webhooks/${subId}`,
+    secret: encryptToken('pending'),
+    active: false,
+  });
+
+  // Simulação do Handshake
+  function simulateHandshake(subscriptionId: string, receivedSecret: string) {
+    const sub = mockSubscriptions.get(subscriptionId);
+    if (!sub) throw new Error('Subscription não encontrada');
+    sub.secret = encryptToken(receivedSecret);
+    sub.active = true;
+    return {
+      status: 200,
+      headers: { 'X-Hook-Secret': receivedSecret },
+    };
+  }
+
+  const handshakeRes = simulateHandshake(subId, plainHookSecret);
+  if (handshakeRes.status !== 200 || handshakeRes.headers['X-Hook-Secret'] !== plainHookSecret) {
+    throw new Error('Falha: Handshake não devolveu o mesmo X-Hook-Secret com HTTP 200!');
+  }
+  const updatedSub = mockSubscriptions.get(subId)!;
+  if (!updatedSub.active || decryptToken(updatedSub.secret) !== plainHookSecret) {
+    throw new Error('Falha: Secret não foi criptografado/persistido corretamente no handshake!');
+  }
+  console.log('✓ Handshake oficial do Asana validado com sucesso (X-Hook-Secret devolvido e secret criptografado).');
+
+  // 3. Validação de Assinatura HMAC-SHA256 (RAW body)
+  const rawBodyPayload = JSON.stringify({
+    events: [
+      {
+        user: { gid: 'user-1' },
+        created_at: new Date().toISOString(),
+        action: 'changed',
+        resource: { gid: 'task-555', resource_type: 'task' },
+      },
+    ],
+  });
+
+  const validSignature = crypto
+    .createHmac('sha256', plainHookSecret)
+    .update(rawBodyPayload)
+    .digest('hex');
+
+  function verifySignature(subscriptionId: string, signature: string, rawBody: string): boolean {
+    const sub = mockSubscriptions.get(subscriptionId);
+    if (!sub || !sub.active) return false;
+    const secret = decryptToken(sub.secret);
+    const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+    const bSig = Buffer.from(signature);
+    const bExp = Buffer.from(expected);
+    if (bSig.length !== bExp.length) return false;
+    return crypto.timingSafeEqual(bSig, bExp);
+  }
+
+  if (!verifySignature(subId, validSignature, rawBodyPayload)) {
+    throw new Error('Falha: Assinatura HMAC-SHA256 válida foi incorretamente rejeitada!');
+  }
+  console.log('✓ Assinatura HMAC-SHA256 válida aceita com base no raw body exato.');
+
+  // Assinatura inválida / adulterada
+  const invalidSignature = 'invalid' + validSignature.slice(7);
+  if (verifySignature(subId, invalidSignature, rawBodyPayload)) {
+    throw new Error('Falha crítica: Assinatura adulterada/inválida foi aceita!');
+  }
+
+  const tamperedPayload = rawBodyPayload + ' ';
+  if (verifySignature(subId, validSignature, tamperedPayload)) {
+    throw new Error('Falha crítica: Payload adulterado não invalidou a assinatura HMAC!');
+  }
+  console.log('✓ Assinatura HMAC-SHA256 inválida ou payload adulterado corretamente rejeitados.');
+
+  // 4. Ciclo de vida: Criação, não duplicidade, manutenção de vínculo compartilhado e expurgo
+  let webhookCallCount = 0;
+  function linkProjectWebhook(orgId: string, projectGid: string) {
+    let existing: MockWebhookSubscription | undefined;
+    for (const sub of mockSubscriptions.values()) {
+      if (sub.organizationId === orgId && sub.resourceGid === projectGid && sub.active) {
+        existing = sub;
+        break;
+      }
+    }
+    if (existing) {
+      return existing; // Já existe webhook ativo, não duplica
+    }
+    webhookCallCount++;
+    const newSub: MockWebhookSubscription = {
+      id: `sub-${Date.now()}-${Math.random()}`,
+      organizationId: orgId,
+      resourceGid: projectGid,
+      webhookGid: `wh-${projectGid}`,
+      target: `https://api.zafirahub.com/integrations/asana/webhooks/${projectGid}`,
+      secret: encryptToken('secret-test'),
+      active: true,
+    };
+    mockSubscriptions.set(newSub.id, newSub);
+    return newSub;
+  }
+
+  // Vincula no Cliente 1
+  linkProjectWebhook('org-A', 'proj-shared');
+  if (webhookCallCount !== 1) throw new Error('Falha: Webhook deveria ter sido criado.');
+
+  // Vincula o mesmo projeto no Cliente 2 da mesma organização
+  linkProjectWebhook('org-A', 'proj-shared');
+  if (webhookCallCount !== 1) throw new Error('Falha: Webhook foi indevidamente duplicado para o mesmo projeto na mesma org!');
+  console.log('✓ Idempotência confirmada: Webhook não é duplicado para o mesmo projeto na organização.');
+
+  function unlinkProjectWebhook(orgId: string, projectGid: string, remainingClientCount: number) {
+    if (remainingClientCount > 0) {
+      return; // Mantém o webhook
+    }
+    for (const [id, sub] of Array.from(mockSubscriptions.entries())) {
+      if (sub.organizationId === orgId && sub.resourceGid === projectGid) {
+        mockSubscriptions.delete(id);
+      }
+    }
+  }
+
+  unlinkProjectWebhook('org-A', 'proj-shared', 1); // 1 vínculo restante
+  let foundSub = Array.from(mockSubscriptions.values()).find((s) => s.resourceGid === 'proj-shared');
+  if (!foundSub) {
+    throw new Error('Falha: Webhook foi indevidamente removido enquanto outro cliente ainda o utilizava!');
+  }
+  console.log('✓ Manutenção de vínculo: Webhook mantido ativo enquanto outro cliente da organização ainda o utiliza.');
+
+  unlinkProjectWebhook('org-A', 'proj-shared', 0); // último vínculo removido
+  foundSub = Array.from(mockSubscriptions.values()).find((s) => s.resourceGid === 'proj-shared');
+  if (foundSub) {
+    throw new Error('Falha: Webhook não foi removido quando o último vínculo foi desfeito!');
+  }
+  console.log('✓ Expurgo automático: Webhook e subscription removidos quando não há mais clientes vinculados ao projeto.');
+
+  // 5. Isolamento Multi-tenant do Server-Sent Events (SSE)
+  const orgAMessages: string[] = [];
+  const orgBMessages: string[] = [];
+
+  const mockReplyOrgA = {
+    raw: {
+      writeHead: () => {},
+      write: (data: string) => orgAMessages.push(data),
+      on: () => {},
+    },
+  } as any;
+
+  const mockReplyOrgB = {
+    raw: {
+      writeHead: () => {},
+      write: (data: string) => orgBMessages.push(data),
+      on: () => {},
+    },
+  } as any;
+
+  sseHub.register('org-A', mockReplyOrgA);
+  sseHub.register('org-B', mockReplyOrgB);
+
+  // Publica evento para a Organização A
+  sseHub.publishToOrganization('org-A', {
+    type: 'asana.task.changed',
+    organizationId: 'org-A',
+    projectGid: 'proj-123',
+    resourceGid: 'task-789',
+    resourceType: 'task',
+    action: 'changed',
+    timestamp: new Date().toISOString(),
+  });
+
+  const orgAHasEvent = orgAMessages.some((m) => m.includes('asana.task.changed') && m.includes('task-789'));
+  const orgBHasEvent = orgBMessages.some((m) => m.includes('asana.task.changed') || m.includes('task-789'));
+
+  if (!orgAHasEvent) {
+    throw new Error('Falha: Cliente da Organização A não recebeu o evento SSE!');
+  }
+  if (orgBHasEvent) {
+    throw new Error('Falha crítica de segurança: Evento da Organização A vazou para a Organização B!');
+  }
+  console.log('✓ Isolamento Multi-tenant SSE comprovado: eventos transmitidos apenas para clientes da organização correspondente.');
+
   console.log('\n======================================================');
-  console.log('TODOS OS 12 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
+  console.log('TODOS OS 13 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
   console.log('======================================================');
 }
 

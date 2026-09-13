@@ -1,5 +1,7 @@
+import crypto from 'crypto';
 import { prisma } from '../../../lib/prisma.js';
 import { encryptToken, decryptToken } from '../../../lib/crypto.js';
+import { sseHub, AsanaNormalizedEvent } from '../../../lib/sseHub.js';
 
 export class AsanaIntegrationError extends Error {
   constructor(public statusCode: number, message: string, public details?: any) {
@@ -123,8 +125,17 @@ export class AsanaService {
       throw new AsanaIntegrationError(response.status, message, errorData);
     }
 
-    const data = await response.json();
-    return data.data;
+    if (response.status === 204) {
+      return {} as T;
+    }
+
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      return {} as T;
+    }
+
+    const data = JSON.parse(text);
+    return data.data !== undefined ? data.data : data;
   }
 
   /**
@@ -361,6 +372,11 @@ export class AsanaService {
         },
       });
 
+      // Cria ou assegura webhook ativo para o projeto nesta organização
+      await this.createProjectWebhook(organizationId, projectGid).catch((err) => {
+        console.warn(`[AsanaService] Não foi possível registrar webhook para o projeto ${projectGid}:`, err?.message || err);
+      });
+
       linkedCount++;
     }
 
@@ -391,8 +407,15 @@ export class AsanaService {
       throw new AsanaIntegrationError(404, 'Vínculo de integração não encontrado.');
     }
 
+    const projectGid = integration.externalId;
+
     await prisma.clientIntegration.delete({
       where: { id: integrationId },
+    });
+
+    // Se nenhum outro cliente da organização ainda usar este projeto, remove o webhook
+    await this.removeProjectWebhookIfNeeded(organizationId, projectGid).catch((err) => {
+      console.warn(`[AsanaService] Erro ao verificar/remover webhook do projeto ${projectGid}:`, err?.message || err);
     });
   }
 
@@ -648,7 +671,10 @@ export class AsanaService {
       throw new AsanaIntegrationError(404, 'Nenhuma integração Asana ativa encontrada para esta organização.');
     }
 
-    // 2. Revogação remota segura de tokens (sem expor credenciais em logs)
+    // 2. Remove todos os webhooks remotos e locais da organização
+    await this.removeAllWebhooks(organizationId).catch(() => {});
+
+    // 3. Revogação remota segura de tokens (sem expor credenciais em logs)
     try {
       const refreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
       const accessToken = orgIntegration.accessToken ? decryptToken(orgIntegration.accessToken) : null;
@@ -662,7 +688,7 @@ export class AsanaService {
       // Prossegue mesmo se a chamada remota falhar
     }
 
-    // 3. Remove os vínculos locais de projetos pertencentes a clientes desta organização
+    // 4. Remove os vínculos locais de projetos pertencentes a clientes desta organização
     const organizationClients = await prisma.client.findMany({
       where: { organizationId },
       select: { id: true },
@@ -678,10 +704,233 @@ export class AsanaService {
       });
     }
 
-    // 4. Remove a integração da organização no PostgreSQL
+    // 5. Remove a integração da organização no PostgreSQL
     await prisma.organizationIntegration.delete({
       where: { id: orgIntegration.id },
     });
+  }
+
+  /**
+   * Retorna a URL base para receber webhooks do Asana.
+   */
+  getWebhookBaseUrl(): string {
+    if (process.env.WEBHOOK_BASE_URL) return process.env.WEBHOOK_BASE_URL.replace(/\/$/, '');
+    if (process.env.API_BASE_URL) return process.env.API_BASE_URL.replace(/\/$/, '');
+    return 'https://zafira-hub-v2-api.hvrb9d.easypanel.host';
+  }
+
+  /**
+   * Cria ou assegura assinatura de webhook ativa para o projeto na organização.
+   */
+  async createProjectWebhook(organizationId: string, projectGid: string) {
+    // 1. Verifica se já existe webhook para este projeto na organização
+    const existing = await prisma.asanaWebhookSubscription.findUnique({
+      where: {
+        organizationId_resourceGid: {
+          organizationId,
+          resourceGid: projectGid,
+        },
+      },
+    });
+
+    if (existing && existing.active) {
+      return existing;
+    }
+
+    const subscriptionId = existing?.id || crypto.randomUUID();
+    const target = `${this.getWebhookBaseUrl()}/integrations/asana/webhooks/${subscriptionId}`;
+    const initialSecret = existing?.secret || encryptToken('pending_handshake');
+
+    const subscription = existing
+      ? await prisma.asanaWebhookSubscription.update({
+          where: { id: existing.id },
+          data: { target, updatedAt: new Date() },
+        })
+      : await prisma.asanaWebhookSubscription.create({
+          data: {
+            id: subscriptionId,
+            organizationId,
+            resourceGid: projectGid,
+            target,
+            secret: initialSecret,
+            active: false,
+          },
+        });
+
+    // 2. Tenta registrar o webhook no Asana via API oficial
+    try {
+      const { token } = await this.getValidToken(organizationId);
+      const res = await this.fetchAsana<any>('/webhooks', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          data: {
+            resource: projectGid,
+            target,
+          },
+        }),
+      });
+
+      if (res?.gid) {
+        await prisma.asanaWebhookSubscription.update({
+          where: { id: subscription.id },
+          data: { webhookGid: res.gid },
+        });
+      }
+    } catch {
+      // Falha no registro remoto (ex: em desenvolvimento sem IP público) não impede fluxo
+    }
+
+    return subscription;
+  }
+
+  /**
+   * Remove o webhook remoto no Asana e localmente se nenhum outro cliente da mesma organização usar o projeto.
+   */
+  async removeProjectWebhookIfNeeded(organizationId: string, projectGid: string): Promise<void> {
+    const orgClients = await prisma.client.findMany({
+      where: { organizationId },
+      select: { id: true },
+    });
+
+    const clientIds = orgClients.map((c) => c.id);
+    const remainingCount = await prisma.clientIntegration.count({
+      where: {
+        clientId: { in: clientIds },
+        provider: 'ASANA',
+        externalId: projectGid,
+      },
+    });
+
+    // Se ainda houver vínculo em outro cliente da mesma organização, mantém o webhook
+    if (remainingCount > 0) {
+      return;
+    }
+
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: {
+        organizationId_resourceGid: {
+          organizationId,
+          resourceGid: projectGid,
+        },
+      },
+    });
+
+    if (!sub) return;
+
+    if (sub.webhookGid) {
+      try {
+        const { token } = await this.getValidToken(organizationId);
+        await this.fetchAsana(`/webhooks/${sub.webhookGid}`, token, { method: 'DELETE' }).catch(() => {});
+      } catch {}
+    }
+
+    await prisma.asanaWebhookSubscription.delete({
+      where: { id: sub.id },
+    });
+  }
+
+  /**
+   * Remove todos os webhooks da organização ao desconectar a conta.
+   */
+  async removeAllWebhooks(organizationId: string): Promise<void> {
+    const subs = await prisma.asanaWebhookSubscription.findMany({
+      where: { organizationId },
+    });
+
+    if (subs.length === 0) return;
+
+    try {
+      const { token } = await this.getValidToken(organizationId);
+      for (const sub of subs) {
+        if (sub.webhookGid) {
+          await this.fetchAsana(`/webhooks/${sub.webhookGid}`, token, { method: 'DELETE' }).catch(() => {});
+        }
+      }
+    } catch {}
+
+    await prisma.asanaWebhookSubscription.deleteMany({
+      where: { organizationId },
+    });
+  }
+
+  /**
+   * Processa o handshake do Asana salvando o secret criptografado e ativando a subscription.
+   */
+  async handleWebhookHandshake(subscriptionId: string, xHookSecret: string): Promise<void> {
+    const encryptedSecret = encryptToken(xHookSecret);
+
+    await prisma.asanaWebhookSubscription.update({
+      where: { id: subscriptionId },
+      data: {
+        secret: encryptedSecret,
+        active: true,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Valida a assinatura HMAC-SHA256 do webhook usando o payload bruto (raw body).
+   */
+  async verifyWebhookSignature(subscriptionId: string, signature: string, rawBody: string): Promise<boolean> {
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: { id: subscriptionId },
+    });
+
+    if (!sub || !sub.secret || !signature) {
+      return false;
+    }
+
+    try {
+      const plainSecret = decryptToken(sub.secret);
+      const computedSignature = crypto.createHmac('sha256', plainSecret).update(rawBody).digest('hex');
+
+      const sigBuffer = Buffer.from(signature);
+      const computedBuffer = Buffer.from(computedSignature);
+
+      if (sigBuffer.length !== computedBuffer.length) {
+        return false;
+      }
+
+      return crypto.timingSafeEqual(sigBuffer, computedBuffer);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Processa os eventos recebidos pelo webhook e os publica via SSE para a organização correspondente.
+   */
+  async processWebhookPayload(subscriptionId: string, payload: any): Promise<void> {
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: { id: subscriptionId },
+    });
+
+    if (!sub) return;
+
+    await prisma.asanaWebhookSubscription.update({
+      where: { id: subscriptionId },
+      data: { lastEventAt: new Date() },
+    });
+
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+
+    for (const event of events) {
+      const resType = event.resource?.resource_type || 'task';
+      const action = event.action || 'changed';
+      const normalized: AsanaNormalizedEvent = {
+        type: `asana.${resType}.${action}`,
+        organizationId: sub.organizationId,
+        projectGid: sub.resourceGid,
+        resourceGid: event.resource?.gid,
+        resourceType: resType,
+        action,
+        timestamp: event.created_at || new Date().toISOString(),
+        details: event,
+      };
+
+      sseHub.publishToOrganization(sub.organizationId, normalized);
+    }
   }
 }
 

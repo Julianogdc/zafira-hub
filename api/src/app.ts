@@ -26,8 +26,26 @@ export function buildApp(): FastifyInstance {
     allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
   });
 
+  // Preserva o payload bruto (rawBody) para validação de assinaturas HMAC em Webhooks (ex: Asana)
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+    try {
+      const buffer = body as Buffer;
+      const rawString = buffer.length ? buffer.toString('utf-8') : '';
+      (req as any).rawBody = rawString;
+      if (!rawString || rawString.trim().length === 0) {
+        return done(null, {});
+      }
+      const json = JSON.parse(rawString);
+      return done(null, json);
+    } catch (err: any) {
+      err.statusCode = 400;
+      return done(err, undefined);
+    }
+  });
+
   // Permite requisições comuns sem body ou com Content-Type vazio/urlencoded (como logout)
-  app.addContentTypeParser(['application/x-www-form-urlencoded', 'text/plain'], (_req, _payload, done) => {
+  app.addContentTypeParser(['application/x-www-form-urlencoded', 'text/plain'], (req, _payload, done) => {
+    (req as any).rawBody = '';
     done(null, null);
   });
 

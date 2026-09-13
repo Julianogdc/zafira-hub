@@ -4,6 +4,7 @@ import { authenticate, requireRole } from '../../../middleware/auth.js';
 import { AsanaService, AsanaIntegrationError } from './asana.service.js';
 import { prisma } from '../../../lib/prisma.js';
 import { createAndPersistOAuthState, verifyAndConsumeOAuthState } from '../../../lib/oauthState.js';
+import { sseHub } from '../../../lib/sseHub.js';
 
 const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
@@ -28,6 +29,9 @@ export const ASANA_OAUTH_SCOPES = [
   'team_memberships:read',
   'teams:read',
   'users:read',
+  'webhooks:delete',
+  'webhooks:read',
+  'webhooks:write',
   'workspaces:read',
 ] as const;
 
@@ -419,4 +423,78 @@ export async function asanaRoutes(app: FastifyInstance) {
   // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
   app.get('/integrations/asana/oauth/callback', callbackHandler);
   app.get('/api/integrations/asana/oauth/callback', callbackHandler);
+
+  // 9. GET /integrations/asana/events (Canal SSE autenticado e isolado por organização)
+  const eventsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      sseHub.register(organizationId, reply);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/integrations/asana/events',
+    {
+      preHandler: [authenticate],
+    },
+    eventsHandler
+  );
+  app.get(
+    '/api/integrations/asana/events',
+    {
+      preHandler: [authenticate],
+    },
+    eventsHandler
+  );
+
+  // 10. POST /integrations/asana/webhooks/:subscriptionId (Endpoint público para Webhooks do Asana)
+  const webhookHandler = async (
+    request: FastifyRequest<{
+      Params: { subscriptionId: string };
+    }>,
+    reply: FastifyReply
+  ) => {
+    const { subscriptionId } = request.params;
+    const xHookSecret = request.headers['x-hook-secret'] as string | undefined;
+    const xHookSignature = request.headers['x-hook-signature'] as string | undefined;
+
+    // 1. Handshake do Asana: recebe X-Hook-Secret, salva e devolve no header
+    if (xHookSecret) {
+      try {
+        await asanaService.handleWebhookHandshake(subscriptionId, xHookSecret);
+        return reply
+          .status(200)
+          .header('X-Hook-Secret', xHookSecret)
+          .send();
+      } catch (err: any) {
+        app.log.error(err, '[AsanaWebhook] Erro no handshake do webhook');
+        return reply.status(400).send({ error: 'Falha no handshake' });
+      }
+    }
+
+    // 2. Eventos posteriores: validação de assinatura HMAC-SHA256 usando o raw body
+    if (xHookSignature) {
+      const rawBody = (request as any).rawBody || (typeof request.body === 'string' ? request.body : JSON.stringify(request.body));
+      const isValid = await asanaService.verifyWebhookSignature(subscriptionId, xHookSignature, rawBody);
+
+      if (!isValid) {
+        return reply.status(401).send({
+          error: 'Assinatura de webhook inválida.',
+        });
+      }
+
+      // Processa os eventos e publica via SSE para a organização correspondente
+      await asanaService.processWebhookPayload(subscriptionId, request.body);
+      return reply.status(200).send({ status: 'ok' });
+    }
+
+    return reply.status(400).send({
+      error: 'Requisição inválida. Cabeçalhos de webhook ausentes.',
+    });
+  };
+
+  app.post('/integrations/asana/webhooks/:subscriptionId', webhookHandler);
+  app.post('/api/integrations/asana/webhooks/:subscriptionId', webhookHandler);
 }

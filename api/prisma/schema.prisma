@@ -41,10 +41,11 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members      OrganizationMember[]
-  clients      Client[]
-  integrations OrganizationIntegration[]
-  oauthStates  OAuthState[]
+  members            OrganizationMember[]
+  clients            Client[]
+  integrations       OrganizationIntegration[]
+  oauthStates        OAuthState[]
+  asanaSubscriptions AsanaWebhookSubscription[]
 
   @@map("organizations")
 }
@@ -161,4 +162,24 @@ model OAuthState {
   @@index([provider, nonce])
   @@index([expiresAt])
   @@map("oauth_states")
+}
+
+model AsanaWebhookSubscription {
+  id             String    @id @default(uuid())
+  organizationId String
+  resourceGid    String
+  webhookGid     String?
+  target         String
+  secret         String    @db.Text
+  active         Boolean   @default(false)
+  lastEventAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, resourceGid])
+  @@index([resourceGid])
+  @@index([webhookGid])
+  @@map("asana_webhook_subscriptions")
 }
