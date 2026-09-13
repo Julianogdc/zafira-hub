@@ -26,6 +26,7 @@ import {
   AsanaUser,
 } from '@/services/asana';
 import { AsanaTaskDetailSheet } from './AsanaTaskDetailSheet';
+import { CreateAsanaTaskModal } from './CreateAsanaTaskModal';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -100,6 +101,9 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   const [selectedTask, setSelectedTask] = useState<ClientAsanaTask | null>(null);
   const [isDetailSheetOpen, setIsDetailSheetOpen] = useState(false);
   const [workspaceUsers, setWorkspaceUsers] = useState<AsanaUser[]>([]);
+
+  // Estado para Criação de Nova Tarefa (Etapa 2B.5)
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
 
   // Carregamento de dados (inicial e refetch geral)
   const loadData = useCallback(async (isInitial = false) => {
@@ -761,12 +765,24 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
           {/* LISTA CONSOLIDADA DE TAREFAS */}
           <div className="space-y-3 pt-2">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-white">Tarefas Vinculadas ({tasks.length})</h3>
-              {loadingTasks && (
-                <span className="text-xs text-zinc-500 flex items-center gap-1.5">
-                  <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
-                  Sincronizando tarefas...
-                </span>
+              <div className="flex items-center gap-3">
+                <h3 className="text-sm font-semibold text-white">Tarefas Vinculadas ({tasks.length})</h3>
+                {loadingTasks && (
+                  <span className="text-xs text-zinc-500 flex items-center gap-1.5">
+                    <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                    Sincronizando tarefas...
+                  </span>
+                )}
+              </div>
+              {canManage && projects.length > 0 && (
+                <Button
+                  size="sm"
+                  onClick={() => setIsCreateTaskOpen(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs h-8 gap-1.5 shadow-sm"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  Nova Demanda
+                </Button>
               )}
             </div>
 
@@ -1041,6 +1057,32 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
                 const pendingTasks = projTasks.filter((t) => !t.completed).length;
                 const overdueTasks = projTasks.filter((t) => t.isOverdue).length;
                 return { ...p, totalTasks, completedTasks, pendingTasks, overdueTasks };
+              }
+              return p;
+            })
+          );
+        }}
+      />
+
+      {/* MODAL DE CRIAÇÃO DE NOVA DEMANDA (ETAPA 2B.5) */}
+      <CreateAsanaTaskModal
+        isOpen={isCreateTaskOpen}
+        onClose={() => setIsCreateTaskOpen(false)}
+        clientId={clientId}
+        projects={projects}
+        onTaskCreated={(newTask) => {
+          setTasks((prev) => {
+            const next = [newTask, ...prev];
+            return sortTasks(next);
+          });
+          setProjects((prevProjects) =>
+            prevProjects.map((p) => {
+              if (p.projectGid === newTask.projectGid) {
+                return {
+                  ...p,
+                  totalTasks: p.totalTasks + 1,
+                  pendingTasks: p.pendingTasks + 1,
+                };
               }
               return p;
             })

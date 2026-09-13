@@ -796,6 +796,90 @@ export class AsanaService {
   }
 
   /**
+   * Cria uma nova tarefa em um projeto Asana vinculado ao cliente.
+   * Valida obrigatoriamente se o projeto indicado pertence aos vínculos do cliente.
+   */
+  async createClientTask(
+    clientId: string,
+    organizationId: string,
+    data: {
+      projectGid: string;
+      name: string;
+      notes?: string | null;
+      due_on?: string | null;
+      assignee?: string | null;
+      sectionGid?: string | null;
+    }
+  ): Promise<ClientAsanaTask> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client) {
+      throw new AsanaIntegrationError(404, 'Cliente não encontrado.');
+    }
+
+    const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+    if (!clientProjectGids.has(data.projectGid)) {
+      throw new AsanaIntegrationError(403, 'O projeto informado não pertence aos projetos vinculados a este cliente.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+
+    // Payload de criação no Asana
+    const taskPayload: Record<string, any> = {
+      name: data.name,
+      projects: [data.projectGid],
+    };
+
+    if (data.notes !== undefined && data.notes !== null) {
+      taskPayload.notes = data.notes;
+    }
+    if (data.due_on !== undefined && data.due_on !== null) {
+      taskPayload.due_on = data.due_on;
+    }
+    if (data.assignee !== undefined && data.assignee !== null) {
+      taskPayload.assignee = data.assignee;
+    }
+
+    const created = await this.fetchAsana<any>('/tasks', token, {
+      method: 'POST',
+      body: JSON.stringify({ data: taskPayload }),
+    });
+
+    if (!created || !created.gid) {
+      throw new AsanaIntegrationError(500, 'Falha ao criar tarefa no Asana.');
+    }
+
+    // Se uma seção específica foi informada, mover a tarefa para ela
+    if (data.sectionGid) {
+      try {
+        await this.fetchAsana<any>(`/sections/${data.sectionGid}/addTask`, token, {
+          method: 'POST',
+          body: JSON.stringify({
+            data: { task: created.gid },
+          }),
+        });
+      } catch (err: any) {
+        console.warn(`[AsanaService] Aviso ao posicionar tarefa ${created.gid} na seção ${data.sectionGid}:`, err?.message || err);
+      }
+    }
+
+    // Retorna a tarefa recém-criada formatada
+    const detailed = await this.getClientSingleTask(clientId, organizationId, created.gid);
+    if (!detailed) {
+      throw new AsanaIntegrationError(500, 'Falha ao recuperar detalhes da tarefa recém-criada.');
+    }
+
+    return detailed;
+  }
+
+  /**
    * Retorna as seções válidas de um projeto Asana vinculado ao cliente.
    */
   async getProjectSections(

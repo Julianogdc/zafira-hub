@@ -124,6 +124,15 @@ export interface UpdateAsanaTaskInput {
   custom_fields?: Record<string, any>;
 }
 
+export interface CreateAsanaTaskInput {
+  projectGid: string;
+  name: string;
+  notes?: string | null;
+  due_on?: string | null;
+  assignee?: string | null;
+  sectionGid?: string | null;
+}
+
 export interface ClientAsanaTask {
   gid: string;
   name: string;
@@ -201,6 +210,13 @@ export const asanaIntegrationService = {
    */
   async updateTask(clientId: string, taskGid: string, data: UpdateAsanaTaskInput): Promise<ClientAsanaTask> {
     return api.patch<ClientAsanaTask>(`/clients/${clientId}/asana/tasks/${taskGid}`, data);
+  },
+
+  /**
+   * Cria uma nova tarefa/demanda em um projeto Asana vinculado ao cliente
+   */
+  async createTask(clientId: string, data: CreateAsanaTaskInput): Promise<ClientAsanaTask> {
+    return api.post<ClientAsanaTask>(`/clients/${clientId}/asana/tasks`, data);
   },
 
   /**

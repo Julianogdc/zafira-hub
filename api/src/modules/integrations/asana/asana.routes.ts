@@ -21,6 +21,15 @@ const updateTaskSchema = z.object({
   custom_fields: z.record(z.string(), z.any()).optional(),
 });
 
+const createTaskSchema = z.object({
+  projectGid: z.string().min(1, 'Projeto de destino é obrigatório'),
+  name: z.string().min(1, 'Título da tarefa é obrigatório'),
+  notes: z.string().nullable().optional(),
+  due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
+  assignee: z.string().nullable().optional(),
+  sectionGid: z.string().nullable().optional(),
+});
+
 export const ASANA_OAUTH_SCOPES = [
   'attachments:read',
   'attachments:write',
@@ -341,6 +350,40 @@ export async function asanaRoutes(app: FastifyInstance) {
       preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
     },
     patchSingleTaskHandler
+  );
+
+  // 6.2.1 POST /clients/:id/asana/tasks (Criação de nova tarefa/demanda com RBAC ADMIN/MANAGER)
+  const postCreateTaskHandler = async (
+    request: FastifyRequest<{ Params: { id: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const parsedBody = createTaskSchema.parse(request.body);
+      const created = await asanaService.createClientTask(
+        request.params.id,
+        organizationId,
+        parsedBody
+      );
+      return reply.status(201).send(created);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postCreateTaskHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postCreateTaskHandler
   );
 
   // 6.3 GET /clients/:id/asana/projects/:projectGid/sections (Lista seções válidas do projeto)

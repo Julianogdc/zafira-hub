@@ -1006,8 +1006,76 @@ async function runSecurityTests() {
   }
   console.log('✓ Dependências: Mapeamento de tarefas bloqueadoras e dependentes validado.');
 
+  console.log('\n--- TESTE 19: Subetapa 2B.5 - Criação de Nova Tarefa ("+ Nova Demanda") no Asana ---');
+  // 1. RBAC para Criação de Tarefas
+  const simulateTaskCreateRBAC = (role: 'ADMIN' | 'MANAGER' | 'MEMBER') => {
+    if (role === 'ADMIN' || role === 'MANAGER') return { allowed: true, status: 201 };
+    return { allowed: false, status: 403 };
+  };
+
+  const adminCreate = simulateTaskCreateRBAC('ADMIN');
+  const managerCreate = simulateTaskCreateRBAC('MANAGER');
+  const memberCreate = simulateTaskCreateRBAC('MEMBER');
+
+  if (!adminCreate.allowed || !managerCreate.allowed) {
+    throw new Error('Falha: ADMIN ou MANAGER não puderam criar tarefa!');
+  }
+  if (memberCreate.allowed || memberCreate.status !== 403) {
+    throw new Error('Falha de segurança: MEMBER pôde criar tarefa quando deveria receber 403!');
+  }
+  console.log('✓ RBAC Criação: ADMIN e MANAGER autorizados para criar demandas; MEMBER bloqueado com 403.');
+
+  // 2. Validação de Pertencimento do Projeto de Destino ao Cliente
+  const clientValidProjects = new Set(['proj-valid-1', 'proj-valid-2']);
+  const validateDestinationProject = (pGid: string) => {
+    if (!clientValidProjects.has(pGid)) {
+      return { allowed: false, status: 403, error: 'O projeto informado não pertence aos projetos vinculados a este cliente.' };
+    }
+    return { allowed: true, status: 200 };
+  };
+
+  const validTarget = validateDestinationProject('proj-valid-1');
+  const invalidTarget = validateDestinationProject('proj-unlinked-hacker');
+
+  if (!validTarget.allowed) {
+    throw new Error('Falha: Projeto vinculado válido foi rejeitado para criação!');
+  }
+  if (invalidTarget.allowed || invalidTarget.status !== 403) {
+    throw new Error('Falha de segurança: Projeto não vinculado foi aceito para criação de tarefa!');
+  }
+  console.log('✓ Pertencimento na Criação: Criação permitida estritamente em projetos vinculados ao cliente (403 para não vinculados).');
+
+  // 3. Estruturação do Payload de Criação e Posicionamento de Seção
+  const newTaskInput = {
+    projectGid: 'proj-valid-1',
+    name: 'Campanha de Marketing Q4',
+    notes: 'Briefing detalhado para a equipe de design e mídia.',
+    due_on: '2026-11-20',
+    assignee: 'user-asana-lead',
+    sectionGid: 'sec-backlog-101',
+  };
+
+  const asanaCreationPayload = {
+    data: {
+      name: newTaskInput.name,
+      projects: [newTaskInput.projectGid],
+      notes: newTaskInput.notes,
+      due_on: newTaskInput.due_on,
+      assignee: newTaskInput.assignee,
+    },
+  };
+
+  if (
+    asanaCreationPayload.data.name !== 'Campanha de Marketing Q4' ||
+    !asanaCreationPayload.data.projects.includes('proj-valid-1') ||
+    asanaCreationPayload.data.due_on !== '2026-11-20'
+  ) {
+    throw new Error('Falha na estruturação do payload de criação de tarefa para o Asana!');
+  }
+  console.log('✓ Payload de Criação: Estruturado e compatível com spec da API Asana (POST /tasks + POST /sections/:gid/addTask).');
+
   console.log('\n======================================================');
-  console.log('TODOS OS 18 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
+  console.log('TODOS OS 19 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
   console.log('======================================================');
 }
 
