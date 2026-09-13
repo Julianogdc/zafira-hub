@@ -507,6 +507,82 @@ export class AsanaService {
   }
 
   /**
+   * Busca os dados atualizados de uma única tarefa no Asana para atualização pontual e ultra rápida.
+   */
+  async getClientSingleTask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<ClientAsanaTask | null> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      return null;
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+    const now = new Date();
+
+    try {
+      const t = await this.fetchAsana<any>(
+        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo,memberships.section.name,permalink_url,projects.gid,projects.name`,
+        token
+      );
+
+      if (!t || !t.gid) return null;
+
+      let isOverdue = false;
+      if (!t.completed && (t.due_on || t.due_at)) {
+        const dueDate = new Date(t.due_at || `${t.due_on}T23:59:59`);
+        if (dueDate < now) {
+          isOverdue = true;
+        }
+      }
+
+      const sectionMembership = t.memberships?.find((m: any) => m.section?.name);
+      const sectionName = sectionMembership?.section?.name || null;
+
+      const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+      const matchingProject = t.projects?.find((p: any) => clientProjectGids.has(p.gid));
+      const projectGid = matchingProject?.gid || client.integrations[0].externalId;
+      const meta = (client.integrations.find((i) => i.externalId === projectGid)?.metadata as any) || {};
+      const projectName = matchingProject?.name || meta.projectName || `Projeto ${projectGid}`;
+
+      return {
+        gid: t.gid,
+        name: t.name,
+        completed: t.completed || false,
+        dueOn: t.due_on || null,
+        dueAt: t.due_at || null,
+        isOverdue,
+        sectionName,
+        assignee: t.assignee
+          ? {
+              gid: t.assignee.gid,
+              name: t.assignee.name,
+              photoUrl: t.assignee.photo?.image_60x60 || null,
+            }
+          : null,
+        permalinkUrl: t.permalink_url || `https://app.asana.com/0/${projectGid}/${t.gid}`,
+        projectGid,
+        projectName,
+      };
+    } catch (err: any) {
+      if (err?.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * Renovação automática do token OAuth via Refresh Token no backend.
    */
   private async refreshToken(integrationId: string, refreshToken: string): Promise<{ accessToken: string }> {
@@ -872,15 +948,15 @@ export class AsanaService {
   }
 
   /**
-   * Valida a assinatura HMAC-SHA256 do webhook usando o payload bruto (raw body).
+   * Valida a assinatura HMAC-SHA256 e retorna a subscription em uma única consulta ao banco.
    */
-  async verifyWebhookSignature(subscriptionId: string, signature: string, rawBody: string): Promise<boolean> {
+  async verifyAndGetSubscription(subscriptionId: string, signature: string, rawBody: string) {
     const sub = await prisma.asanaWebhookSubscription.findUnique({
       where: { id: subscriptionId },
     });
 
     if (!sub || !sub.secret || !signature) {
-      return false;
+      return null;
     }
 
     try {
@@ -891,37 +967,45 @@ export class AsanaService {
       const computedBuffer = Buffer.from(computedSignature);
 
       if (sigBuffer.length !== computedBuffer.length) {
-        return false;
+        return null;
       }
 
-      return crypto.timingSafeEqual(sigBuffer, computedBuffer);
+      if (!crypto.timingSafeEqual(sigBuffer, computedBuffer)) {
+        return null;
+      }
+
+      return sub;
     } catch {
-      return false;
+      return null;
     }
   }
 
   /**
-   * Processa os eventos recebidos pelo webhook e os publica via SSE para a organização correspondente.
+   * Valida a assinatura HMAC-SHA256 do webhook usando o payload bruto (compatibilidade legada).
    */
-  async processWebhookPayload(subscriptionId: string, payload: any): Promise<void> {
-    const sub = await prisma.asanaWebhookSubscription.findUnique({
-      where: { id: subscriptionId },
-    });
+  async verifyWebhookSignature(subscriptionId: string, signature: string, rawBody: string): Promise<boolean> {
+    const sub = await this.verifyAndGetSubscription(subscriptionId, signature, rawBody);
+    return sub !== null;
+  }
 
-    if (!sub) return;
-
-    await prisma.asanaWebhookSubscription.update({
-      where: { id: subscriptionId },
+  /**
+   * Processa os eventos e publica via SSE imediatamente, gravando no banco em background para latência zero.
+   */
+  processWebhookPayloadFast(sub: any, payload: any, tWebhookReceived: number): void {
+    // 1. Atualiza lastEventAt no PostgreSQL em background (fire-and-forget, sem bloquear SSE)
+    prisma.asanaWebhookSubscription.update({
+      where: { id: sub.id },
       data: { lastEventAt: new Date() },
+    }).catch((err) => {
+      console.warn(`[Asana Webhook] Falha assíncrona ao atualizar lastEventAt:`, err?.message || err);
     });
 
     const events = Array.isArray(payload?.events) ? payload.events : [];
+    const tServerPublished = Date.now();
 
     for (const event of events) {
       const resType = event.resource?.resource_type || 'task';
       const action = event.action || 'changed';
-
-      console.log(`[Asana Webhook] evento recebido subscriptionId=${subscriptionId} organizationId=${sub.organizationId} resourceType=${resType} resourceGid=${event.resource?.gid} action=${action} signatureValid=true`);
 
       const normalized: AsanaNormalizedEvent = {
         type: `asana.${resType}.${action}`,
@@ -932,10 +1016,27 @@ export class AsanaService {
         action,
         timestamp: event.created_at || new Date().toISOString(),
         details: event,
+        timing: {
+          asanaCreatedAt: event.created_at || null,
+          serverReceivedAt: tWebhookReceived,
+          serverPublishedAt: tServerPublished,
+        },
       };
 
       sseHub.publishToOrganization(sub.organizationId, normalized);
     }
+  }
+
+  /**
+   * Processa os eventos recebidos pelo webhook (compatibilidade).
+   */
+  async processWebhookPayload(subscriptionId: string, payload: any): Promise<void> {
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: { id: subscriptionId },
+    });
+
+    if (!sub) return;
+    this.processWebhookPayloadFast(sub, payload, Date.now());
   }
 
   /**

@@ -9,6 +9,11 @@ export interface AsanaNormalizedEvent {
   action?: string;
   timestamp: string;
   details?: any;
+  timing?: {
+    asanaCreatedAt?: string | null;
+    serverReceivedAt?: number;
+    serverPublishedAt?: number;
+  };
 }
 
 interface SSEClient {
@@ -123,6 +128,9 @@ class SSEHub {
     for (const client of orgClients) {
       try {
         client.reply.raw.write(payload);
+        if (typeof (client.reply.raw as any).flush === 'function') {
+          (client.reply.raw as any).flush();
+        }
       } catch {
         this.removeClient(organizationId, client.id);
       }

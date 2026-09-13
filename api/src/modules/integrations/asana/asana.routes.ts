@@ -217,20 +217,58 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 6. GET /clients/:id/asana/tasks
+  const getTasksHandler = async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const tasks = await asanaService.getClientTasks(request.params.id, organizationId);
+      return reply.status(200).send(tasks);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
   app.get(
     '/clients/:id/asana/tasks',
     {
       preHandler: [authenticate],
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
-      try {
-        const organizationId = getOrganizationId(request);
-        const tasks = await asanaService.getClientTasks(request.params.id, organizationId);
-        return reply.status(200).send(tasks);
-      } catch (error) {
-        return handleError(error, reply);
-      }
+    getTasksHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks',
+    {
+      preHandler: [authenticate],
+    },
+    getTasksHandler
+  );
+
+  // 6.1 GET /clients/:id/asana/tasks/:taskGid (Busca rápida de tarefa individual para atualização instantânea na UI)
+  const getSingleTaskHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const task = await asanaService.getClientSingleTask(request.params.id, organizationId, request.params.taskGid);
+      return reply.status(200).send(task);
+    } catch (error) {
+      return handleError(error, reply);
     }
+  };
+
+  app.get(
+    '/clients/:id/asana/tasks/:taskGid',
+    {
+      preHandler: [authenticate],
+    },
+    getSingleTaskHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks/:taskGid',
+    {
+      preHandler: [authenticate],
+    },
+    getSingleTaskHandler
   );
 
   function getOAuthRedirectUri(): string {
@@ -476,19 +514,38 @@ export async function asanaRoutes(app: FastifyInstance) {
 
     // 2. Eventos posteriores: validação de assinatura HMAC-SHA256 usando o raw body
     if (xHookSignature) {
+      const t0 = performance.now();
+      const tWebhookReceived = Date.now();
+      console.log(`[TIMING] [1. Webhook Recebido] subId=${subscriptionId} timestamp=${new Date(tWebhookReceived).toISOString()}`);
+
+      // Mede a latência interna do Asana (entre criação no Asana e entrega na nossa API)
+      const events = Array.isArray((request.body as any)?.events) ? (request.body as any).events : [];
+      for (const ev of events) {
+        if (ev.created_at) {
+          const asanaEventTime = new Date(ev.created_at).getTime();
+          const asanaLagMs = tWebhookReceived - asanaEventTime;
+          console.log(`[TIMING] [Asana Delivery Lag] tempo decorrido no Asana até enviar webhook=${(asanaLagMs / 1000).toFixed(2)}s (resource=${ev.resource?.gid} action=${ev.action})`);
+        }
+      }
+
       const rawBody = (request as any).rawBody || (typeof request.body === 'string' ? request.body : JSON.stringify(request.body));
-      const isValid = await asanaService.verifyWebhookSignature(subscriptionId, xHookSignature, rawBody);
+      const sub = await asanaService.verifyAndGetSubscription(subscriptionId, xHookSignature, rawBody);
 
-      console.log(`[Asana Webhook] evento recebido subscriptionId=${subscriptionId} signatureValid=${isValid}`);
+      const tSignature = performance.now();
+      const isValid = sub !== null;
+      console.log(`[TIMING] [2. Assinatura Validada] dur=${(tSignature - t0).toFixed(1)}ms signatureValid=${isValid}`);
 
-      if (!isValid) {
+      if (!sub) {
         return reply.status(401).send({
           error: 'Assinatura de webhook inválida.',
         });
       }
 
-      // Processa os eventos e publica via SSE para a organização correspondente
-      await asanaService.processWebhookPayload(subscriptionId, request.body);
+      // Processa e publica via SSE imediatamente (zero espera no banco antes de publicar)
+      asanaService.processWebhookPayloadFast(sub, request.body, tWebhookReceived);
+      const tSsePublished = performance.now();
+      console.log(`[TIMING] [3. SSE Publicado] dur=${(tSsePublished - t0).toFixed(1)}ms`);
+
       return reply.status(200).send({ status: 'ok' });
     }
 

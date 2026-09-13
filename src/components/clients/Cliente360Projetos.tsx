@@ -159,6 +159,22 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     }
   }, [clientId]);
 
+  // Ordenação de tarefas idêntica à API: pendentes primeiro (atrasadas no topo), depois concluídas, depois prazo, depois nome
+  const sortTasks = (taskList: ClientAsanaTask[]): ClientAsanaTask[] => {
+    return [...taskList].sort((a, b) => {
+      if (a.completed !== b.completed) {
+        return a.completed ? 1 : -1;
+      }
+      if (a.isOverdue !== b.isOverdue) {
+        return a.isOverdue ? -1 : 1;
+      }
+      if (a.dueOn && b.dueOn) {
+        return a.dueOn.localeCompare(b.dueOn);
+      }
+      return a.name.localeCompare(b.name);
+    });
+  };
+
   // Preparação de arquitetura para futuras ações com atualização otimista (Etapa 2)
   const optimisticUpdateTask = useCallback((taskGid: string, updates: Partial<ClientAsanaTask>) => {
     setTasks((prev) => prev.map((t) => (t.gid === taskGid ? { ...t, ...updates } : t)));
@@ -182,15 +198,76 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   useEffect(() => {
     if (!status?.connected) return;
 
-    const unsubscribe = asanaIntegrationService.subscribeToEvents((event) => {
-      // Quando chega evento referente a projetos ou tarefas, sincroniza silenciosamente
-      silentRefresh();
+    const unsubscribe = asanaIntegrationService.subscribeToEvents(async (event) => {
+      const tBrowserReceived = performance.now();
+      const serverTransitLag = event.timing?.serverPublishedAt ? Date.now() - event.timing.serverPublishedAt : null;
+      console.log(`[TIMING] [4. SSE Recebido no Navegador] lagServerToClient=${serverTransitLag !== null ? serverTransitLag + 'ms' : 'n/a'}`);
+
+      // Se o evento for de tarefa e contiver o GID, realiza atualização cirúrgica em ultra-alta velocidade
+      if (event.resourceType === 'task' && event.resourceGid) {
+        const tRefreshStart = performance.now();
+        console.log(`[TIMING] [5. silentRefresh Iniciado (singleTask)] taskGid=${event.resourceGid} delayDesdeSSE=${(tRefreshStart - tBrowserReceived).toFixed(1)}ms`);
+
+        try {
+          const updatedTask = await asanaIntegrationService.getSingleTask(clientId, event.resourceGid);
+
+          setTasks((prev) => {
+            let nextTasks: ClientAsanaTask[];
+            if (updatedTask) {
+              const exists = prev.some((t) => t.gid === updatedTask.gid);
+              nextTasks = exists
+                ? prev.map((t) => (t.gid === updatedTask.gid ? updatedTask : t))
+                : [updatedTask, ...prev];
+            } else {
+              // Tarefa foi deletada ou não encontrada
+              nextTasks = prev.filter((t) => t.gid !== event.resourceGid);
+            }
+
+            const sorted = sortTasks(nextTasks);
+
+            // Atualiza métricas do projeto em memória sem novas requisições
+            const targetProjectGid = updatedTask?.projectGid || event.projectGid;
+            if (targetProjectGid) {
+              setProjects((prevProjects) =>
+                prevProjects.map((p) => {
+                  if (p.projectGid === targetProjectGid) {
+                    const projTasks = sorted.filter((t) => t.projectGid === p.projectGid);
+                    const totalTasks = projTasks.length;
+                    const completedTasks = projTasks.filter((t) => t.completed).length;
+                    const pendingTasks = projTasks.filter((t) => !t.completed).length;
+                    const overdueTasks = projTasks.filter((t) => t.isOverdue).length;
+                    return { ...p, totalTasks, completedTasks, pendingTasks, overdueTasks };
+                  }
+                  return p;
+                })
+              );
+            }
+
+            return sorted;
+          });
+
+          setLastSyncedAt(new Date());
+
+          const tUiUpdated = performance.now();
+          console.log(`[TIMING] [6. Dados Atualizados na UI] duracaoAtualizacao=${(tUiUpdated - tRefreshStart).toFixed(1)}ms tempoTotalCliente=${(tUiUpdated - tBrowserReceived).toFixed(1)}ms`);
+          return;
+        } catch (err) {
+          console.warn('[Cliente360Projetos] Falha na atualização pontual da tarefa, recorrendo a silentRefresh completo:', err);
+        }
+      }
+
+      // Fallback para eventos de projetos, seções ou falhas pontuais
+      const tRefreshStart = performance.now();
+      console.log(`[TIMING] [5. silentRefresh Iniciado (completo)] delayDesdeSSE=${(tRefreshStart - tBrowserReceived).toFixed(1)}ms`);
+      await silentRefresh();
+      const tUiUpdated = performance.now();
+      console.log(`[TIMING] [6. Dados Atualizados na UI] duracaoAtualizacao=${(tUiUpdated - tRefreshStart).toFixed(1)}ms tempoTotalCliente=${(tUiUpdated - tBrowserReceived).toFixed(1)}ms`);
     });
 
     return () => {
       unsubscribe();
     };
-  }, [status?.connected, silentRefresh]);
+  }, [status?.connected, clientId, silentRefresh]);
 
   // Polling de segurança leve: 15s em ambiente DEV para validação ágil, 3 min (180s) em PROD
   useEffect(() => {

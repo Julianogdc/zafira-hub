@@ -96,6 +96,13 @@ export const asanaIntegrationService = {
   },
 
   /**
+   * Obtém os dados de uma única tarefa (para atualização imediata sem overhead)
+   */
+  async getSingleTask(clientId: string, taskGid: string): Promise<ClientAsanaTask | null> {
+    return api.get<ClientAsanaTask | null>(`/clients/${clientId}/asana/tasks/${taskGid}`);
+  },
+
+  /**
    * Obtém a URL oficial para autorização OAuth no Asana
    */
   async getOAuthAuthorizeUrl(): Promise<{ url: string }> {
@@ -134,24 +141,19 @@ export const asanaIntegrationService = {
       console.log('[Asana SSE] connected');
     };
 
-    eventSource.onmessage = (e: MessageEvent) => {
+    const handleData = (raw: string) => {
       console.log('[Asana SSE] event received');
       try {
-        const parsed = JSON.parse(e.data);
+        const parsed = JSON.parse(raw);
         onEvent(parsed);
       } catch (err) {
         console.warn('[AsanaSSE] Falha no parse do evento recebido:', err);
       }
     };
 
+    // Escuta eventos tipados 'asana_event'
     eventSource.addEventListener('asana_event', (e: MessageEvent) => {
-      console.log('[Asana SSE] event received');
-      try {
-        const parsed = JSON.parse(e.data);
-        onEvent(parsed);
-      } catch (err) {
-        console.warn('[AsanaSSE] Falha no parse do evento recebido:', err);
-      }
+      handleData(e.data);
     });
 
     eventSource.onerror = (err) => {
@@ -174,6 +176,11 @@ export interface AsanaRealtimeEvent {
   action?: string;
   timestamp: string;
   details?: any;
+  timing?: {
+    asanaCreatedAt?: string | null;
+    serverReceivedAt?: number;
+    serverPublishedAt?: number;
+  };
 }
 
 
