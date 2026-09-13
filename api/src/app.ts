@@ -9,6 +9,7 @@ import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { clientRoutes } from './modules/clients/clients.routes.js';
 import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
+import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -89,6 +90,9 @@ export function buildApp(): FastifyInstance {
 
   // 8. Rotas de Integração Asana
   app.register(asanaRoutes);
+
+  // 9. Rotas de Integração Postiz
+  app.register(postizRoutes);
 
   return app;
 }

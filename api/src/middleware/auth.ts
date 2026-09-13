@@ -43,7 +43,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
   }
 
   // 2. Verificação de Sessão do Usuário (Cookie 'token' ou Header 'Authorization: Bearer ...')
-  let token: string | undefined = request.cookies.token;
+  let token: string | undefined = request.cookies?.token;
 
   if (!token && request.headers.authorization) {
     const parts = request.headers.authorization.split(' ');
