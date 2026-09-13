@@ -145,19 +145,19 @@ export class PostizClient {
   }
 
   /**
-   * GET /public/v1/is-connected
+   * GET /api/public/v1/is-connected
    */
   async isConnected(): Promise<{ connected: boolean }> {
-    return this.request<{ connected: boolean }>('/public/v1/is-connected', {
+    return this.request<{ connected: boolean }>('/api/public/v1/is-connected', {
       method: 'GET',
     });
   }
 
   /**
-   * GET /public/v1/integrations
+   * GET /api/public/v1/integrations
    */
   async getIntegrations(): Promise<PostizRawAccount[]> {
-    return this.request<PostizRawAccount[]>('/public/v1/integrations', {
+    return this.request<PostizRawAccount[]>('/api/public/v1/integrations', {
       method: 'GET',
     });
   }

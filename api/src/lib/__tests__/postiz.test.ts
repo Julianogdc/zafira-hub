@@ -34,7 +34,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     );
   });
 
-  await t.test('2. PostizClient envia Authorization: <API_KEY> e consome /public/v1/is-connected com sucesso', async () => {
+  await t.test('2. PostizClient envia Authorization: <API_KEY> e consome /api/public/v1/is-connected com sucesso', async () => {
     let capturedUrl = '';
     let capturedHeaders: Record<string, string> = {};
 
@@ -55,10 +55,33 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
 
     const result = await client.isConnected();
 
-    assert.strictEqual(capturedUrl, 'https://postiz.lab.zafiramkt.com.br/public/v1/is-connected');
+    assert.strictEqual(capturedUrl, 'https://postiz.lab.zafiramkt.com.br/api/public/v1/is-connected');
     assert.strictEqual(capturedHeaders['Authorization'], 'test_super_secret_key_123');
     assert.strictEqual(capturedHeaders['Accept'], 'application/json');
     assert.strictEqual(result.connected, true);
+  });
+
+  await t.test('2b. PostizClient consome /api/public/v1/integrations com sucesso', async () => {
+    let capturedUrl = '';
+
+    globalThis.fetch = (async (url: string | URL | Request) => {
+      capturedUrl = url.toString();
+
+      return new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as any;
+
+    const client = new PostizClient({
+      baseUrl: 'https://postiz.lab.zafiramkt.com.br',
+      apiKey: 'test_super_secret_key_123',
+    });
+
+    const result = await client.getIntegrations();
+
+    assert.strictEqual(capturedUrl, 'https://postiz.lab.zafiramkt.com.br/api/public/v1/integrations');
+    assert.deepStrictEqual(result, []);
   });
 
   await t.test('3. PostizClient trata erro 401/403 do Postiz sem vazar a API Key', async () => {
