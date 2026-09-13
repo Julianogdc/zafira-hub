@@ -10,6 +10,21 @@ export class AsanaIntegrationError extends Error {
   }
 }
 
+/**
+ * Normaliza e formata string HTML para a especificação aceita pelo Asana (body tags obrigatórias).
+ */
+export function formatAsanaHtmlNotes(html: string | null | undefined): string | null {
+  if (html === null || html === undefined) return null;
+  const trimmed = html.trim();
+  if (!trimmed || trimmed === '<p></p>' || trimmed === '<p><br></p>') {
+    return '<body></body>';
+  }
+  if (trimmed.startsWith('<body>') && trimmed.endsWith('</body>')) {
+    return trimmed;
+  }
+  return `<body>${trimmed}</body>`;
+}
+
 export interface AsanaStatus {
   configured: boolean;
   connected: boolean;
@@ -127,6 +142,7 @@ export interface ClientAsanaTask {
   gid: string;
   name: string;
   notes?: string | null;
+  htmlNotes?: string | null;
   completed: boolean;
   dueOn: string | null;
   dueAt: string | null;
@@ -618,7 +634,7 @@ export class AsanaService {
 
     try {
       const t = await this.fetchAsana<any>(
-        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_options.name,custom_fields.enum_options.color,custom_fields.enum_options.enabled,custom_fields.enum_value.name,custom_fields.enum_value.color`,
+        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,html_notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_options.name,custom_fields.enum_options.color,custom_fields.enum_options.enabled,custom_fields.enum_value.name,custom_fields.enum_value.color`,
         token
       );
 
@@ -682,6 +698,7 @@ export class AsanaService {
         gid: t.gid,
         name: t.name,
         notes: t.notes || null,
+        htmlNotes: t.html_notes || null,
         completed: t.completed || false,
         dueOn: t.due_on || null,
         dueAt: t.due_at || null,
@@ -723,6 +740,7 @@ export class AsanaService {
     data: {
       name?: string;
       notes?: string | null;
+      html_notes?: string | null;
       completed?: boolean;
       due_on?: string | null;
       due_at?: string | null;
@@ -762,6 +780,7 @@ export class AsanaService {
     const payloadData: Record<string, any> = {};
     if (data.name !== undefined) payloadData.name = data.name;
     if (data.notes !== undefined) payloadData.notes = data.notes ?? '';
+    if (data.html_notes !== undefined) payloadData.html_notes = formatAsanaHtmlNotes(data.html_notes);
     if (data.completed !== undefined) payloadData.completed = data.completed;
     if (data.due_on !== undefined) payloadData.due_on = data.due_on;
     if (data.due_at !== undefined) payloadData.due_at = data.due_at;
@@ -806,6 +825,7 @@ export class AsanaService {
       projectGid: string;
       name: string;
       notes?: string | null;
+      html_notes?: string | null;
       due_on?: string | null;
       assignee?: string | null;
       sectionGid?: string | null;
@@ -839,6 +859,9 @@ export class AsanaService {
 
     if (data.notes !== undefined && data.notes !== null) {
       taskPayload.notes = data.notes;
+    }
+    if (data.html_notes !== undefined && data.html_notes !== null) {
+      taskPayload.html_notes = formatAsanaHtmlNotes(data.html_notes);
     }
     if (data.due_on !== undefined && data.due_on !== null) {
       taskPayload.due_on = data.due_on;

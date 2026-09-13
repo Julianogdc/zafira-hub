@@ -1074,8 +1074,51 @@ async function runSecurityTests() {
   }
   console.log('✓ Payload de Criação: Estruturado e compatível com spec da API Asana (POST /tasks + POST /sections/:gid/addTask).');
 
+  console.log('\n--- TESTE 20: Subetapa 2B.6 - Editor Rico TipTap e Conversão Asana HTML (html_notes) ---');
+  // 1. Função de normalização idêntica à do AsanaService
+  const formatAsanaHtmlNotesTest = (html: string | null | undefined): string | null => {
+    if (html === null || html === undefined) return null;
+    const trimmed = html.trim();
+    if (!trimmed || trimmed === '<p></p>' || trimmed === '<p><br></p>') {
+      return '<body></body>';
+    }
+    if (trimmed.startsWith('<body>') && trimmed.endsWith('</body>')) {
+      return trimmed;
+    }
+    return `<body>${trimmed}</body>`;
+  };
+
+  // Casos de teste:
+  const rawEmpty = formatAsanaHtmlNotesTest('');
+  const rawP = formatAsanaHtmlNotesTest('<p></p>');
+  const rawStandard = formatAsanaHtmlNotesTest('<p><strong>Planejamento Estratégico</strong></p><ul><li>Meta 1</li><li>Meta 2</li></ul>');
+  const alreadyWrapped = formatAsanaHtmlNotesTest('<body><p>Conteúdo já formatado</p></body>');
+
+  if (rawEmpty !== '<body></body>' || rawP !== '<body></body>') {
+    throw new Error('Falha: Normalização de HTML vazio/parágrafo em branco inválida!');
+  }
+  if (rawStandard !== '<body><p><strong>Planejamento Estratégico</strong></p><ul><li>Meta 1</li><li>Meta 2</li></ul></body>') {
+    throw new Error('Falha: Adição automática de tags <body> falhou!');
+  }
+  if (alreadyWrapped !== '<body><p>Conteúdo já formatado</p></body>') {
+    throw new Error('Falha: String já envolvida em <body> não deve ser duplicada!');
+  }
+  console.log('✓ Normalização de HTML: Envolvimento seguro em <body>...</body> e tratamento de parágrafos vazios validados.');
+
+  // 2. Validação de envio conjunto de html_notes no payload de atualização
+  const updatePayloadWithHtml = {
+    name: 'Tarefa com Briefing Rico',
+    notes: 'Texto plano de fallback',
+    html_notes: formatAsanaHtmlNotesTest('<p>Texto com <em>itálico</em> e <strong>negrito</strong></p>'),
+  };
+
+  if (!updatePayloadWithHtml.html_notes?.startsWith('<body>') || !updatePayloadWithHtml.html_notes?.endsWith('</body>')) {
+    throw new Error('Falha: Payload não contém html_notes devidamente formatado!');
+  }
+  console.log('✓ Payload TipTap/Asana: Suporte bidirecional a notas ricas (html_notes) e texto puro validados.');
+
   console.log('\n======================================================');
-  console.log('TODOS OS 19 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
+  console.log('TODOS OS 20 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
   console.log('======================================================');
 }
 

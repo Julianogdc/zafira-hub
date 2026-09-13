@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { TiptapEditor } from '@/components/projects/TiptapEditor';
 import {
   Select,
   SelectContent,
@@ -123,6 +124,7 @@ export function AsanaTaskDetailSheet({
   // Campos de edição local
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
+  const [htmlNotes, setHtmlNotes] = useState('');
   const [dueOn, setDueOn] = useState('');
   const [assigneeGid, setAssigneeGid] = useState<string>('unassigned');
   const [sectionGid, setSectionGid] = useState<string>('none');
@@ -133,6 +135,7 @@ export function AsanaTaskDetailSheet({
       setFullTask(task);
       setName(task.name || '');
       setNotes(task.notes || '');
+      setHtmlNotes(task.htmlNotes || task.notes || '');
       setDueOn(task.dueOn ? task.dueOn.split('T')[0] : '');
       setAssigneeGid(task.assignee?.gid || 'unassigned');
       setSectionGid(task.sectionGid || 'none');
@@ -219,6 +222,7 @@ export function AsanaTaskDetailSheet({
             setFullTask(detailed);
             setName(detailed.name || '');
             setNotes(detailed.notes || '');
+            setHtmlNotes(detailed.htmlNotes || detailed.notes || '');
             setDueOn(detailed.dueOn ? detailed.dueOn.split('T')[0] : '');
             setAssigneeGid(detailed.assignee?.gid || 'unassigned');
             setSectionGid(detailed.sectionGid || 'none');
@@ -313,6 +317,7 @@ export function AsanaTaskDetailSheet({
       ...currentTask,
       name: name.trim(),
       notes: notes.trim(),
+      htmlNotes: htmlNotes.trim() ? htmlNotes : null,
       dueOn: dueOn || null,
       assignee: targetAssignee
         ? {
@@ -329,6 +334,7 @@ export function AsanaTaskDetailSheet({
     const payload: UpdateAsanaTaskInput = {
       name: name.trim(),
       notes: notes.trim(),
+      html_notes: htmlNotes.trim() ? htmlNotes : undefined,
       due_on: dueOn || null,
       assignee: assigneeGid === 'unassigned' ? null : assigneeGid,
       custom_fields: Object.keys(customFieldValues).length > 0 ? customFieldValues : undefined,
@@ -347,6 +353,7 @@ export function AsanaTaskDetailSheet({
       onTaskUpdated(previousTask);
       setName(previousTask.name || '');
       setNotes(previousTask.notes || '');
+      setHtmlNotes(previousTask.htmlNotes || previousTask.notes || '');
       setDueOn(previousTask.dueOn ? previousTask.dueOn.split('T')[0] : '');
       setAssigneeGid(previousTask.assignee?.gid || 'unassigned');
       toast.error(`Falha ao salvar alterações: ${err?.message || 'Erro no Asana'}`);
@@ -845,27 +852,33 @@ export function AsanaTaskDetailSheet({
 
             {/* ABA 1: GERAL (Descrição, Tags, Campos Personalizados) */}
             <TabsContent value="geral" className="space-y-6 focus-visible:outline-none">
-              {/* Descrição / Notes */}
+              {/* Descrição Rica / Notes com TipTap */}
               <div className="space-y-2">
                 <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
                   <FileText className="w-3.5 h-3.5 text-zinc-500" />
-                  Descrição / Notas da Tarefa
+                  Descrição / Notas da Tarefa (Editor Rico)
                 </label>
 
                 {canManage ? (
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
+                  <TiptapEditor
+                    value={htmlNotes || notes}
+                    onChange={(html) => {
+                      setHtmlNotes(html);
+                      // Extrai texto puro para fallback
+                      const tempDiv = document.createElement('div');
+                      tempDiv.innerHTML = html;
+                      setNotes(tempDiv.textContent || tempDiv.innerText || '');
+                    }}
                     placeholder="Adicione detalhes, orientações ou notas para esta tarefa..."
-                    rows={7}
-                    className="bg-zinc-900/50 border-white/10 text-xs text-zinc-200 leading-relaxed resize-y focus-visible:ring-emerald-500/50"
+                    className="min-h-[160px]"
                   />
                 ) : (
-                  <div className="p-3.5 rounded-lg bg-zinc-900/40 border border-white/5 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed min-h-[100px]">
-                    {currentTask.notes || (
-                      <span className="text-zinc-600 italic">Nenhuma descrição informada no Asana.</span>
-                    )}
-                  </div>
+                  <div
+                    className="p-3.5 rounded-lg bg-zinc-900/40 border border-white/5 text-xs text-zinc-300 leading-relaxed min-h-[100px] prose prose-sm prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{
+                      __html: htmlNotes || notes || '<span class="text-zinc-600 italic">Nenhuma descrição informada no Asana.</span>',
+                    }}
+                  />
                 )}
               </div>
 

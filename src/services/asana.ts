@@ -116,6 +116,7 @@ export interface AsanaAttachment {
 export interface UpdateAsanaTaskInput {
   name?: string;
   notes?: string | null;
+  html_notes?: string | null;
   completed?: boolean;
   due_on?: string | null;
   due_at?: string | null;
@@ -128,6 +129,7 @@ export interface CreateAsanaTaskInput {
   projectGid: string;
   name: string;
   notes?: string | null;
+  html_notes?: string | null;
   due_on?: string | null;
   assignee?: string | null;
   sectionGid?: string | null;
@@ -137,6 +139,7 @@ export interface ClientAsanaTask {
   gid: string;
   name: string;
   notes?: string | null;
+  htmlNotes?: string | null;
   completed: boolean;
   dueOn: string | null;
   dueAt: string | null;

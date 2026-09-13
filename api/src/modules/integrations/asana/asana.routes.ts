@@ -13,6 +13,7 @@ const linkProjectsSchema = z.object({
 const updateTaskSchema = z.object({
   name: z.string().min(1, 'O nome da tarefa não pode estar vazio').optional(),
   notes: z.string().nullable().optional(),
+  html_notes: z.string().nullable().optional(),
   completed: z.boolean().optional(),
   due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
   due_at: z.string().nullable().optional(),
@@ -25,6 +26,7 @@ const createTaskSchema = z.object({
   projectGid: z.string().min(1, 'Projeto de destino é obrigatório'),
   name: z.string().min(1, 'Título da tarefa é obrigatório'),
   notes: z.string().nullable().optional(),
+  html_notes: z.string().nullable().optional(),
   due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
   assignee: z.string().nullable().optional(),
   sectionGid: z.string().nullable().optional(),
