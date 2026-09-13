@@ -61,6 +61,32 @@ export interface AsanaCustomField {
   type: string;
 }
 
+export interface AsanaSubtask {
+  gid: string;
+  name: string;
+  completed: boolean;
+  dueOn: string | null;
+  dueAt: string | null;
+  assignee?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
+export interface AsanaStory {
+  gid: string;
+  text: string;
+  htmlText?: string | null;
+  type: 'comment' | 'system';
+  createdAt: string;
+  createdBy?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
 export interface AsanaUser {
   gid: string;
   name: string;
@@ -815,6 +841,216 @@ export class AsanaService {
     }
 
     return updated;
+  }
+
+  /**
+   * Helper privado para validar se a tarefa informada pertence a projetos vinculados ao cliente
+   */
+  private async validateTaskBelongsToClient(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<{ token: string; task: any }> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Cliente ou projetos vinculados não encontrados.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+    const task = await this.fetchAsana<any>(`/tasks/${taskGid}?opt_fields=projects.gid,parent.projects.gid`, token);
+    if (!task || !task.gid) {
+      throw new AsanaIntegrationError(404, 'Tarefa não encontrada no Asana.');
+    }
+
+    const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+    const belongsDirectly = task.projects?.some((p: any) => clientProjectGids.has(p.gid));
+    const belongsViaParent = task.parent?.projects?.some((p: any) => clientProjectGids.has(p.gid));
+
+    if (!belongsDirectly && !belongsViaParent) {
+      throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos vinculados a este cliente.');
+    }
+
+    return { token, task };
+  }
+
+  /**
+   * Lista subtarefas de uma tarefa Asana vinculada ao cliente.
+   */
+  async getTaskSubtasks(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaSubtask[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const subtasks = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/subtasks?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo`,
+        token
+      );
+
+      if (!Array.isArray(subtasks)) return [];
+
+      return subtasks.map((st) => ({
+        gid: st.gid,
+        name: st.name || 'Subtarefa sem título',
+        completed: Boolean(st.completed),
+        dueOn: st.due_on || null,
+        dueAt: st.due_at || null,
+        assignee: st.assignee
+          ? {
+              gid: st.assignee.gid,
+              name: st.assignee.name,
+              photoUrl: st.assignee.photo?.image_60x60 || null,
+            }
+          : null,
+      }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar subtarefas da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Cria uma nova subtarefa no Asana.
+   */
+  async createTaskSubtask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    data: {
+      name: string;
+      due_on?: string | null;
+      assignee?: string | null;
+    }
+  ): Promise<AsanaSubtask> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    const payload: Record<string, any> = {
+      name: data.name.trim(),
+    };
+    if (data.due_on) payload.due_on = data.due_on;
+    if (data.assignee) payload.assignee = data.assignee;
+
+    const res = await this.fetchAsana<any>(`/tasks/${taskGid}/subtasks`, token, {
+      method: 'POST',
+      body: JSON.stringify({ data: payload }),
+    });
+
+    if (!res || !res.gid) {
+      throw new AsanaIntegrationError(500, 'Não foi possível criar a subtarefa no Asana.');
+    }
+
+    // Busca dados populados da subtarefa criada
+    const created = await this.fetchAsana<any>(
+      `/tasks/${res.gid}?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo`,
+      token
+    );
+
+    return {
+      gid: created.gid,
+      name: created.name || data.name,
+      completed: Boolean(created.completed),
+      dueOn: created.due_on || null,
+      dueAt: created.due_at || null,
+      assignee: created.assignee
+        ? {
+            gid: created.assignee.gid,
+            name: created.assignee.name,
+            photoUrl: created.assignee.photo?.image_60x60 || null,
+          }
+        : null,
+    };
+  }
+
+  /**
+   * Lista histórico de comentários e atividades (stories) da tarefa.
+   */
+  async getTaskStories(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaStory[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const stories = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/stories?opt_fields=text,html_text,created_at,created_by.name,created_by.photo,type,resource_subtype`,
+        token
+      );
+
+      if (!Array.isArray(stories)) return [];
+
+      return stories
+        .filter((s) => Boolean(s.text || s.html_text))
+        .map((s) => ({
+          gid: s.gid,
+          text: s.text || '',
+          htmlText: s.html_text || null,
+          type: s.resource_subtype === 'comment_added' || s.type === 'comment' ? ('comment' as const) : ('system' as const),
+          createdAt: s.created_at || new Date().toISOString(),
+          createdBy: s.created_by
+            ? {
+                gid: s.created_by.gid,
+                name: s.created_by.name,
+                photoUrl: s.created_by.photo?.image_60x60 || null,
+              }
+            : null,
+        }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar stories da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Adiciona um comentário oficial na tarefa do Asana.
+   */
+  async addTaskComment(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    text: string
+  ): Promise<AsanaStory> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    const res = await this.fetchAsana<any>(`/tasks/${taskGid}/stories`, token, {
+      method: 'POST',
+      body: JSON.stringify({
+        data: {
+          text: text.trim(),
+        },
+      }),
+    });
+
+    if (!res || !res.gid) {
+      throw new AsanaIntegrationError(500, 'Não foi possível adicionar o comentário no Asana.');
+    }
+
+    return {
+      gid: res.gid,
+      text: res.text || text,
+      htmlText: res.html_text || null,
+      type: 'comment',
+      createdAt: res.created_at || new Date().toISOString(),
+      createdBy: res.created_by
+        ? {
+            gid: res.created_by.gid,
+            name: res.created_by.name,
+            photoUrl: res.created_by.photo?.image_60x60 || null,
+          }
+        : null,
+    };
   }
 
   /**

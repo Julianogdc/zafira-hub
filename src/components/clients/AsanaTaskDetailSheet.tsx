@@ -22,9 +22,12 @@ import {
   ClientAsanaTask,
   AsanaUser,
   AsanaSection,
+  AsanaSubtask,
+  AsanaStory,
   asanaIntegrationService,
   UpdateAsanaTaskInput,
 } from '@/services/asana';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import {
   CheckCircle2,
@@ -42,6 +45,13 @@ import {
   FileText,
   Layers,
   ArrowRightLeft,
+  CheckSquare,
+  MessageSquare,
+  History,
+  Send,
+  Plus,
+  Check,
+  Circle,
 } from 'lucide-react';
 
 interface AsanaTaskDetailSheetProps {
@@ -72,6 +82,21 @@ export function AsanaTaskDetailSheet({
   // Seções disponíveis no projeto da tarefa
   const [projectSections, setProjectSections] = useState<AsanaSection[]>([]);
   const [isLoadingSections, setIsLoadingSections] = useState(false);
+
+  // Subtarefas
+  const [subtasks, setSubtasks] = useState<AsanaSubtask[]>([]);
+  const [isLoadingSubtasks, setIsLoadingSubtasks] = useState(false);
+  const [newSubtaskName, setNewSubtaskName] = useState('');
+  const [isCreatingSubtask, setIsCreatingSubtask] = useState(false);
+
+  // Comentários e Histórico (Stories)
+  const [stories, setStories] = useState<AsanaStory[]>([]);
+  const [isLoadingStories, setIsLoadingStories] = useState(false);
+  const [newCommentText, setNewCommentText] = useState('');
+  const [isPostingComment, setIsPostingComment] = useState(false);
+
+  // Aba ativa
+  const [activeTab, setActiveTab] = useState<'geral' | 'subtarefas' | 'atividades'>('geral');
 
   // Campos de edição local
   const [name, setName] = useState('');
@@ -105,6 +130,34 @@ export function AsanaTaskDetailSheet({
             setIsLoadingSections(false);
           });
       }
+
+      // Busca subtarefas
+      setIsLoadingSubtasks(true);
+      asanaIntegrationService
+        .getTaskSubtasks(clientId, task.gid)
+        .then((items) => {
+          setSubtasks(items);
+        })
+        .catch((err) => {
+          console.warn('[AsanaTaskDetailSheet] Erro ao buscar subtarefas:', err);
+        })
+        .finally(() => {
+          setIsLoadingSubtasks(false);
+        });
+
+      // Busca comentários e histórico (stories)
+      setIsLoadingStories(true);
+      asanaIntegrationService
+        .getTaskStories(clientId, task.gid)
+        .then((items) => {
+          setStories(items);
+        })
+        .catch((err) => {
+          console.warn('[AsanaTaskDetailSheet] Erro ao buscar stories:', err);
+        })
+        .finally(() => {
+          setIsLoadingStories(false);
+        });
 
       // Busca dados enriquecidos (notes, tags, custom_fields) da API
       setIsLoadingDetails(true);
@@ -287,6 +340,89 @@ export function AsanaTaskDetailSheet({
       toast.error(`Falha ao mover seção: ${err?.message || 'Erro no Asana'}`);
     } finally {
       setIsMovingSection(false);
+    }
+  };
+
+  // Alternar conclusão de Subtarefa (Optimistic Update + Rollback)
+  const handleToggleSubtaskComplete = async (subtask: AsanaSubtask) => {
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem alterar subtarefas.');
+      return;
+    }
+
+    const previousSubtasks = [...subtasks];
+    const nextCompleted = !subtask.completed;
+
+    // Optimistic update
+    setSubtasks((prev) =>
+      prev.map((s) => (s.gid === subtask.gid ? { ...s, completed: nextCompleted } : s))
+    );
+
+    try {
+      await asanaIntegrationService.updateTask(clientId, subtask.gid, {
+        completed: nextCompleted,
+      });
+      toast.success(nextCompleted ? 'Subtarefa concluída!' : 'Subtarefa reaberta!');
+    } catch (err: any) {
+      // Rollback
+      setSubtasks(previousSubtasks);
+      toast.error(`Falha ao atualizar subtarefa: ${err?.message || 'Erro no Asana'}`);
+    }
+  };
+
+  // Criar nova Subtarefa
+  const handleCreateSubtask = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem criar subtarefas.');
+      return;
+    }
+    if (!newSubtaskName.trim()) {
+      toast.error('O nome da subtarefa não pode ficar vazio.');
+      return;
+    }
+
+    try {
+      setIsCreatingSubtask(true);
+      const created = await asanaIntegrationService.createTaskSubtask(clientId, currentTask.gid, {
+        name: newSubtaskName.trim(),
+      });
+      setSubtasks((prev) => [...prev, created]);
+      setNewSubtaskName('');
+      toast.success('Subtarefa adicionada com sucesso!');
+    } catch (err: any) {
+      toast.error(`Falha ao criar subtarefa: ${err?.message || 'Erro no Asana'}`);
+    } finally {
+      setIsCreatingSubtask(false);
+    }
+  };
+
+  // Adicionar Comentário no Asana
+  const handlePostComment = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem comentar.');
+      return;
+    }
+    if (!newCommentText.trim()) {
+      toast.error('O comentário não pode ficar vazio.');
+      return;
+    }
+
+    try {
+      setIsPostingComment(true);
+      const created = await asanaIntegrationService.addTaskComment(
+        clientId,
+        currentTask.gid,
+        newCommentText.trim()
+      );
+      setStories((prev) => [...prev, created]);
+      setNewCommentText('');
+      toast.success('Comentário publicado no Asana!');
+    } catch (err: any) {
+      toast.error(`Falha ao publicar comentário: ${err?.message || 'Erro no Asana'}`);
+    } finally {
+      setIsPostingComment(false);
     }
   };
 
@@ -496,71 +632,310 @@ export function AsanaTaskDetailSheet({
             </div>
           </div>
 
-          {/* Descrição / Notes */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-              <FileText className="w-3.5 h-3.5 text-zinc-500" />
-              Descrição / Notas da Tarefa
-            </label>
+          {/* Abas de Conteúdo: Geral, Subtarefas, Comentários & Atividades */}
+          <Tabs
+            value={activeTab}
+            onValueChange={(val) => setActiveTab(val as any)}
+            className="w-full space-y-4"
+          >
+            <TabsList className="bg-zinc-900/80 border border-white/10 p-1 w-full grid grid-cols-3 h-10 rounded-lg">
+              <TabsTrigger
+                value="geral"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+              >
+                <FileText className="w-3.5 h-3.5 text-zinc-400" />
+                Geral
+              </TabsTrigger>
+              <TabsTrigger
+                value="subtarefas"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+              >
+                <CheckSquare className="w-3.5 h-3.5 text-zinc-400" />
+                Subtarefas
+                {subtasks.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-zinc-700 text-zinc-300">
+                    {subtasks.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
+                value="atividades"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
+                Comentários
+                {stories.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-zinc-700 text-zinc-300">
+                    {stories.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            </TabsList>
 
-            {canManage ? (
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Adicione detalhes, orientações ou notas para esta tarefa..."
-                rows={7}
-                className="bg-zinc-900/50 border-white/10 text-xs text-zinc-200 leading-relaxed resize-y focus-visible:ring-emerald-500/50"
-              />
-            ) : (
-              <div className="p-3.5 rounded-lg bg-zinc-900/40 border border-white/5 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed min-h-[100px]">
-                {currentTask.notes || (
-                  <span className="text-zinc-600 italic">Nenhuma descrição informada no Asana.</span>
+            {/* ABA 1: GERAL (Descrição, Tags, Campos Personalizados) */}
+            <TabsContent value="geral" className="space-y-6 focus-visible:outline-none">
+              {/* Descrição / Notes */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                  <FileText className="w-3.5 h-3.5 text-zinc-500" />
+                  Descrição / Notas da Tarefa
+                </label>
+
+                {canManage ? (
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Adicione detalhes, orientações ou notas para esta tarefa..."
+                    rows={7}
+                    className="bg-zinc-900/50 border-white/10 text-xs text-zinc-200 leading-relaxed resize-y focus-visible:ring-emerald-500/50"
+                  />
+                ) : (
+                  <div className="p-3.5 rounded-lg bg-zinc-900/40 border border-white/5 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed min-h-[100px]">
+                    {currentTask.notes || (
+                      <span className="text-zinc-600 italic">Nenhuma descrição informada no Asana.</span>
+                    )}
+                  </div>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* Tags (Somente Leitura nesta etapa) */}
-          {currentTask.tags && currentTask.tags.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-white/5">
-              <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-                <Tag className="w-3.5 h-3.5 text-zinc-500" />
-                Tags ({currentTask.tags.length})
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {currentTask.tags.map((tag) => (
-                  <Badge
-                    key={tag.gid}
-                    variant="outline"
-                    className="bg-white/5 border-white/10 text-zinc-300 text-[11px] py-0.5 px-2 font-normal"
-                  >
-                    #{tag.name}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Campos Personalizados (Somente Leitura nesta etapa) */}
-          {currentTask.customFields && currentTask.customFields.length > 0 && (
-            <div className="space-y-2 pt-2 border-t border-white/5">
-              <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5 text-zinc-500" />
-                Campos Personalizados ({currentTask.customFields.length})
-              </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {currentTask.customFields.map((cf) => (
-                  <div
-                    key={cf.gid}
-                    className="p-2.5 rounded-lg bg-zinc-900/40 border border-white/5 space-y-0.5"
-                  >
-                    <p className="text-[10px] text-zinc-500 truncate">{cf.name}</p>
-                    <p className="text-xs font-medium text-zinc-200 truncate">{cf.value}</p>
+              {/* Tags */}
+              {currentTask.tags && currentTask.tags.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-zinc-500" />
+                    Tags ({currentTask.tags.length})
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {currentTask.tags.map((tag) => (
+                      <Badge
+                        key={tag.gid}
+                        variant="outline"
+                        className="bg-white/5 border-white/10 text-zinc-300 text-[11px] py-0.5 px-2 font-normal"
+                      >
+                        #{tag.name}
+                      </Badge>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
+                </div>
+              )}
+
+              {/* Campos Personalizados */}
+              {currentTask.customFields && currentTask.customFields.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                    <Sliders className="w-3.5 h-3.5 text-zinc-500" />
+                    Campos Personalizados ({currentTask.customFields.length})
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {currentTask.customFields.map((cf) => (
+                      <div
+                        key={cf.gid}
+                        className="p-2.5 rounded-lg bg-zinc-900/40 border border-white/5 space-y-0.5"
+                      >
+                        <p className="text-[10px] text-zinc-500 truncate">{cf.name}</p>
+                        <p className="text-xs font-medium text-zinc-200 truncate">{cf.value}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ABA 2: SUBTAREFAS */}
+            <TabsContent value="subtarefas" className="space-y-4 focus-visible:outline-none">
+              {/* Criação de Subtarefa */}
+              {canManage && (
+                <form onSubmit={handleCreateSubtask} className="flex items-center gap-2">
+                  <Input
+                    value={newSubtaskName}
+                    onChange={(e) => setNewSubtaskName(e.target.value)}
+                    placeholder="Adicionar nova subtarefa..."
+                    disabled={isCreatingSubtask}
+                    className="bg-zinc-900 border-white/10 text-xs h-9 text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-emerald-500/50"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={isCreatingSubtask || !newSubtaskName.trim()}
+                    className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shrink-0"
+                  >
+                    {isCreatingSubtask ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5" />
+                        Adicionar
+                      </>
+                    )}
+                  </Button>
+                </form>
+              )}
+
+              {/* Lista de Subtarefas */}
+              {isLoadingSubtasks ? (
+                <div className="py-8 flex flex-col items-center justify-center text-zinc-500 text-xs gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                  <span>Carregando subtarefas...</span>
+                </div>
+              ) : subtasks.length === 0 ? (
+                <div className="py-8 text-center text-zinc-500 text-xs italic bg-zinc-900/20 rounded-lg border border-white/5">
+                  Nenhuma subtarefa cadastrada no Asana para esta demanda.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {subtasks.map((st) => (
+                    <div
+                      key={st.gid}
+                      className="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-900/40 border border-white/5 hover:border-white/10 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSubtaskComplete(st)}
+                          disabled={!canManage}
+                          className={`w-5 h-5 rounded flex items-center justify-center border transition-colors shrink-0 ${
+                            st.completed
+                              ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400'
+                              : 'border-zinc-700 hover:border-emerald-500/50 text-transparent'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                        </button>
+                        <span
+                          className={`text-xs truncate ${
+                            st.completed ? 'line-through text-zinc-500' : 'text-zinc-200'
+                          }`}
+                        >
+                          {st.name}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 text-[11px] text-zinc-400">
+                        {st.assignee && (
+                          <span className="flex items-center gap-1.5 bg-zinc-800/60 px-2 py-0.5 rounded text-zinc-300">
+                            <User className="w-3 h-3 text-zinc-500" />
+                            {st.assignee.name}
+                          </span>
+                        )}
+                        {st.dueOn && (
+                          <span className="flex items-center gap-1 bg-zinc-800/60 px-2 py-0.5 rounded text-zinc-300">
+                            <Calendar className="w-3 h-3 text-zinc-500" />
+                            {formatDateDisplay(st.dueOn)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ABA 3: COMENTÁRIOS E HISTÓRICO */}
+            <TabsContent value="atividades" className="space-y-4 focus-visible:outline-none">
+              {isLoadingStories ? (
+                <div className="py-8 flex flex-col items-center justify-center text-zinc-500 text-xs gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                  <span>Carregando comentários e histórico...</span>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {stories.length === 0 ? (
+                    <div className="py-6 text-center text-zinc-500 text-xs italic bg-zinc-900/20 rounded-lg border border-white/5">
+                      Nenhum comentário ou atividade registrada no Asana ainda.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {stories.map((s) => (
+                        <div
+                          key={s.gid}
+                          className={`p-3.5 rounded-xl border text-xs leading-relaxed ${
+                            s.type === 'comment'
+                              ? 'bg-zinc-900/60 border-white/10 space-y-1.5'
+                              : 'bg-zinc-950/40 border-white/5 text-zinc-400 flex items-start gap-2.5 py-2'
+                          }`}
+                        >
+                          {s.type === 'comment' ? (
+                            <>
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  {s.createdBy?.photoUrl ? (
+                                    <img
+                                      src={s.createdBy.photoUrl}
+                                      alt={s.createdBy.name}
+                                      className="w-5 h-5 rounded-full"
+                                    />
+                                  ) : (
+                                    <div className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-[10px] font-semibold">
+                                      {(s.createdBy?.name || 'U').charAt(0).toUpperCase()}
+                                    </div>
+                                  )}
+                                  <span className="font-medium text-zinc-200">
+                                    {s.createdBy?.name || 'Usuário Asana'}
+                                  </span>
+                                </div>
+                                <span className="text-[10px] text-zinc-500">
+                                  {formatDateDisplay(s.createdAt)}
+                                </span>
+                              </div>
+                              <p className="text-zinc-300 pl-7 whitespace-pre-wrap">{s.text}</p>
+                            </>
+                          ) : (
+                            <>
+                              <History className="w-3.5 h-3.5 text-zinc-600 mt-0.5 shrink-0" />
+                              <div className="flex-1 flex items-center justify-between gap-2">
+                                <span className="text-[11px] text-zinc-400">{s.text}</span>
+                                <span className="text-[10px] text-zinc-600 shrink-0">
+                                  {formatDateDisplay(s.createdAt)}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Caixa de Envio de Comentário */}
+                  {canManage && (
+                    <form onSubmit={handlePostComment} className="pt-2 border-t border-white/10 space-y-2">
+                      <label className="text-xs font-medium text-zinc-400 flex items-center gap-1.5">
+                        <MessageSquare className="w-3.5 h-3.5 text-zinc-500" />
+                        Adicionar Comentário no Asana
+                      </label>
+                      <Textarea
+                        value={newCommentText}
+                        onChange={(e) => setNewCommentText(e.target.value)}
+                        placeholder="Escreva um comentário para sincronizar diretamente com o Asana..."
+                        rows={3}
+                        disabled={isPostingComment}
+                        className="bg-zinc-900 border-white/10 text-xs text-zinc-200 resize-none focus-visible:ring-emerald-500/50"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={isPostingComment || !newCommentText.trim()}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-8 px-3 gap-1.5"
+                        >
+                          {isPostingComment ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              Enviando...
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-3 h-3" />
+                              Comentar
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
 
           {!canManage && (
             <p className="text-[11px] text-zinc-500 italic text-center pt-2">

@@ -414,6 +414,150 @@ export async function asanaRoutes(app: FastifyInstance) {
     postTaskSectionHandler
   );
 
+  // 6.5 Subtarefas: GET e POST
+  const createSubtaskSchema = z.object({
+    name: z.string().min(1, 'O nome da subtarefa não pode estar vazio'),
+    due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
+    assignee: z.string().nullable().optional(),
+  });
+
+  const getSubtasksHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const subtasks = await asanaService.getTaskSubtasks(
+        request.params.id,
+        organizationId,
+        request.params.taskGid
+      );
+      return reply.status(200).send(subtasks);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/clients/:id/asana/tasks/:taskGid/subtasks',
+    {
+      preHandler: [authenticate],
+    },
+    getSubtasksHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks/:taskGid/subtasks',
+    {
+      preHandler: [authenticate],
+    },
+    getSubtasksHandler
+  );
+
+  const postSubtaskHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const parsedBody = createSubtaskSchema.parse(request.body);
+      const created = await asanaService.createTaskSubtask(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        parsedBody
+      );
+      return reply.status(201).send(created);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks/:taskGid/subtasks',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postSubtaskHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks/:taskGid/subtasks',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postSubtaskHandler
+  );
+
+  // 6.6 Histórico e Comentários (Stories): GET e POST
+  const addCommentSchema = z.object({
+    text: z.string().min(1, 'O comentário não pode estar vazio'),
+  });
+
+  const getStoriesHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const stories = await asanaService.getTaskStories(
+        request.params.id,
+        organizationId,
+        request.params.taskGid
+      );
+      return reply.status(200).send(stories);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/clients/:id/asana/tasks/:taskGid/stories',
+    {
+      preHandler: [authenticate],
+    },
+    getStoriesHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks/:taskGid/stories',
+    {
+      preHandler: [authenticate],
+    },
+    getStoriesHandler
+  );
+
+  const postStoryHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const { text } = addCommentSchema.parse(request.body);
+      const story = await asanaService.addTaskComment(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        text
+      );
+      return reply.status(201).send(story);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks/:taskGid/stories',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postStoryHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks/:taskGid/stories',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postStoryHandler
+  );
+
   function getOAuthRedirectUri(): string {
     return process.env.ASANA_REDIRECT_URI || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
   }

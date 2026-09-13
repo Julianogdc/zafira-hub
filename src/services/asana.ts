@@ -58,6 +58,32 @@ export interface AsanaSection {
   name: string;
 }
 
+export interface AsanaSubtask {
+  gid: string;
+  name: string;
+  completed: boolean;
+  dueOn: string | null;
+  dueAt: string | null;
+  assignee?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
+export interface AsanaStory {
+  gid: string;
+  text: string;
+  htmlText?: string | null;
+  type: 'comment' | 'system';
+  createdAt: string;
+  createdBy?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
 export interface UpdateAsanaTaskInput {
   name?: string;
   notes?: string | null;
@@ -159,6 +185,38 @@ export const asanaIntegrationService = {
    */
   async moveTaskSection(clientId: string, taskGid: string, sectionGid: string): Promise<ClientAsanaTask> {
     return api.post<ClientAsanaTask>(`/clients/${clientId}/asana/tasks/${taskGid}/section`, { sectionGid });
+  },
+
+  /**
+   * Busca subtarefas de uma tarefa no Asana
+   */
+  async getTaskSubtasks(clientId: string, taskGid: string): Promise<AsanaSubtask[]> {
+    return api.get<AsanaSubtask[]>(`/clients/${clientId}/asana/tasks/${taskGid}/subtasks`);
+  },
+
+  /**
+   * Cria uma nova subtarefa no Asana
+   */
+  async createTaskSubtask(
+    clientId: string,
+    taskGid: string,
+    data: { name: string; due_on?: string | null; assignee?: string | null }
+  ): Promise<AsanaSubtask> {
+    return api.post<AsanaSubtask>(`/clients/${clientId}/asana/tasks/${taskGid}/subtasks`, data);
+  },
+
+  /**
+   * Busca comentários e histórico de atividades de uma tarefa
+   */
+  async getTaskStories(clientId: string, taskGid: string): Promise<AsanaStory[]> {
+    return api.get<AsanaStory[]>(`/clients/${clientId}/asana/tasks/${taskGid}/stories`);
+  },
+
+  /**
+   * Adiciona um novo comentário à tarefa no Asana
+   */
+  async addTaskComment(clientId: string, taskGid: string, text: string): Promise<AsanaStory> {
+    return api.post<AsanaStory>(`/clients/${clientId}/asana/tasks/${taskGid}/stories`, { text });
   },
 
   /**
