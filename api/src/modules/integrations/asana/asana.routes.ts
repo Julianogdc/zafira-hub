@@ -17,6 +17,7 @@ const updateTaskSchema = z.object({
   due_on: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Formato de data inválido (YYYY-MM-DD)').nullable().optional(),
   due_at: z.string().nullable().optional(),
   assignee: z.string().nullable().optional(),
+  sectionGid: z.string().nullable().optional(),
 });
 
 export const ASANA_OAUTH_SCOPES = [
@@ -339,6 +340,78 @@ export async function asanaRoutes(app: FastifyInstance) {
       preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
     },
     patchSingleTaskHandler
+  );
+
+  // 6.3 GET /clients/:id/asana/projects/:projectGid/sections (Lista seções válidas do projeto)
+  const getSectionsHandler = async (
+    request: FastifyRequest<{ Params: { id: string; projectGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const sections = await asanaService.getProjectSections(
+        request.params.id,
+        organizationId,
+        request.params.projectGid
+      );
+      return reply.status(200).send(sections);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/clients/:id/asana/projects/:projectGid/sections',
+    {
+      preHandler: [authenticate],
+    },
+    getSectionsHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/projects/:projectGid/sections',
+    {
+      preHandler: [authenticate],
+    },
+    getSectionsHandler
+  );
+
+  // 6.4 POST /clients/:id/asana/tasks/:taskGid/section (Move tarefa entre seções com RBAC ADMIN/MANAGER)
+  const moveTaskSectionSchema = z.object({
+    sectionGid: z.string().min(1, 'O gid da seção é obrigatório'),
+  });
+
+  const postTaskSectionHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const { sectionGid } = moveTaskSectionSchema.parse(request.body);
+      const updated = await asanaService.moveTaskSection(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        sectionGid
+      );
+      return reply.status(200).send(updated);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks/:taskGid/section',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postTaskSectionHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks/:taskGid/section',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postTaskSectionHandler
   );
 
   function getOAuthRedirectUri(): string {

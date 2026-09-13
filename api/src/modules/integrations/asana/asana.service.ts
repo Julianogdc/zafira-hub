@@ -49,6 +49,11 @@ export interface AsanaTag {
   name: string;
 }
 
+export interface AsanaSection {
+  gid: string;
+  name: string;
+}
+
 export interface AsanaCustomField {
   gid: string;
   name: string;
@@ -473,7 +478,7 @@ export class AsanaService {
 
       try {
         const tasks = await this.fetchAsana<any[]>(
-          `/projects/${integration.externalId}/tasks?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo,memberships.section.name,permalink_url`,
+          `/projects/${integration.externalId}/tasks?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,permalink_url`,
           token
         );
 
@@ -488,6 +493,7 @@ export class AsanaService {
 
           const sectionMembership = t.memberships?.find((m: any) => m.section?.name);
           const sectionName = sectionMembership?.section?.name || null;
+          const sectionGid = sectionMembership?.section?.gid || null;
 
           allTasks.push({
             gid: t.gid,
@@ -497,6 +503,7 @@ export class AsanaService {
             dueAt: t.due_at || null,
             isOverdue,
             sectionName,
+            sectionGid,
             assignee: t.assignee
               ? {
                   gid: t.assignee.gid,
@@ -695,9 +702,116 @@ export class AsanaService {
       });
     }
 
+    // Se uma nova seção foi especificada, move a tarefa para ela
+    if (data.sectionGid) {
+      await this.fetchAsana(`/sections/${data.sectionGid}/addTask`, token, {
+        method: 'POST',
+        body: JSON.stringify({ data: { task: taskGid } }),
+      }).catch((err) => {
+        console.warn(`[AsanaService] Falha ao mover tarefa ${taskGid} para seção ${data.sectionGid}:`, err);
+      });
+    }
+
     const updated = await this.getClientSingleTask(clientId, organizationId, taskGid);
     if (!updated) {
       throw new AsanaIntegrationError(500, 'Não foi possível recuperar a tarefa atualizada do Asana.');
+    }
+
+    return updated;
+  }
+
+  /**
+   * Retorna as seções válidas de um projeto Asana vinculado ao cliente.
+   */
+  async getProjectSections(
+    clientId: string,
+    organizationId: string,
+    projectGid: string
+  ): Promise<AsanaSection[]> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA', externalId: projectGid },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Projeto não encontrado ou não vinculado a este cliente.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+
+    try {
+      const sections = await this.fetchAsana<any[]>(
+        `/projects/${projectGid}/sections?opt_fields=name`,
+        token
+      );
+
+      if (!Array.isArray(sections)) return [];
+
+      return sections.map((s) => ({
+        gid: s.gid,
+        name: s.name,
+      }));
+    } catch (err: any) {
+      console.warn(`[AsanaService] Falha ao buscar seções do projeto ${projectGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Move uma tarefa para uma seção específica no Asana.
+   * Valida obrigatoriamente se a tarefa e o projeto pertencem ao cliente informado.
+   */
+  async moveTaskSection(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    sectionGid: string
+  ): Promise<ClientAsanaTask> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Cliente ou projetos vinculados não encontrados.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+
+    // Validação de pertencimento no Asana
+    const existing = await this.fetchAsana<any>(`/tasks/${taskGid}?opt_fields=projects.gid`, token);
+    if (!existing || !existing.gid) {
+      throw new AsanaIntegrationError(404, 'Tarefa não encontrada no Asana.');
+    }
+
+    const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+    const belongsToClient = existing.projects?.some((p: any) => clientProjectGids.has(p.gid));
+
+    if (!belongsToClient) {
+      throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos vinculados a este cliente.');
+    }
+
+    // Executa a movimentação da tarefa para a seção desejada no Asana
+    await this.fetchAsana(`/sections/${sectionGid}/addTask`, token, {
+      method: 'POST',
+      body: JSON.stringify({
+        data: {
+          task: taskGid,
+        },
+      }),
+    });
+
+    const updated = await this.getClientSingleTask(clientId, organizationId, taskGid);
+    if (!updated) {
+      throw new AsanaIntegrationError(500, 'Não foi possível recuperar a tarefa após mover de seção.');
     }
 
     return updated;

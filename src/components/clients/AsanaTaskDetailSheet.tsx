@@ -21,6 +21,7 @@ import {
 import {
   ClientAsanaTask,
   AsanaUser,
+  AsanaSection,
   asanaIntegrationService,
   UpdateAsanaTaskInput,
 } from '@/services/asana';
@@ -40,6 +41,7 @@ import {
   X,
   FileText,
   Layers,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface AsanaTaskDetailSheetProps {
@@ -65,12 +67,18 @@ export function AsanaTaskDetailSheet({
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isTogglingComplete, setIsTogglingComplete] = useState(false);
+  const [isMovingSection, setIsMovingSection] = useState(false);
+
+  // Seções disponíveis no projeto da tarefa
+  const [projectSections, setProjectSections] = useState<AsanaSection[]>([]);
+  const [isLoadingSections, setIsLoadingSections] = useState(false);
 
   // Campos de edição local
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
   const [dueOn, setDueOn] = useState('');
   const [assigneeGid, setAssigneeGid] = useState<string>('unassigned');
+  const [sectionGid, setSectionGid] = useState<string>('none');
 
   // Inicializa o formulário com a tarefa selecionada e busca dados completos
   useEffect(() => {
@@ -80,6 +88,23 @@ export function AsanaTaskDetailSheet({
       setNotes(task.notes || '');
       setDueOn(task.dueOn ? task.dueOn.split('T')[0] : '');
       setAssigneeGid(task.assignee?.gid || 'unassigned');
+      setSectionGid(task.sectionGid || 'none');
+
+      // Busca seções do projeto correspondente
+      if (task.projectGid) {
+        setIsLoadingSections(true);
+        asanaIntegrationService
+          .getProjectSections(clientId, task.projectGid)
+          .then((secs) => {
+            setProjectSections(secs);
+          })
+          .catch((err) => {
+            console.warn('[AsanaTaskDetailSheet] Erro ao buscar seções do projeto:', err);
+          })
+          .finally(() => {
+            setIsLoadingSections(false);
+          });
+      }
 
       // Busca dados enriquecidos (notes, tags, custom_fields) da API
       setIsLoadingDetails(true);
@@ -92,6 +117,7 @@ export function AsanaTaskDetailSheet({
             setNotes(detailed.notes || '');
             setDueOn(detailed.dueOn ? detailed.dueOn.split('T')[0] : '');
             setAssigneeGid(detailed.assignee?.gid || 'unassigned');
+            setSectionGid(detailed.sectionGid || 'none');
           }
         })
         .catch((err) => {
@@ -224,11 +250,51 @@ export function AsanaTaskDetailSheet({
     }
   };
 
+  // Mover Tarefa de Seção com Optimistic Update e Rollback
+  const handleSectionChange = async (newSectionGid: string) => {
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem alterar a seção.');
+      return;
+    }
+    if (newSectionGid === 'none' || newSectionGid === currentTask.sectionGid) return;
+
+    const previousTask = { ...currentTask };
+    const targetSection = projectSections.find((s) => s.gid === newSectionGid);
+    const newSectionName = targetSection ? targetSection.name : currentTask.sectionName;
+
+    // 1. Optimistic update
+    const optimisticTask: ClientAsanaTask = {
+      ...currentTask,
+      sectionGid: newSectionGid,
+      sectionName: newSectionName,
+    };
+    setFullTask(optimisticTask);
+    setSectionGid(newSectionGid);
+    onTaskUpdated(optimisticTask);
+
+    try {
+      setIsMovingSection(true);
+      const updated = await asanaIntegrationService.moveTaskSection(clientId, currentTask.gid, newSectionGid);
+      setFullTask(updated);
+      setSectionGid(updated.sectionGid || newSectionGid);
+      onTaskUpdated(updated);
+      toast.success(`Tarefa movida para a seção "${newSectionName}"`);
+    } catch (err: any) {
+      // Rollback
+      setFullTask(previousTask);
+      setSectionGid(previousTask.sectionGid || 'none');
+      onTaskUpdated(previousTask);
+      toast.error(`Falha ao mover seção: ${err?.message || 'Erro no Asana'}`);
+    } finally {
+      setIsMovingSection(false);
+    }
+  };
+
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
-        className="w-full sm:max-w-xl bg-zinc-950 border-white/10 text-zinc-100 p-0 flex flex-col z-50 shadow-2xl overflow-hidden"
+        className="w-full sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl bg-zinc-950 border-white/10 text-zinc-100 p-0 flex flex-col z-50 shadow-2xl overflow-hidden"
       >
         {/* CABEÇALHO DO SHEET */}
         <SheetHeader className="p-6 border-b border-white/10 bg-zinc-900/40 space-y-3">
@@ -267,8 +333,29 @@ export function AsanaTaskDetailSheet({
                 </Badge>
               )}
 
-              {/* Seção atual */}
-              {currentTask.sectionName && (
+              {/* Seletor ou Badge de Seção */}
+              {canManage && projectSections.length > 0 ? (
+                <div className="flex items-center gap-1.5">
+                  <Select
+                    value={sectionGid}
+                    onValueChange={handleSectionChange}
+                    disabled={isMovingSection}
+                  >
+                    <SelectTrigger className="bg-zinc-800/80 border-white/10 text-zinc-300 text-[11px] h-7 px-2.5 gap-1.5 font-normal hover:bg-zinc-800 focus:ring-emerald-500/50">
+                      <Layers className="w-3 h-3 text-zinc-400" />
+                      <SelectValue placeholder="Selecionar seção" />
+                      {isMovingSection && <Loader2 className="w-2.5 h-2.5 animate-spin text-emerald-400 ml-1" />}
+                    </SelectTrigger>
+                    <SelectContent className="bg-zinc-900 border-white/10 text-zinc-200">
+                      {projectSections.map((s) => (
+                        <SelectItem key={s.gid} value={s.gid} className="text-xs">
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : currentTask.sectionName ? (
                 <Badge
                   variant="outline"
                   className="bg-zinc-800/80 border-white/10 text-zinc-400 text-[11px] gap-1 py-1 px-2 font-normal"
@@ -277,7 +364,7 @@ export function AsanaTaskDetailSheet({
                   <Layers className="w-3 h-3 text-zinc-500" />
                   {currentTask.sectionName}
                 </Badge>
-              )}
+              ) : null}
             </div>
 
             {isLoadingDetails && (

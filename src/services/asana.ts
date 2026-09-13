@@ -53,6 +53,11 @@ export interface AsanaUser {
   photoUrl?: string | null;
 }
 
+export interface AsanaSection {
+  gid: string;
+  name: string;
+}
+
 export interface UpdateAsanaTaskInput {
   name?: string;
   notes?: string | null;
@@ -60,6 +65,7 @@ export interface UpdateAsanaTaskInput {
   due_on?: string | null;
   due_at?: string | null;
   assignee?: string | null;
+  sectionGid?: string | null;
 }
 
 export interface ClientAsanaTask {
@@ -139,6 +145,20 @@ export const asanaIntegrationService = {
    */
   async updateTask(clientId: string, taskGid: string, data: UpdateAsanaTaskInput): Promise<ClientAsanaTask> {
     return api.patch<ClientAsanaTask>(`/clients/${clientId}/asana/tasks/${taskGid}`, data);
+  },
+
+  /**
+   * Busca as seções de um projeto vinculado ao cliente
+   */
+  async getProjectSections(clientId: string, projectGid: string): Promise<AsanaSection[]> {
+    return api.get<AsanaSection[]>(`/clients/${clientId}/asana/projects/${projectGid}/sections`);
+  },
+
+  /**
+   * Move uma tarefa para uma seção específica
+   */
+  async moveTaskSection(clientId: string, taskGid: string, sectionGid: string): Promise<ClientAsanaTask> {
+    return api.post<ClientAsanaTask>(`/clients/${clientId}/asana/tasks/${taskGid}/section`, { sectionGid });
   },
 
   /**
