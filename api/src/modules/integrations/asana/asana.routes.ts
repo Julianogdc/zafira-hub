@@ -113,6 +113,26 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
+  // 1.1 DELETE /integrations/asana/disconnect (ADMIN)
+  app.delete(
+    '/integrations/asana/disconnect',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN'])],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        await asanaService.disconnect(organizationId);
+        return reply.status(200).send({
+          status: 'ok',
+          message: 'Integração Asana desconectada com sucesso da organização.',
+        });
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    }
+  );
+
   // 2. GET /integrations/asana/projects
   app.get(
     '/integrations/asana/projects',

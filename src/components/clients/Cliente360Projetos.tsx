@@ -13,8 +13,10 @@ import {
   User,
   Calendar,
   AlertCircle,
+  Unlink,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuthStore } from '@/store/useAuthStore';
 import {
   asanaIntegrationService,
   ClientAsanaProject,
@@ -41,6 +43,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 
@@ -67,8 +79,16 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   // Desvinculação
   const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
 
+  // Informações de autenticação e papel
+  const { user } = useAuthStore();
+  const isAdmin = user?.role?.toLowerCase() === 'admin';
+
   // Conexão OAuth
   const [isConnecting, setIsConnecting] = useState(false);
+
+  // Desconexão total da organização
+  const [isDisconnectDialogOpen, setIsDisconnectDialogOpen] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
 
   // Carregamento de dados
   const loadData = useCallback(async () => {
@@ -181,6 +201,25 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
       console.error('Erro ao conectar Asana:', err);
       toast.error(err?.data?.message || err?.message || 'Falha ao iniciar conexão com o Asana.');
       setIsConnecting(false);
+    }
+  };
+
+  const handleDisconnectAsana = async (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    try {
+      setIsDisconnecting(true);
+      await asanaIntegrationService.disconnect();
+      toast.success('Integração Asana desconectada com sucesso.');
+      setIsDisconnectDialogOpen(false);
+      setStatus({ configured: false, connected: false });
+      setProjects([]);
+      setTasks([]);
+      loadData();
+    } catch (err: any) {
+      console.error('Erro ao desconectar Asana:', err);
+      toast.error(err?.data?.message || err?.message || 'Erro ao desconectar Asana da organização.');
+    } finally {
+      setIsDisconnecting(false);
     }
   };
 
@@ -318,9 +357,26 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
             <FolderGit2 className="w-5 h-5 text-emerald-400" />
             Projetos & Tarefas Asana
           </h2>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Projetos vinculados no workspace {status.workspaceName ? `"${status.workspaceName}"` : 'da organização'}.
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mt-0.5">
+            <p className="text-xs text-zinc-400">
+              Projetos vinculados no workspace {status.workspaceName ? `"${status.workspaceName}"` : 'da organização'}.
+            </p>
+            {isAdmin && (
+              <>
+                <span className="text-zinc-600 text-xs hidden sm:inline">•</span>
+                <button
+                  type="button"
+                  onClick={() => setIsDisconnectDialogOpen(true)}
+                  disabled={isDisconnecting}
+                  className="text-xs text-zinc-500 hover:text-red-400 transition-colors underline-offset-2 hover:underline inline-flex items-center gap-1"
+                  title="Desconectar workspace Asana do Hub"
+                >
+                  <Unlink className="w-3 h-3" />
+                  Desconectar Asana
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -732,6 +788,34 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Confirmação Forte para Desconectar Asana */}
+      <AlertDialog open={isDisconnectDialogOpen} onOpenChange={setIsDisconnectDialogOpen}>
+        <AlertDialogContent className="bg-zinc-950 border-white/10 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-white text-base">Desconectar Asana?</AlertDialogTitle>
+            <AlertDialogDescription className="text-zinc-400 text-xs leading-relaxed">
+              Esta ação desconectará o workspace Asana do Zafira Hub e removerá os vínculos locais entre clientes e projetos. Nenhum projeto, tarefa, comentário ou arquivo será apagado do Asana.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <AlertDialogCancel
+              disabled={isDisconnecting}
+              className="border-white/10 bg-transparent text-zinc-300 hover:bg-white/5 hover:text-white text-xs"
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDisconnectAsana}
+              disabled={isDisconnecting}
+              className="bg-red-600 hover:bg-red-700 text-white text-xs gap-1.5"
+            >
+              {isDisconnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Desconectar Asana
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

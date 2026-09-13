@@ -101,4 +101,12 @@ export const asanaIntegrationService = {
   async getOAuthAuthorizeUrl(): Promise<{ url: string }> {
     return api.get<{ url: string }>('/integrations/asana/oauth/authorize');
   },
+
+  /**
+   * Desconecta completamente o Asana da organização (ADMIN)
+   */
+  async disconnect(): Promise<{ status: string; message: string }> {
+    return api.delete('/integrations/asana/disconnect');
+  },
 };
+

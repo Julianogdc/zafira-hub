@@ -599,4 +599,89 @@ export class AsanaService {
       },
     });
   }
+
+  /**
+   * Tenta revogar o token OAuth no servidor do Asana (RFC 7009).
+   * Falhas de rede ou tokens já revogados são silenciadas para garantir que a desconexão local sempre ocorra.
+   */
+  private async revokeToken(token: string): Promise<void> {
+    try {
+      const clientId = process.env.ASANA_CLIENT_ID;
+      const clientSecret = process.env.ASANA_CLIENT_SECRET;
+      if (!clientId || !clientSecret || !token) return;
+
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        token,
+      });
+
+      await fetch('https://app.asana.com/-/oauth_revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      }).catch(() => {});
+    } catch {
+      // Falha remota não bloqueia o expurgo local seguro
+    }
+  }
+
+  /**
+   * Desconecta completamente o Asana da organização:
+   * 1. Revoga o token no Asana (se possível)
+   * 2. Remove os vínculos ClientIntegration do provedor ASANA pertencentes aos clientes da organização
+   * 3. Exclui o registro OrganizationIntegration do Asana
+   * 4. NÃO envia nenhuma deleção para projetos ou tarefas reais no Asana
+   */
+  async disconnect(organizationId: string): Promise<void> {
+    // 1. Localiza a integração da organização
+    const orgIntegration = await prisma.organizationIntegration.findUnique({
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      },
+    });
+
+    if (!orgIntegration) {
+      throw new AsanaIntegrationError(404, 'Nenhuma integração Asana ativa encontrada para esta organização.');
+    }
+
+    // 2. Revogação remota segura de tokens (sem expor credenciais em logs)
+    try {
+      const refreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
+      const accessToken = orgIntegration.accessToken ? decryptToken(orgIntegration.accessToken) : null;
+
+      if (refreshToken) {
+        await this.revokeToken(refreshToken);
+      } else if (accessToken) {
+        await this.revokeToken(accessToken);
+      }
+    } catch {
+      // Prossegue mesmo se a chamada remota falhar
+    }
+
+    // 3. Remove os vínculos locais de projetos pertencentes a clientes desta organização
+    const organizationClients = await prisma.client.findMany({
+      where: { organizationId },
+      select: { id: true },
+    });
+
+    const clientIds = organizationClients.map((c) => c.id);
+    if (clientIds.length > 0) {
+      await prisma.clientIntegration.deleteMany({
+        where: {
+          clientId: { in: clientIds },
+          provider: 'ASANA',
+        },
+      });
+    }
+
+    // 4. Remove a integração da organização no PostgreSQL
+    await prisma.organizationIntegration.delete({
+      where: { id: orgIntegration.id },
+    });
+  }
 }
+
