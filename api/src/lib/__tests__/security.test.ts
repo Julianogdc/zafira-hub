@@ -7,6 +7,7 @@ import {
   createAndPersistOAuthState,
   verifyAndConsumeOAuthState,
 } from '../oauthState.js';
+import { buildAsanaAuthorizeUrl, ASANA_OAUTH_SCOPES } from '../../modules/integrations/asana/asana.routes.js';
 
 interface InMemoryOAuthState {
   id: string;
@@ -241,8 +242,77 @@ async function runSecurityTests() {
   }
   console.log('✓ Frontend: Origem legítima aceita e mensagem de origem forjada (phishing) sumariamente ignorada.');
 
+  console.log('\n--- TESTE 11: Validação de Scopes Explícitos do Asana OAuth ---');
+  const dummyClientId = '1205135781277453';
+  const dummyRedirectUri = 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
+  const dummyState = 'state_test_token_sample.hmac123';
+
+  const generatedAuthUrl = buildAsanaAuthorizeUrl({
+    clientId: dummyClientId,
+    redirectUri: dummyRedirectUri,
+    state: dummyState,
+    scopes: ASANA_OAUTH_SCOPES,
+  });
+
+  const parsedUrl = new URL(generatedAuthUrl);
+
+  // 1. Validar parâmetros fundamentais
+  if (parsedUrl.searchParams.get('response_type') !== 'code') {
+    throw new Error('Falha: response_type diferente de "code"!');
+  }
+  if (parsedUrl.searchParams.get('client_id') !== dummyClientId) {
+    throw new Error('Falha: client_id incorreto na URL!');
+  }
+  if (parsedUrl.searchParams.get('redirect_uri') !== dummyRedirectUri) {
+    throw new Error('Falha: redirect_uri incorreto na URL!');
+  }
+  if (parsedUrl.searchParams.get('state') !== dummyState) {
+    throw new Error('Falha: state ausente ou corrompido na URL!');
+  }
+
+  // 2. Validar scope
+  const scopeParam = parsedUrl.searchParams.get('scope');
+  if (!scopeParam) {
+    throw new Error('Falha crítica: Parâmetro scope não existe na URL de autorização!');
+  }
+
+  const scopesList = scopeParam.split(' ');
+
+  // Não contém default
+  if (scopesList.includes('default')) {
+    throw new Error('Falha crítica: scope contém "default" proibido para apps granulares!');
+  }
+
+  // Não contém openid, email, profile
+  const forbiddenScopes = ['openid', 'email', 'profile'];
+  for (const forbidden of forbiddenScopes) {
+    if (scopesList.includes(forbidden)) {
+      throw new Error(`Falha crítica: scope contém escopo proibido "${forbidden}"!`);
+    }
+  }
+
+  // Contém projects:read e tasks:read
+  if (!scopesList.includes('projects:read') || !scopesList.includes('tasks:read')) {
+    throw new Error('Falha: scope deve conter obrigatoriamente "projects:read" e "tasks:read"!');
+  }
+
+  // Não contém permissões delete
+  const deleteScopes = scopesList.filter((s) => s.includes(':delete'));
+  if (deleteScopes.length > 0) {
+    throw new Error(`Falha crítica: scopes contém permissões de delete proibidas: ${deleteScopes.join(', ')}`);
+  }
+
+  // Não contém webhooks
+  if (scopesList.some((s) => s.includes('webhook'))) {
+    throw new Error('Falha: escopos não devem conter webhooks!');
+  }
+
+  console.log('✓ Escopos validados com sucesso: 19 escopos específicos presentes.');
+  console.log('✓ Nenhuma permissão "default", "identity/openid/email/profile" ou ":delete" detectada.');
+  console.log('✓ URL gerada com sucesso:', generatedAuthUrl.slice(0, 100) + '...');
+
   console.log('\n======================================================');
-  console.log('TODOS OS 10 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
+  console.log('TODOS OS 11 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');
   console.log('======================================================');
 }
 
@@ -250,3 +320,4 @@ runSecurityTests().catch((err) => {
   console.error('ERRO NOS TESTES:', err);
   process.exit(1);
 });
+

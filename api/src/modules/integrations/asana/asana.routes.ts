@@ -9,6 +9,50 @@ const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
 });
 
+export const ASANA_OAUTH_SCOPES = [
+  'attachments:read',
+  'attachments:write',
+  'custom_fields:read',
+  'custom_fields:write',
+  'jobs:read',
+  'project_templates:read',
+  'projects:read',
+  'projects:write',
+  'stories:read',
+  'stories:write',
+  'tags:read',
+  'tags:write',
+  'task_templates:read',
+  'tasks:read',
+  'tasks:write',
+  'team_memberships:read',
+  'teams:read',
+  'users:read',
+  'workspaces:read',
+] as const;
+
+export function buildAsanaAuthorizeUrl({
+  clientId,
+  redirectUri,
+  state,
+  scopes = ASANA_OAUTH_SCOPES,
+}: {
+  clientId: string;
+  redirectUri: string;
+  state: string;
+  scopes?: readonly string[] | string[];
+}): string {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    state,
+    scope: scopes.join(' '),
+  });
+
+  return `https://app.asana.com/-/oauth_authorize?${params.toString()}`;
+}
+
 export async function asanaRoutes(app: FastifyInstance) {
   const asanaService = new AsanaService();
 
@@ -180,7 +224,7 @@ export async function asanaRoutes(app: FastifyInstance) {
     return 'http://localhost:5173';
   }
 
-  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com state seguro persistido no servidor)
+  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com scopes explícitos e state seguro)
   app.get(
     '/integrations/asana/oauth/authorize',
     {
@@ -202,15 +246,13 @@ export async function asanaRoutes(app: FastifyInstance) {
 
         const redirectUri = getOAuthRedirectUri();
 
-        const params = new URLSearchParams({
-          response_type: 'code',
-          client_id: clientId,
-          redirect_uri: redirectUri,
+        const authUrl = buildAsanaAuthorizeUrl({
+          clientId,
+          redirectUri,
           state: stateParam,
-          scope: 'default',
+          scopes: ASANA_OAUTH_SCOPES,
         });
 
-        const authUrl = `https://app.asana.com/-/oauth_authorize?${params.toString()}`;
         return reply.status(200).send({ url: authUrl });
       } catch (error) {
         return handleError(error, reply);
