@@ -738,5 +738,363 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const rawResponse = res.body;
     assert.ok(!rawResponse.includes(secretApiKey), 'A API Key do Postiz não pode vazar na resposta HTTP');
   });
+
+  // ==========================================
+  // ETAPA 3: Leitura de Conteúdo do Postiz no Client 360
+  // ==========================================
+
+  await t.test('20. GET /clients/:clientId/content/postiz exige autenticação', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: [] }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_123/content/postiz',
+    });
+    assert.strictEqual(res.statusCode, 401);
+  });
+
+  await t.test('21. GET /clients/:clientId/content/postiz rejeita cliente inexistente com 404 CLIENT_NOT_FOUND', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma(); // sem clientes
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: [] }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_fantasma/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual(res.json().error, 'CLIENT_NOT_FOUND');
+  });
+
+  await t.test('22. Cliente sem contas Postiz vinculadas retorna 200 com posts: [], total: 0', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_sem_postiz', { id: 'cli_sem_postiz', name: 'Cliente Novo' });
+
+    let postizCalled = false;
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => {
+        postizCalled = true;
+        return { posts: [] };
+      },
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_sem_postiz/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.clientId, 'cli_sem_postiz');
+    assert.deepStrictEqual(body.posts, []);
+    assert.strictEqual(body.total, 0);
+    assert.strictEqual(postizCalled, false, 'Não deve gastar requisição no Postiz se o cliente não possui contas vinculadas');
+  });
+
+  await t.test('23. Cliente com conta vinculada e Postiz sem publicações retorna 200 com posts: [], total: 0', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_insta_01',
+    });
+
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => ({ posts: [] }),
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.clientId, 'cli_1');
+    assert.deepStrictEqual(body.posts, []);
+    assert.strictEqual(body.total, 0);
+  });
+
+  await t.test('24. Busca e normaliza posts da conta vinculada ao cliente', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Grupo Lima' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'postiz_int_lima_insta',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_1',
+        content: 'Post sobre lançamento da marca #zafira',
+        publishDate: '2026-09-10T12:00:00.000Z',
+        releaseURL: 'https://instagram.com/p/abc123',
+        releaseId: 'rel_123',
+        state: 'PUBLISHED',
+        integration: {
+          id: 'postiz_int_lima_insta',
+          providerIdentifier: 'instagram',
+          name: 'Grupo Lima Instagram',
+          picture: 'https://cdn.postiz.com/avatar.jpg',
+        },
+      },
+      {
+        id: 'post_2',
+        content: 'Vídeo institucional programado',
+        publishDate: '2026-09-20T18:00:00.000Z',
+        releaseURL: null,
+        releaseId: null,
+        state: 'QUEUE',
+        integration: {
+          id: 'postiz_int_lima_insta',
+          providerIdentifier: 'instagram',
+          name: 'Grupo Lima Instagram',
+          picture: 'https://cdn.postiz.com/avatar.jpg',
+        },
+      },
+    ];
+
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => ({ posts: mockPosts }),
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.clientId, 'cli_1');
+    assert.strictEqual(body.total, 2);
+    assert.strictEqual(body.posts.length, 2);
+
+    const published = body.posts.find((p: any) => p.id === 'post_1');
+    assert.strictEqual(published.status, 'PUBLISHED');
+    assert.strictEqual(published.publishedAt, '2026-09-10T12:00:00.000Z');
+    assert.strictEqual(published.scheduledAt, null);
+    assert.strictEqual(published.platform, 'instagram');
+    assert.strictEqual(published.releaseUrl, 'https://instagram.com/p/abc123');
+
+    const scheduled = body.posts.find((p: any) => p.id === 'post_2');
+    assert.strictEqual(scheduled.status, 'QUEUE');
+    assert.strictEqual(scheduled.scheduledAt, '2026-09-20T18:00:00.000Z');
+    assert.strictEqual(scheduled.publishedAt, null);
+  });
+
+  await t.test('25. SEGURANÇA DE ESCOPO: Cliente A NUNCA recebe posts da conta do Cliente B', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+
+    // Cria Cliente A e Cliente B
+    mockPrisma._data.clients.set('cli_A', { id: 'cli_A', name: 'Empresa A' });
+    mockPrisma._data.clients.set('cli_B', { id: 'cli_B', name: 'Empresa B' });
+
+    // Vincula integrações distintas
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_A',
+      clientId: 'cli_A',
+      provider: 'POSTIZ',
+      externalId: 'int_cliente_A',
+    });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_B',
+      clientId: 'cli_B',
+      provider: 'POSTIZ',
+      externalId: 'int_cliente_B',
+    });
+
+    // Postiz retorna posts misturados da organização
+    const allOrgPosts = [
+      {
+        id: 'post_A_1',
+        content: 'Conteúdo confidencial Cliente A',
+        publishDate: '2026-09-01T10:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: {
+          id: 'int_cliente_A',
+          providerIdentifier: 'linkedin',
+          name: 'LinkedIn Cliente A',
+        },
+      },
+      {
+        id: 'post_B_1',
+        content: 'Conteúdo confidencial Cliente B',
+        publishDate: '2026-09-02T11:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: {
+          id: 'int_cliente_B',
+          providerIdentifier: 'instagram',
+          name: 'Instagram Cliente B',
+        },
+      },
+    ];
+
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => ({ posts: allOrgPosts }),
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    // Consulta Cliente A
+    const resA = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_A/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+    assert.strictEqual(resA.statusCode, 200);
+    const bodyA = resA.json();
+    assert.strictEqual(bodyA.total, 1);
+    assert.strictEqual(bodyA.posts[0].id, 'post_A_1');
+    assert.strictEqual(bodyA.posts[0].integrationId, 'int_cliente_A');
+    assert.ok(!JSON.stringify(bodyA).includes('Cliente B'), 'NENHUM dado do Cliente B pode vazar para o Cliente A');
+
+    // Consulta Cliente B
+    const resB = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_B/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+    assert.strictEqual(resB.statusCode, 200);
+    const bodyB = resB.json();
+    assert.strictEqual(bodyB.total, 1);
+    assert.strictEqual(bodyB.posts[0].id, 'post_B_1');
+    assert.strictEqual(bodyB.posts[0].integrationId, 'int_cliente_B');
+    assert.ok(!JSON.stringify(bodyB).includes('Cliente A'), 'NENHUM dado do Cliente A pode vazar para o Cliente B');
+  });
+
+  await t.test('26. Posts são retornados em ordem cronológica decrescente', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_antigo',
+        content: 'Post mais antigo',
+        publishDate: '2026-08-01T10:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Insta' },
+      },
+      {
+        id: 'post_recente',
+        content: 'Post mais recente',
+        publishDate: '2026-09-12T10:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Insta' },
+      },
+    ];
+
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => ({ posts: mockPosts }),
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.posts[0].id, 'post_recente');
+    assert.strictEqual(body.posts[1].id, 'post_antigo');
+  });
+
+  await t.test('27. Erros remotos do Postiz são tratados de forma segura sem expor POSTIZ_API_KEY', async () => {
+    const secretApiKey = 'super_secret_postiz_api_key_xyz';
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    process.env.POSTIZ_API_KEY = secretApiKey;
+
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => {
+        throw new PostizIntegrationError(`Falha remota com token=${secretApiKey}`, 502, 'POSTIZ_ERROR');
+      },
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123' },
+    });
+
+    assert.strictEqual(res.statusCode, 502);
+    const rawBody = res.body;
+    assert.ok(!rawBody.includes(secretApiKey), 'API Key do Postiz JAMAIS deve vazar em erro HTTP');
+    assert.ok(rawBody.includes('[REDACTED]'), 'A chave deve ser sanitizada com [REDACTED]');
+  });
 });
+
 

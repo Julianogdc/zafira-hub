@@ -180,6 +180,37 @@ export function createPostizRoutes(customService?: PostizService) {
       { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
       unlinkAccountHandler
     );
+
+    // 6. GET /clients/:clientId/content/postiz (Buscar publicações do Postiz vinculadas ao cliente)
+    const getClientContentHandler = async (
+      request: FastifyRequest<{
+        Params: ClientParams;
+        Querystring: { startDate?: string; endDate?: string };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const { startDate, endDate } = request.query || {};
+
+        const result = await service.getClientPosts(clientId, { startDate, endDate });
+
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/clients/:clientId/content/postiz',
+      { preHandler: [authenticate] },
+      getClientContentHandler
+    );
+    app.get(
+      '/api/clients/:clientId/content/postiz',
+      { preHandler: [authenticate] },
+      getClientContentHandler
+    );
   };
 }
 

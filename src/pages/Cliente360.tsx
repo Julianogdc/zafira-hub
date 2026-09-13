@@ -34,6 +34,7 @@ import {
 } from '@/services/clients';
 import { useAuthStore } from '@/store/useAuthStore';
 import { Cliente360Projetos } from '@/components/clients/Cliente360Projetos';
+import { Cliente360Conteudo } from '@/components/clients/Cliente360Conteudo';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -448,15 +449,9 @@ export default function Cliente360() {
           <Cliente360Projetos clientId={client.id} canManage={canManage} />
         </TabsContent>
 
-        {/* 5. ABA: CONTEÚDO (PLACEHOLDER) */}
+        {/* 5. ABA: CONTEÚDO (POSTIZ REAL) */}
         <TabsContent value="conteudo" className="outline-none">
-          <Card className="bg-zinc-950/40 border-white/10 p-12 text-center space-y-3">
-            <Share2 className="w-10 h-10 text-zinc-600 mx-auto opacity-50" />
-            <h3 className="text-base font-semibold text-white">Publicações & Redes Sociais</h3>
-            <p className="text-sm text-zinc-400 max-w-md mx-auto">
-              Conteúdo será integrado ao Postiz.
-            </p>
-          </Card>
+          <Cliente360Conteudo clientId={client.id} />
         </TabsContent>
 
         {/* 6. ABA: PERFORMANCE (PLACEHOLDER) */}

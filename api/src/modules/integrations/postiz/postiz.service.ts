@@ -40,6 +40,26 @@ export interface ClientPostizAccountsResponse {
   total: number;
 }
 
+export interface ClientPostizPost {
+  id: string;
+  integrationId: string;
+  platform: string;
+  accountName: string;
+  accountPicture?: string | null;
+  status: string;
+  content: string;
+  scheduledAt?: string | null;
+  publishedAt?: string | null;
+  createdAt?: string | null;
+  releaseUrl?: string | null;
+}
+
+export interface ClientPostizContentResponse {
+  clientId: string;
+  posts: ClientPostizPost[];
+  total: number;
+}
+
 export class PostizService {
   private readonly client: PostizClient;
   private readonly prismaClient: typeof defaultPrisma;
@@ -245,6 +265,89 @@ export class PostizService {
       externalId: link.externalId,
     };
   }
+
+  /**
+   * Obtém as publicações do Postiz filtrando com isolamento estrito
+   * apenas pelas contas associadas ao cliente fornecido.
+   */
+  async getClientPosts(
+    clientId: string,
+    options?: { startDate?: string; endDate?: string }
+  ): Promise<ClientPostizContentResponse> {
+    // 1. Valida se o cliente existe
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+    });
+
+    if (!client) {
+      throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
+    }
+
+    // 2. Busca vínculos de integração com provider POSTIZ
+    const integrations = await this.prismaClient.clientIntegration.findMany({
+      where: {
+        clientId,
+        provider: 'POSTIZ',
+      },
+    });
+
+    // Se o cliente não tiver nenhuma conta Postiz vinculada, retorna lista vazia com status 200
+    if (integrations.length === 0) {
+      return {
+        clientId,
+        posts: [],
+        total: 0,
+      };
+    }
+
+    // 3. Coleta os externalIds permitidos
+    const allowedIntegrationIds = new Set(integrations.map((item) => item.externalId));
+
+    // 4. Consulta os posts no Postiz
+    const { posts: rawPosts } = await this.client.getPosts({
+      startDate: options?.startDate,
+      endDate: options?.endDate,
+    });
+
+    // 5. Aplica isolamento estrito por ID da integração vinculada
+    const filteredPosts = (rawPosts || []).filter((post) => {
+      return post?.integration?.id && allowedIntegrationIds.has(post.integration.id);
+    });
+
+    // 6. Normaliza os posts para formato seguro e padronizado
+    const posts: ClientPostizPost[] = filteredPosts.map((post) => {
+      const isPublished = post.state === 'PUBLISHED';
+      const publishDateIso = post.publishDate ? new Date(post.publishDate).toISOString() : null;
+
+      return {
+        id: post.id,
+        integrationId: post.integration.id,
+        platform: post.integration.providerIdentifier || '',
+        accountName: post.integration.name || '',
+        accountPicture: post.integration.picture || null,
+        status: post.state,
+        content: post.content || '',
+        scheduledAt: !isPublished ? publishDateIso : null,
+        publishedAt: isPublished ? publishDateIso : null,
+        createdAt: publishDateIso,
+        releaseUrl: post.releaseURL || null,
+      };
+    });
+
+    // 7. Ordena decrescentemente por data
+    posts.sort((a, b) => {
+      const dateA = new Date(a.publishedAt || a.scheduledAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.publishedAt || b.scheduledAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    return {
+      clientId,
+      posts,
+      total: posts.length,
+    };
+  }
 }
 
 export const postizService = new PostizService();
+

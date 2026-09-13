@@ -29,6 +29,32 @@ export interface PostizRawAccount {
   } | null;
 }
 
+export interface PostizRawPost {
+  id: string;
+  content: string;
+  publishDate: string | Date;
+  releaseURL?: string | null;
+  releaseId?: string | null;
+  state: string;
+  intervalInDays?: number | null;
+  group?: string;
+  creationMethod?: string;
+  settings?: any;
+  tags?: Array<{ tag: { id: string; name: string } }>;
+  integration: {
+    id: string;
+    providerIdentifier: string;
+    name: string;
+    picture?: string | null;
+  };
+}
+
+export interface GetPostsParams {
+  startDate?: string;
+  endDate?: string;
+  customer?: string;
+}
+
 export interface PostizClientConfig {
   baseUrl?: string;
   apiKey?: string;
@@ -161,4 +187,28 @@ export class PostizClient {
       method: 'GET',
     });
   }
+
+  /**
+   * GET /api/public/v1/posts
+   * O Postiz exige startDate e endDate via validação de data (ISO 8601).
+   * Se não informados, definimos uma janela padrão de 90 dias passados até 30 dias futuros.
+   */
+  async getPosts(params?: GetPostsParams): Promise<{ posts: PostizRawPost[] }> {
+    const query = new URLSearchParams();
+
+    const defaultStart = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+    const defaultEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    query.set('startDate', params?.startDate || defaultStart);
+    query.set('endDate', params?.endDate || defaultEnd);
+
+    if (params?.customer) {
+      query.set('customer', params.customer);
+    }
+
+    return this.request<{ posts: PostizRawPost[] }>(`/api/public/v1/posts?${query.toString()}`, {
+      method: 'GET',
+    });
+  }
 }
+
