@@ -70,6 +70,42 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   // Conexão OAuth
   const [isConnecting, setIsConnecting] = useState(false);
 
+  // Carregamento de dados
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      // 1. Checa status e projetos vinculados em paralelo
+      const [statusData, projectsData] = await Promise.all([
+        asanaIntegrationService.getStatus().catch(() => ({ configured: false, connected: false })),
+        asanaIntegrationService.getClientProjects(clientId).catch(() => []),
+      ]);
+
+      setStatus(statusData);
+      setProjects(projectsData);
+
+      // 2. Se houver projetos vinculados e o Asana estiver conectado, carrega as tarefas
+      if (projectsData.length > 0 && statusData.connected) {
+        setLoadingTasks(true);
+        const tasksData = await asanaIntegrationService.getClientTasks(clientId).catch(() => []);
+        setTasks(tasksData);
+        setLoadingTasks(false);
+      } else {
+        setTasks([]);
+      }
+    } catch (err: any) {
+      console.error('Erro ao carregar dados do Asana:', err);
+      setError(err?.message || 'Falha ao carregar dados da integração Asana.');
+    } finally {
+      setLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
   // Escuta mensagem de sucesso disparada pelo popup OAuth do Asana
   useEffect(() => {
     const handleOAuthMessage = (event: MessageEvent) => {
@@ -147,41 +183,6 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
       setIsConnecting(false);
     }
   };
-
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-
-      // 1. Checa status e projetos vinculados em paralelo
-      const [statusData, projectsData] = await Promise.all([
-        asanaIntegrationService.getStatus().catch(() => ({ configured: false, connected: false })),
-        asanaIntegrationService.getClientProjects(clientId).catch(() => []),
-      ]);
-
-      setStatus(statusData);
-      setProjects(projectsData);
-
-      // 2. Se houver projetos vinculados e o Asana estiver conectado, carrega as tarefas
-      if (projectsData.length > 0 && statusData.connected) {
-        setLoadingTasks(true);
-        const tasksData = await asanaIntegrationService.getClientTasks(clientId).catch(() => []);
-        setTasks(tasksData);
-        setLoadingTasks(false);
-      } else {
-        setTasks([]);
-      }
-    } catch (err: any) {
-      console.error('Erro ao carregar dados do Asana:', err);
-      setError(err?.message || 'Falha ao carregar dados da integração Asana.');
-    } finally {
-      setLoading(false);
-    }
-  }, [clientId]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   // Abre modal para vincular projetos
   const handleOpenLinkDialog = async () => {
