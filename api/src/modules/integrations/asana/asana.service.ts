@@ -87,6 +87,17 @@ export interface AsanaStory {
   } | null;
 }
 
+export interface AsanaAttachment {
+  gid: string;
+  name: string;
+  downloadUrl: string | null;
+  viewUrl: string | null;
+  permanentUrl: string | null;
+  host: string;
+  size: number | null;
+  createdAt: string;
+}
+
 export interface AsanaUser {
   gid: string;
   name: string;
@@ -1050,6 +1061,90 @@ export class AsanaService {
             photoUrl: res.created_by.photo?.image_60x60 || null,
           }
         : null,
+    };
+  }
+
+  /**
+   * Lista anexos vinculados a uma tarefa no Asana Cloud.
+   */
+  async getTaskAttachments(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaAttachment[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const attachments = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/attachments?opt_fields=name,download_url,view_url,permanent_url,host,size,created_at`,
+        token
+      );
+
+      if (!Array.isArray(attachments)) return [];
+
+      return attachments.map((att) => ({
+        gid: att.gid,
+        name: att.name || 'Anexo sem nome',
+        downloadUrl: att.download_url || null,
+        viewUrl: att.view_url || null,
+        permanentUrl: att.permanent_url || null,
+        host: att.host || 'asana',
+        size: typeof att.size === 'number' ? att.size : null,
+        createdAt: att.created_at || new Date().toISOString(),
+      }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar anexos da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Envia anexo multipart diretamente ao Asana Cloud (sem retenção em disco na VPS).
+   */
+  async uploadTaskAttachment(
+    clientId: string,
+    organizationId: string,
+    taskGid: string,
+    fileBuffer: Buffer,
+    filename: string,
+    mimetype: string
+  ): Promise<AsanaAttachment> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    const formData = new FormData();
+    const fileBlob = new Blob([fileBuffer], { type: mimetype || 'application/octet-stream' });
+    formData.append('file', fileBlob, filename);
+
+    const response = await fetch(`${this.asanaBaseUrl}/tasks/${taskGid}/attachments`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`[AsanaService] Erro no upload multipart para o Asana (${response.status}):`, errText);
+      throw new AsanaIntegrationError(
+        response.status,
+        `Falha ao enviar arquivo para o Asana Cloud: ${errText}`
+      );
+    }
+
+    const json = (await response.json()) as any;
+    const att = json.data;
+
+    return {
+      gid: att.gid,
+      name: att.name || filename,
+      downloadUrl: att.download_url || null,
+      viewUrl: att.view_url || null,
+      permanentUrl: att.permanent_url || null,
+      host: att.host || 'asana',
+      size: typeof att.size === 'number' ? att.size : fileBuffer.length,
+      createdAt: att.created_at || new Date().toISOString(),
     };
   }
 

@@ -4,6 +4,7 @@ import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
+import multipart from '@fastify/multipart';
 import { healthRoutes } from './routes/health.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { clientRoutes } from './modules/clients/clients.routes.js';
@@ -67,6 +68,14 @@ export function buildApp(): FastifyInstance {
   // 4. Rate Limiting para mitigação de ataques de força bruta
   app.register(rateLimit, {
     global: false, // aplicado especificamente em rotas sensíveis como /auth/login
+  });
+
+  // 4.1 Suporte a Uploads Multipart sem retenção na VPS (encaminhado diretamente ao Asana Cloud)
+  app.register(multipart, {
+    limits: {
+      fileSize: 25 * 1024 * 1024, // 25MB (limite da API Asana)
+      files: 1,
+    },
   });
 
   // 5. Rotas Públicas de diagnóstico e infraestrutura

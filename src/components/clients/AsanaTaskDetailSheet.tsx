@@ -24,6 +24,7 @@ import {
   AsanaSection,
   AsanaSubtask,
   AsanaStory,
+  AsanaAttachment,
   asanaIntegrationService,
   UpdateAsanaTaskInput,
 } from '@/services/asana';
@@ -52,6 +53,10 @@ import {
   Plus,
   Check,
   Circle,
+  Paperclip,
+  Download,
+  UploadCloud,
+  File,
 } from 'lucide-react';
 
 interface AsanaTaskDetailSheetProps {
@@ -89,6 +94,12 @@ export function AsanaTaskDetailSheet({
   const [newSubtaskName, setNewSubtaskName] = useState('');
   const [isCreatingSubtask, setIsCreatingSubtask] = useState(false);
 
+  // Anexos (Cloud Asana)
+  const [attachments, setAttachments] = useState<AsanaAttachment[]>([]);
+  const [isLoadingAttachments, setIsLoadingAttachments] = useState(false);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
   // Comentários e Histórico (Stories)
   const [stories, setStories] = useState<AsanaStory[]>([]);
   const [isLoadingStories, setIsLoadingStories] = useState(false);
@@ -96,7 +107,7 @@ export function AsanaTaskDetailSheet({
   const [isPostingComment, setIsPostingComment] = useState(false);
 
   // Aba ativa
-  const [activeTab, setActiveTab] = useState<'geral' | 'subtarefas' | 'atividades'>('geral');
+  const [activeTab, setActiveTab] = useState<'geral' | 'subtarefas' | 'anexos' | 'atividades'>('geral');
 
   // Campos de edição local
   const [name, setName] = useState('');
@@ -157,6 +168,20 @@ export function AsanaTaskDetailSheet({
         })
         .finally(() => {
           setIsLoadingStories(false);
+        });
+
+      // Busca anexos do Asana Cloud
+      setIsLoadingAttachments(true);
+      asanaIntegrationService
+        .getTaskAttachments(clientId, task.gid)
+        .then((items) => {
+          setAttachments(items);
+        })
+        .catch((err) => {
+          console.warn('[AsanaTaskDetailSheet] Erro ao buscar anexos:', err);
+        })
+        .finally(() => {
+          setIsLoadingAttachments(false);
         });
 
       // Busca dados enriquecidos (notes, tags, custom_fields) da API
@@ -426,6 +451,47 @@ export function AsanaTaskDetailSheet({
     }
   };
 
+  // Upload de Anexo direto ao Asana Cloud
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!canManage) {
+      toast.error('Apenas Administradores e Gestores podem anexar arquivos.');
+      return;
+    }
+
+    if (file.size > 25 * 1024 * 1024) {
+      toast.error('O arquivo excede o limite de 25MB permitido pela API do Asana.');
+      return;
+    }
+
+    try {
+      setIsUploadingAttachment(true);
+      const uploaded = await asanaIntegrationService.uploadTaskAttachment(
+        clientId,
+        currentTask.gid,
+        file
+      );
+      setAttachments((prev) => [uploaded, ...prev]);
+      toast.success(`Arquivo "${file.name}" anexado com sucesso no Asana Cloud!`);
+    } catch (err: any) {
+      toast.error(`Falha no upload do anexo: ${err?.message || 'Erro no Asana'}`);
+    } finally {
+      setIsUploadingAttachment(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const formatFileSize = (bytes: number | null): string => {
+    if (!bytes || bytes <= 0) return '-';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
@@ -638,20 +704,20 @@ export function AsanaTaskDetailSheet({
             onValueChange={(val) => setActiveTab(val as any)}
             className="w-full space-y-4"
           >
-            <TabsList className="bg-zinc-900/80 border border-white/10 p-1 w-full grid grid-cols-3 h-10 rounded-lg">
+            <TabsList className="bg-zinc-900/80 border border-white/10 p-1 w-full grid grid-cols-4 h-10 rounded-lg">
               <TabsTrigger
                 value="geral"
-                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-1.5"
               >
                 <FileText className="w-3.5 h-3.5 text-zinc-400" />
-                Geral
+                <span className="hidden sm:inline">Geral</span>
               </TabsTrigger>
               <TabsTrigger
                 value="subtarefas"
-                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-1.5"
               >
                 <CheckSquare className="w-3.5 h-3.5 text-zinc-400" />
-                Subtarefas
+                <span className="hidden sm:inline">Subtarefas</span>
                 {subtasks.length > 0 && (
                   <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-zinc-700 text-zinc-300">
                     {subtasks.length}
@@ -659,11 +725,23 @@ export function AsanaTaskDetailSheet({
                 )}
               </TabsTrigger>
               <TabsTrigger
+                value="anexos"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-1.5"
+              >
+                <Paperclip className="w-3.5 h-3.5 text-zinc-400" />
+                <span className="hidden sm:inline">Anexos</span>
+                {attachments.length > 0 && (
+                  <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-zinc-700 text-zinc-300">
+                    {attachments.length}
+                  </Badge>
+                )}
+              </TabsTrigger>
+              <TabsTrigger
                 value="atividades"
-                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-2"
+                className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white flex items-center justify-center gap-1.5"
               >
                 <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
-                Comentários
+                <span className="hidden sm:inline">Comentários</span>
                 {stories.length > 0 && (
                   <Badge variant="secondary" className="text-[10px] h-4 px-1.5 bg-zinc-700 text-zinc-300">
                     {stories.length}
@@ -830,7 +908,104 @@ export function AsanaTaskDetailSheet({
               )}
             </TabsContent>
 
-            {/* ABA 3: COMENTÁRIOS E HISTÓRICO */}
+            {/* ABA 3: ANEXOS (Cloud Asana sem retenção na VPS) */}
+            <TabsContent value="anexos" className="space-y-4 focus-visible:outline-none">
+              {/* Dropzone e Botão de Upload */}
+              {canManage && (
+                <div className="p-4 rounded-xl border border-dashed border-white/15 bg-zinc-900/20 hover:bg-zinc-900/40 transition-colors flex flex-col items-center justify-center gap-2.5 text-center">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    className="hidden"
+                    onChange={handleFileUpload}
+                    disabled={isUploadingAttachment}
+                  />
+                  <div className="w-9 h-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                    {isUploadingAttachment ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <UploadCloud className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-zinc-200">
+                      {isUploadingAttachment
+                        ? 'Enviando arquivo diretamente ao Asana Cloud...'
+                        : 'Faça upload de arquivos diretamente no Asana'}
+                    </p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Suporte até 25MB por anexo. Nenhum arquivo é retido no servidor local do Hub.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={isUploadingAttachment}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="h-8 px-3 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 text-xs gap-1.5 border border-white/10"
+                  >
+                    <Paperclip className="w-3.5 h-3.5" />
+                    Selecionar Arquivo
+                  </Button>
+                </div>
+              )}
+
+              {/* Lista de Anexos */}
+              {isLoadingAttachments ? (
+                <div className="py-8 flex flex-col items-center justify-center text-zinc-500 text-xs gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-500" />
+                  <span>Carregando anexos do Asana Cloud...</span>
+                </div>
+              ) : attachments.length === 0 ? (
+                <div className="py-8 text-center text-zinc-500 text-xs italic bg-zinc-900/20 rounded-lg border border-white/5">
+                  Nenhum anexo associado a esta demanda no Asana.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {attachments.map((att) => (
+                    <div
+                      key={att.gid}
+                      className="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-900/40 border border-white/5 hover:border-white/10 transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-8 h-8 rounded bg-zinc-800 flex items-center justify-center text-zinc-400 shrink-0">
+                          <File className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-zinc-200 truncate">{att.name}</p>
+                          <p className="text-[10px] text-zinc-500">
+                            {formatFileSize(att.size)} • {formatDateDisplay(att.createdAt)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {(att.downloadUrl || att.viewUrl || att.permanentUrl) && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            asChild
+                            className="h-7 px-2.5 text-xs text-zinc-300 border-white/10 hover:text-white hover:bg-white/5 gap-1.5"
+                          >
+                            <a
+                              href={att.downloadUrl || att.viewUrl || att.permanentUrl || '#'}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Baixar ou abrir no Asana Cloud"
+                            >
+                              <Download className="w-3 h-3" />
+                              Abrir
+                            </a>
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* ABA 4: COMENTÁRIOS E HISTÓRICO */}
             <TabsContent value="atividades" className="space-y-4 focus-visible:outline-none">
               {isLoadingStories ? (
                 <div className="py-8 flex flex-col items-center justify-center text-zinc-500 text-xs gap-2">

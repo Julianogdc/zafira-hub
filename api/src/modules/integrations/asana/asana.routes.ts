@@ -558,6 +558,80 @@ export async function asanaRoutes(app: FastifyInstance) {
     postStoryHandler
   );
 
+  // 6.7 Anexos: GET e POST (Upload Multipart direto para Asana Cloud sem retenção na VPS)
+  const getAttachmentsHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const attachments = await asanaService.getTaskAttachments(
+        request.params.id,
+        organizationId,
+        request.params.taskGid
+      );
+      return reply.status(200).send(attachments);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/clients/:id/asana/tasks/:taskGid/attachments',
+    {
+      preHandler: [authenticate],
+    },
+    getAttachmentsHandler
+  );
+  app.get(
+    '/api/clients/:id/asana/tasks/:taskGid/attachments',
+    {
+      preHandler: [authenticate],
+    },
+    getAttachmentsHandler
+  );
+
+  const postAttachmentHandler = async (
+    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    reply: FastifyReply
+  ) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const file = await request.file();
+      if (!file) {
+        return reply.status(400).send({ error: 'Nenhum arquivo enviado para upload.' });
+      }
+
+      const buffer = await file.toBuffer();
+      const attachment = await asanaService.uploadTaskAttachment(
+        request.params.id,
+        organizationId,
+        request.params.taskGid,
+        buffer,
+        file.filename,
+        file.mimetype
+      );
+      return reply.status(201).send(attachment);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/clients/:id/asana/tasks/:taskGid/attachments',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postAttachmentHandler
+  );
+  app.post(
+    '/api/clients/:id/asana/tasks/:taskGid/attachments',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    postAttachmentHandler
+  );
+
   function getOAuthRedirectUri(): string {
     return process.env.ASANA_REDIRECT_URI || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
   }

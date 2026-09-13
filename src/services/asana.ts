@@ -84,6 +84,17 @@ export interface AsanaStory {
   } | null;
 }
 
+export interface AsanaAttachment {
+  gid: string;
+  name: string;
+  downloadUrl: string | null;
+  viewUrl: string | null;
+  permanentUrl: string | null;
+  host: string;
+  size: number | null;
+  createdAt: string;
+}
+
 export interface UpdateAsanaTaskInput {
   name?: string;
   notes?: string | null;
@@ -217,6 +228,22 @@ export const asanaIntegrationService = {
    */
   async addTaskComment(clientId: string, taskGid: string, text: string): Promise<AsanaStory> {
     return api.post<AsanaStory>(`/clients/${clientId}/asana/tasks/${taskGid}/stories`, { text });
+  },
+
+  /**
+   * Busca lista de anexos vinculados à tarefa no Asana Cloud
+   */
+  async getTaskAttachments(clientId: string, taskGid: string): Promise<AsanaAttachment[]> {
+    return api.get<AsanaAttachment[]>(`/clients/${clientId}/asana/tasks/${taskGid}/attachments`);
+  },
+
+  /**
+   * Envia anexo multipart diretamente ao Asana Cloud (sem retenção em disco na VPS)
+   */
+  async uploadTaskAttachment(clientId: string, taskGid: string, file: File): Promise<AsanaAttachment> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post<AsanaAttachment>(`/clients/${clientId}/asana/tasks/${taskGid}/attachments`, formData);
   },
 
   /**
