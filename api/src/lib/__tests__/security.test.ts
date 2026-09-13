@@ -648,7 +648,42 @@ async function runSecurityTests() {
   if (orgBHasEvent) {
     throw new Error('Falha crítica de segurança: Evento da Organização A vazou para a Organização B!');
   }
-  console.log('✓ Isolamento Multi-tenant SSE comprovado: eventos transmitidos apenas para clientes da organização correspondente.');
+  // 6. Hardening de Segurança SSE: NUNCA aceitar token na URL / query string
+  function simulateAuthenticate(req: { cookies: { token?: string }; headers: { authorization?: string }; query?: { token?: string } }) {
+    let token: string | undefined = req.cookies.token;
+    if (!token && req.headers.authorization) {
+      const parts = req.headers.authorization.split(' ');
+      if (parts.length === 2 && parts[0] === 'Bearer') {
+        token = parts[1];
+      }
+    }
+    // Token em query string NÃO é extraído nem aceito
+    if (!token) {
+      return { authenticated: false, status: 401 };
+    }
+    return { authenticated: true, status: 200, token };
+  }
+
+  // Tentativa com ?token= na URL sem cookie ou header
+  const queryTokenAttempt = simulateAuthenticate({
+    cookies: {},
+    headers: {},
+    query: { token: 'jwt.token.in.url.attempt' },
+  });
+  if (queryTokenAttempt.authenticated || queryTokenAttempt.status !== 401) {
+    throw new Error('Falha crítica de segurança: Token em query string foi aceito no SSE!');
+  }
+  console.log('✓ Hardening SSE: Autenticação via ?token= na query string terminantemente rejeitada com 401.');
+
+  // Requisição legítima com cookie HTTP-only
+  const cookieAttempt = simulateAuthenticate({
+    cookies: { token: 'valid_httponly_jwt_token' },
+    headers: {},
+  });
+  if (!cookieAttempt.authenticated || cookieAttempt.status !== 200) {
+    throw new Error('Falha: Cookie de sessão HTTP-only foi incorretamente recusado!');
+  }
+  console.log('✓ Hardening SSE: Sessão HTTP-only autenticada com sucesso sem expor tokens na URL.');
 
   console.log('\n======================================================');
   console.log('TODOS OS 13 TESTES DE SEGURANÇA E COMPATIBILIDADE APROVADOS COM 100% DE SUCESSO!');

@@ -52,10 +52,6 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     }
   }
 
-  if (!token && (request.query as any)?.token) {
-    token = (request.query as any).token;
-  }
-
   if (token) {
     try {
       const decoded = await request.server.jwt.verify<{ sub: string; email: string }>(token);
