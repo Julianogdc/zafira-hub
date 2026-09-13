@@ -44,6 +44,7 @@ model Organization {
   members      OrganizationMember[]
   clients      Client[]
   integrations OrganizationIntegration[]
+  oauthStates  OAuthState[]
 
   @@map("organizations")
 }
@@ -61,6 +62,7 @@ model User {
 
   memberships        OrganizationMember[]
   responsibleClients Client[]
+  oauthStates        OAuthState[]
 
   @@map("users")
 }
@@ -141,4 +143,22 @@ model OrganizationIntegration {
   @@unique([organizationId, provider])
   @@index([provider])
   @@map("organization_integrations")
+}
+
+model OAuthState {
+  id             String              @id @default(uuid())
+  nonce          String              @unique
+  organizationId String
+  userId         String
+  provider       IntegrationProvider @default(ASANA)
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([provider, nonce])
+  @@index([expiresAt])
+  @@map("oauth_states")
 }

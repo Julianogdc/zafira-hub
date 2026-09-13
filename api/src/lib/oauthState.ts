@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { PrismaClient, IntegrationProvider } from '@prisma/client';
 
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutos de validade máxima
 
@@ -15,36 +16,9 @@ export interface OAuthStatePayload {
 }
 
 /**
- * Gera um state de OAuth criptograficamente seguro e assinado via HMAC-SHA256.
+ * Valida a integridade criptográfica e a assinatura HMAC-SHA256 do state recebido.
  */
-export function generateOAuthState(organizationId: string, userId: string): { stateParam: string; cookieNonce: string } {
-  const nonce = crypto.randomBytes(24).toString('hex');
-  const exp = Date.now() + STATE_TTL_MS;
-
-  const payload: OAuthStatePayload = {
-    nonce,
-    orgId: organizationId,
-    userId,
-    exp,
-  };
-
-  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const secret = getStateSecret();
-
-  const hmac = crypto.createHmac('sha256', secret).update(payloadStr).digest('base64url');
-  const stateParam = `${payloadStr}.${hmac}`;
-
-  return {
-    stateParam,
-    cookieNonce: nonce,
-  };
-}
-
-/**
- * Valida o state retornado pelo Asana no callback.
- * Verifica a assinatura HMAC, a expiração e o nonce da sessão do usuário.
- */
-export function verifyOAuthState(stateParam: string, cookieNonce?: string): { organizationId: string; userId: string } {
+export function verifyOAuthStateSignature(stateParam: string): OAuthStatePayload {
   if (!stateParam || typeof stateParam !== 'string') {
     throw new Error('Parâmetro state ausente ou inválido.');
   }
@@ -79,12 +53,144 @@ export function verifyOAuthState(stateParam: string, cookieNonce?: string): { or
     throw new Error('State de autorização expirado. Inicie o fluxo novamente.');
   }
 
-  if (cookieNonce && payload.nonce !== cookieNonce) {
-    throw new Error('Sessão de autorização incompatível com o navegador.');
+  if (!payload.orgId || !payload.nonce) {
+    throw new Error('Identificador de organização ou nonce ausente no state.');
   }
 
-  if (!payload.orgId) {
-    throw new Error('Identificador de organização ausente no state.');
+  return payload;
+}
+
+/**
+ * Cria o OAuth state assinado criptograficamente e o persiste no banco de dados para validação server-side.
+ */
+export async function createAndPersistOAuthState(
+  prisma: PrismaClient,
+  organizationId: string,
+  userId: string,
+  provider: IntegrationProvider = 'ASANA'
+): Promise<{ stateParam: string; nonce: string }> {
+  // Limpeza oportunística de states expirados
+  await prisma.oAuthState.deleteMany({
+    where: {
+      expiresAt: { lt: new Date() },
+    },
+  }).catch(() => {});
+
+  const nonce = crypto.randomBytes(24).toString('hex');
+  const exp = Date.now() + STATE_TTL_MS;
+
+  const payload: OAuthStatePayload = {
+    nonce,
+    orgId: organizationId,
+    userId,
+    exp,
+  };
+
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const secret = getStateSecret();
+  const hmac = crypto.createHmac('sha256', secret).update(payloadStr).digest('base64url');
+  const stateParam = `${payloadStr}.${hmac}`;
+
+  await prisma.oAuthState.create({
+    data: {
+      nonce,
+      organizationId,
+      userId,
+      provider,
+      expiresAt: new Date(exp),
+    },
+  });
+
+  return {
+    stateParam,
+    nonce,
+  };
+}
+
+/**
+ * Valida o OAuth state tanto pela assinatura HMAC quanto pelo registro no banco de dados,
+ * garantindo uso estritamente único (consome o registro).
+ */
+export async function verifyAndConsumeOAuthState(
+  prisma: PrismaClient,
+  stateParam: string,
+  provider: IntegrationProvider = 'ASANA'
+): Promise<{ organizationId: string; userId: string }> {
+  // 1. Validação Criptográfica HMAC e expiração de curto prazo
+  const payload = verifyOAuthStateSignature(stateParam);
+
+  // 2. Busca e validação Server-side no banco de dados
+  const record = await prisma.oAuthState.findUnique({
+    where: { nonce: payload.nonce },
+  });
+
+  if (!record) {
+    throw new Error('State de autorização inexistente ou não reconhecido pelo servidor.');
+  }
+
+  if (record.consumedAt) {
+    throw new Error('State de autorização já utilizado. Cada autorização deve ser única.');
+  }
+
+  if (record.expiresAt.getTime() < Date.now()) {
+    throw new Error('State de autorização expirado no servidor.');
+  }
+
+  if (record.provider !== provider) {
+    throw new Error('Provedor de integração incompatível com o state.');
+  }
+
+  if (record.organizationId !== payload.orgId || record.userId !== payload.userId) {
+    throw new Error('Inconsistência nos parâmetros de identidade da autorização.');
+  }
+
+  // 3. Invalidação atômica (Uso único garantido)
+  await prisma.oAuthState.update({
+    where: { id: record.id },
+    data: { consumedAt: new Date() },
+  });
+
+  // 4. Retorna organização e usuário estritamente obtidos do registro seguro do banco
+  return {
+    organizationId: record.organizationId,
+    userId: record.userId,
+  };
+}
+
+/**
+ * Função utilitária mantida para compatibilidade e testes locais em memória
+ */
+export function generateOAuthState(organizationId: string, userId: string): { stateParam: string; cookieNonce: string } {
+  const nonce = crypto.randomBytes(24).toString('hex');
+  const exp = Date.now() + STATE_TTL_MS;
+
+  const payload: OAuthStatePayload = {
+    nonce,
+    orgId: organizationId,
+    userId,
+    exp,
+  };
+
+  const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const secret = getStateSecret();
+
+  const hmac = crypto.createHmac('sha256', secret).update(payloadStr).digest('base64url');
+  const stateParam = `${payloadStr}.${hmac}`;
+
+  return {
+    stateParam,
+    cookieNonce: nonce,
+  };
+}
+
+/**
+ * Função utilitária mantida para compatibilidade e testes locais em memória
+ */
+export function verifyOAuthState(stateParam: string, cookieNonce?: string): { organizationId: string; userId: string } {
+  const payload = verifyOAuthStateSignature(stateParam);
+
+  if (cookieNonce && payload.nonce !== cookieNonce) {
+    throw new Error('Sessão de autorização incompatível com o navegador.');
   }
 
   return {

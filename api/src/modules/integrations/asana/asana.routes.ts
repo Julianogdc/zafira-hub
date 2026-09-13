@@ -2,7 +2,8 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { authenticate, requireRole } from '../../../middleware/auth.js';
 import { AsanaService, AsanaIntegrationError } from './asana.service.js';
-import { generateOAuthState, verifyOAuthState } from '../../../lib/oauthState.js';
+import { prisma } from '../../../lib/prisma.js';
+import { createAndPersistOAuthState, verifyAndConsumeOAuthState } from '../../../lib/oauthState.js';
 
 const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
@@ -168,7 +169,18 @@ export async function asanaRoutes(app: FastifyInstance) {
     return process.env.ASANA_REDIRECT_URI || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
   }
 
-  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com state seguro e assinado)
+  function getTargetOrigin(): string {
+    if (process.env.FRONTEND_ORIGIN) {
+      return process.env.FRONTEND_ORIGIN.trim();
+    }
+    if (process.env.CORS_ORIGIN) {
+      const first = process.env.CORS_ORIGIN.split(',')[0].trim();
+      if (first) return first;
+    }
+    return 'http://localhost:5173';
+  }
+
+  // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com state seguro persistido no servidor)
   app.get(
     '/integrations/asana/oauth/authorize',
     {
@@ -185,17 +197,8 @@ export async function asanaRoutes(app: FastifyInstance) {
         const userId = auth?.type === 'user' ? auth.userId : 'system';
         const organizationId = getOrganizationId(request);
 
-        // Gera state criptograficamente seguro e assinado via HMAC com TTL de 10 min
-        const { stateParam, cookieNonce } = generateOAuthState(organizationId, userId);
-
-        const isProduction = process.env.NODE_ENV === 'production';
-        reply.setCookie('asana_oauth_nonce', cookieNonce, {
-          path: '/',
-          httpOnly: true,
-          secure: isProduction,
-          sameSite: 'lax',
-          maxAge: 600, // 10 minutos
-        });
+        // Gera state assinado via HMAC e persiste no PostgreSQL para validação com uso único
+        const { stateParam } = await createAndPersistOAuthState(prisma, organizationId, userId, 'ASANA');
 
         const redirectUri = getOAuthRedirectUri();
 
@@ -220,12 +223,12 @@ export async function asanaRoutes(app: FastifyInstance) {
     reply: FastifyReply
   ) => {
     const { code, state: stateParam, error } = request.query;
-    const cookieNonce = request.cookies.asana_oauth_nonce;
+    const targetOrigin = getTargetOrigin();
 
-    // Limpa imediatamente o cookie de nonce (uso único)
-    reply.clearCookie('asana_oauth_nonce', {
-      path: '/',
-    });
+    // Limpa opcionalmente o cookie legado se presente
+    if (request.cookies.asana_oauth_nonce) {
+      reply.clearCookie('asana_oauth_nonce', { path: '/' });
+    }
 
     if (error || !code || !stateParam) {
       const errDescription = error || 'Autorização cancelada ou recusada.';
@@ -253,9 +256,10 @@ export async function asanaRoutes(app: FastifyInstance) {
               <button onclick="window.close()">Fechar Janela</button>
             </div>
             <script>
+              const targetOrigin = "${targetOrigin}";
               try {
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errDescription}' }, '*');
+                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errDescription}' }, targetOrigin);
                 }
               } catch (e) {}
             </script>
@@ -265,8 +269,8 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
 
     try {
-      // Validação estrita do state: assinatura HMAC, expiração de 10 min e nonce da sessão
-      const verified = verifyOAuthState(stateParam, cookieNonce);
+      // Validação criptográfica HMAC + verificação e consumo atômico no banco de dados (uso único garantido)
+      const verified = await verifyAndConsumeOAuthState(prisma, stateParam, 'ASANA');
       const organizationId = verified.organizationId;
       const redirectUri = getOAuthRedirectUri();
 
@@ -296,9 +300,10 @@ export async function asanaRoutes(app: FastifyInstance) {
               <div class="badge">Fechando esta janela em instantes...</div>
             </div>
             <script>
+              const targetOrigin = "${targetOrigin}";
               try {
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, '*');
+                  window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, targetOrigin);
                 }
               } catch (e) {
                 console.error(e);
@@ -336,9 +341,10 @@ export async function asanaRoutes(app: FastifyInstance) {
               <button onclick="window.close()">Fechar Janela</button>
             </div>
             <script>
+              const targetOrigin = "${targetOrigin}";
               try {
                 if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errMsg}' }, '*');
+                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errMsg}' }, targetOrigin);
                 }
               } catch (e) {}
             </script>
