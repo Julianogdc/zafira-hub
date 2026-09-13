@@ -15,6 +15,8 @@ export default defineConfig({
         target: 'https://zafira-hub-v2-api.hvrb9d.easypanel.host',
         changeOrigin: true,
         secure: true,
+        timeout: 0,
+        proxyTimeout: 0,
         rewrite: (path) => path.replace(/^\/api/, ''),
         configure: (proxy) => {
           proxy.on('proxyRes', (proxyRes) => {

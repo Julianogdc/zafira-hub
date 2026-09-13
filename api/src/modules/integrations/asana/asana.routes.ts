@@ -479,6 +479,8 @@ export async function asanaRoutes(app: FastifyInstance) {
       const rawBody = (request as any).rawBody || (typeof request.body === 'string' ? request.body : JSON.stringify(request.body));
       const isValid = await asanaService.verifyWebhookSignature(subscriptionId, xHookSignature, rawBody);
 
+      console.log(`[Asana Webhook] evento recebido subscriptionId=${subscriptionId} signatureValid=${isValid}`);
+
       if (!isValid) {
         return reply.status(401).send({
           error: 'Assinatura de webhook inválida.',
@@ -497,4 +499,56 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   app.post('/integrations/asana/webhooks/:subscriptionId', webhookHandler);
   app.post('/api/integrations/asana/webhooks/:subscriptionId', webhookHandler);
+
+  // 11. GET /integrations/asana/diagnostics (Diagnóstico seguro de Webhooks, SSE e banco - ADMIN)
+  const diagnosticsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const diagnostics = await asanaService.getDiagnostics(organizationId);
+      return reply.status(200).send(diagnostics);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.get(
+    '/integrations/asana/diagnostics',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN'])],
+    },
+    diagnosticsHandler
+  );
+  app.get(
+    '/api/integrations/asana/diagnostics',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN'])],
+    },
+    diagnosticsHandler
+  );
+
+  // 12. POST /integrations/asana/webhooks/sync (Sincroniza e garante webhooks para todos os projetos vinculados)
+  const syncWebhooksHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      const organizationId = getOrganizationId(request);
+      const result = await asanaService.syncWebhooks(organizationId);
+      return reply.status(200).send(result);
+    } catch (error) {
+      return handleError(error, reply);
+    }
+  };
+
+  app.post(
+    '/integrations/asana/webhooks/sync',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    syncWebhooksHandler
+  );
+  app.post(
+    '/api/integrations/asana/webhooks/sync',
+    {
+      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+    },
+    syncWebhooksHandler
+  );
 }

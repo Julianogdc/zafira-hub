@@ -51,6 +51,11 @@ class SSEHub {
   register(organizationId: string, reply: FastifyReply): string {
     const clientId = `sse_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
 
+    // Importante no Fastify v5: assume o controle do stream HTTP manualmente
+    if (typeof reply.hijack === 'function') {
+      reply.hijack();
+    }
+
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
@@ -67,6 +72,9 @@ class SSEHub {
       this.clients.set(organizationId, new Set());
     }
     this.clients.get(organizationId)!.add(client);
+
+    const currentCount = this.clients.get(organizationId)?.size || 1;
+    console.log(`[SSE] connected organizationId=${organizationId} connections=${currentCount}`);
 
     // Remove a conexão assim que o socket for fechado
     reply.raw.on('close', () => {
@@ -90,6 +98,8 @@ class SSEHub {
       }
     }
 
+    console.log(`[SSE] disconnected organizationId=${organizationId}`);
+
     if (orgClients.size === 0) {
       this.clients.delete(organizationId);
     }
@@ -101,6 +111,9 @@ class SSEHub {
    */
   publishToOrganization(organizationId: string, event: AsanaNormalizedEvent) {
     const orgClients = this.clients.get(organizationId);
+    const count = orgClients?.size || 0;
+    console.log(`[SSE] publish organizationId=${organizationId} eventType=${event.type} connections=${count}`);
+
     if (!orgClients || orgClients.size === 0) {
       return;
     }

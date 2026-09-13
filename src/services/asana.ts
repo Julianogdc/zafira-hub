@@ -110,13 +110,42 @@ export const asanaIntegrationService = {
   },
 
   /**
+   * Sincroniza e garante webhooks ativos para todos os projetos vinculados da organização
+   */
+  async syncWebhooks(): Promise<{ synced: number; details: any[] }> {
+    return api.post('/integrations/asana/webhooks/sync');
+  },
+
+  /**
+   * Retorna diagnóstico seguro da integração Asana (ADMIN)
+   */
+  async getDiagnostics(): Promise<any> {
+    return api.get('/integrations/asana/diagnostics');
+  },
+
+  /**
    * Conecta ao stream Server-Sent Events (SSE) do Asana para receber atualizações da organização
    */
   subscribeToEvents(onEvent: (event: AsanaRealtimeEvent) => void, onError?: (err: any) => void): () => void {
     const url = '/api/integrations/asana/events';
     const eventSource = new EventSource(url, { withCredentials: true });
 
+    eventSource.onopen = () => {
+      console.log('[Asana SSE] connected');
+    };
+
+    eventSource.onmessage = (e: MessageEvent) => {
+      console.log('[Asana SSE] event received');
+      try {
+        const parsed = JSON.parse(e.data);
+        onEvent(parsed);
+      } catch (err) {
+        console.warn('[AsanaSSE] Falha no parse do evento recebido:', err);
+      }
+    };
+
     eventSource.addEventListener('asana_event', (e: MessageEvent) => {
+      console.log('[Asana SSE] event received');
       try {
         const parsed = JSON.parse(e.data);
         onEvent(parsed);
@@ -126,6 +155,7 @@ export const asanaIntegrationService = {
     });
 
     eventSource.onerror = (err) => {
+      console.error('[Asana SSE] error', err);
       if (onError) onError(err);
     };
 

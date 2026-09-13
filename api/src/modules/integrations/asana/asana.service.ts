@@ -859,7 +859,7 @@ export class AsanaService {
   async handleWebhookHandshake(subscriptionId: string, xHookSecret: string): Promise<void> {
     const encryptedSecret = encryptToken(xHookSecret);
 
-    await prisma.asanaWebhookSubscription.update({
+    const sub = await prisma.asanaWebhookSubscription.update({
       where: { id: subscriptionId },
       data: {
         secret: encryptedSecret,
@@ -867,6 +867,8 @@ export class AsanaService {
         updatedAt: new Date(),
       },
     });
+
+    console.log(`[Asana Webhook] handshake recebido subscriptionId=${subscriptionId} resourceGid=${sub.resourceGid} handshake=success`);
   }
 
   /**
@@ -918,6 +920,9 @@ export class AsanaService {
     for (const event of events) {
       const resType = event.resource?.resource_type || 'task';
       const action = event.action || 'changed';
+
+      console.log(`[Asana Webhook] evento recebido subscriptionId=${subscriptionId} organizationId=${sub.organizationId} resourceType=${resType} resourceGid=${event.resource?.gid} action=${action} signatureValid=true`);
+
       const normalized: AsanaNormalizedEvent = {
         type: `asana.${resType}.${action}`,
         organizationId: sub.organizationId,
@@ -931,6 +936,110 @@ export class AsanaService {
 
       sseHub.publishToOrganization(sub.organizationId, normalized);
     }
+  }
+
+  /**
+   * Retorna diagnóstico seguro do pipeline de webhooks e SSE para a organização (ADMIN).
+   */
+  async getDiagnostics(organizationId: string) {
+    let tableExists = false;
+    let subscriptions: any[] = [];
+    let dbError: string | null = null;
+
+    try {
+      const check = await prisma.$queryRaw<any[]>`
+        SELECT to_regclass('public.asana_webhook_subscriptions') as table_name;
+      `;
+      tableExists = check && check[0] && check[0].table_name !== null;
+
+      if (tableExists) {
+        subscriptions = await prisma.asanaWebhookSubscription.findMany({
+          where: { organizationId },
+          select: {
+            id: true,
+            organizationId: true,
+            resourceGid: true,
+            webhookGid: true,
+            target: true,
+            active: true,
+            lastEventAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+      }
+    } catch (err: any) {
+      dbError = err?.message || String(err);
+    }
+
+    let remoteWebhooks: any = null;
+    let remoteError: string | null = null;
+    let workspaceId: string | null = null;
+
+    try {
+      const auth = await this.getValidToken(organizationId);
+      workspaceId = auth.workspaceId || null;
+      if (workspaceId) {
+        remoteWebhooks = await this.fetchAsana(`/webhooks?workspace=${workspaceId}`, auth.token);
+      }
+    } catch (err: any) {
+      remoteError = err?.message || String(err);
+    }
+
+    const linkedProjects = await prisma.clientIntegration.findMany({
+      where: {
+        client: { organizationId },
+        provider: 'ASANA',
+      },
+      select: {
+        id: true,
+        clientId: true,
+        externalId: true,
+        metadata: true,
+        createdAt: true,
+      },
+    });
+
+    const activeSSEConnections = sseHub.getActiveConnectionsCount(organizationId);
+
+    return {
+      organizationId,
+      workspaceId,
+      tableExists,
+      dbError,
+      subscriptions,
+      remoteWebhooks,
+      remoteError,
+      linkedProjects,
+      activeSSEConnections,
+    };
+  }
+
+  /**
+   * Sincroniza e garante webhooks remotos e locais para todos os projetos vinculados da organização.
+   */
+  async syncWebhooks(organizationId: string) {
+    const linkedProjects = await prisma.clientIntegration.findMany({
+      where: {
+        client: { organizationId },
+        provider: 'ASANA',
+      },
+      select: { externalId: true },
+    });
+
+    const uniqueGids = Array.from(new Set(linkedProjects.map((p) => p.externalId)));
+    const results: any[] = [];
+
+    for (const gid of uniqueGids) {
+      try {
+        const sub = await this.createProjectWebhook(organizationId, gid);
+        results.push({ projectGid: gid, success: true, subscriptionId: sub?.id, active: sub?.active });
+      } catch (err: any) {
+        results.push({ projectGid: gid, success: false, error: err?.message || String(err) });
+      }
+    }
+
+    return { synced: results.length, details: results };
   }
 }
 

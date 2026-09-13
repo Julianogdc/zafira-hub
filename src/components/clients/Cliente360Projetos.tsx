@@ -138,6 +138,7 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
   // Atualização em segundo plano (silenciosa, sem desmontar UI nem acionar spinners invasivos)
   const silentRefresh = useCallback(async () => {
     try {
+      console.log('[Asana UI] silent refresh triggered');
       setIsSilentSyncing(true);
       const [projectsData, tasksData] = await Promise.all([
         asanaIntegrationService.getClientProjects(clientId).catch(() => null),
@@ -163,10 +164,19 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     setTasks((prev) => prev.map((t) => (t.gid === taskGid ? { ...t, ...updates } : t)));
   }, []);
 
-  // Carregamento inicial
+  // Carregamento inicial e sincronização de webhooks
   useEffect(() => {
     loadData(true);
   }, [loadData]);
+
+  // Assegura webhooks ativos no Asana quando a integração estiver conectada
+  useEffect(() => {
+    if (status?.connected && projects.length > 0) {
+      asanaIntegrationService.syncWebhooks().catch((err) => {
+        console.warn('[Cliente360Projetos] Falha ao sincronizar webhooks remotos:', err);
+      });
+    }
+  }, [status?.connected, projects.length]);
 
   // Conexão SSE em tempo real: recebe eventos da organização e atualiza silenciosamente
   useEffect(() => {
@@ -182,16 +192,17 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     };
   }, [status?.connected, silentRefresh]);
 
-  // Polling de segurança leve e não invasivo a cada 3 minutos (como contingência para webhooks)
+  // Polling de segurança leve: 15s em ambiente DEV para validação ágil, 3 min (180s) em PROD
   useEffect(() => {
     if (!status?.connected) return;
 
+    const pollInterval = import.meta.env.DEV ? 15000 : 180000;
     const interval = setInterval(() => {
       if (typeof document !== 'undefined' && document.hidden) {
         return; // Não executa se a aba do navegador estiver em segundo plano
       }
       silentRefresh();
-    }, 180000);
+    }, pollInterval);
 
     return () => {
       clearInterval(interval);

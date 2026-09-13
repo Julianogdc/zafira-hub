@@ -27,7 +27,7 @@ export function buildApp(): FastifyInstance {
   });
 
   // Preserva o payload bruto (rawBody) para validação de assinaturas HMAC em Webhooks (ex: Asana)
-  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (req, body, done) => {
+  app.addContentTypeParser(['application/json', /^application\/json/], { parseAs: 'buffer' }, (req, body, done) => {
     try {
       const buffer = body as Buffer;
       const rawString = buffer.length ? buffer.toString('utf-8') : '';
