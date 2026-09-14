@@ -25,6 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthStore } from '@/store/useAuthStore';
+import EditarAgendamentoModal from '@/components/content/EditarAgendamentoModal';
 import {
   ClientPostizPost,
   postizIntegrationService,
@@ -48,9 +49,9 @@ export default function ClienteConteudoPreview() {
   const [error, setError] = useState<string | null>(null);
   const [selectedCarouselIndex, setSelectedCarouselIndex] = useState(0);
 
-  // Autenticação e RBAC (Editar no Postiz visível apenas para Admin e Manager)
+  // Autenticação e RBAC (Editar agendamento visível apenas para Admin e Manager)
   const { user } = useAuthStore();
-  const [isOpeningEditor, setIsOpeningEditor] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const userRole = (user?.role || '').toLowerCase();
@@ -97,24 +98,6 @@ export default function ClienteConteudoPreview() {
   useEffect(() => {
     loadData();
   }, [loadData]);
-
-  // Ação segura: obter destino e abrir o editor no Postiz em nova aba (somente ADMIN e MANAGER)
-  const handleEditInPostiz = async () => {
-    if (!clientId || !postId) return;
-    try {
-      setIsOpeningEditor(true);
-      const res = await postizIntegrationService.getPostEditLink(clientId, postId);
-      if (res?.editorUrl) {
-        window.open(res.editorUrl, '_blank', 'noopener,noreferrer');
-      } else {
-        throw new Error('URL inválida');
-      }
-    } catch {
-      toast.error('Não foi possível abrir este conteúdo para edição. Tente novamente.');
-    } finally {
-      setIsOpeningEditor(false);
-    }
-  };
 
   // Recarrega os dados reais atualizados do post no Hub
   const handleRefresh = async () => {
@@ -359,21 +342,16 @@ export default function ClienteConteudoPreview() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Ação discreta: Editar no Postiz (visível apenas para ADMIN e MANAGER em status elegíveis) */}
+          {/* Ação nativa Zafira: Editar agendamento / Agendar rascunho (visível para ADMIN e MANAGER em posts elegíveis) */}
           {isEditable && (
             <Button
               variant="outline"
               size="sm"
-              onClick={handleEditInPostiz}
-              disabled={isOpeningEditor}
+              onClick={() => setIsEditModalOpen(true)}
               className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 gap-2 text-xs"
             >
-              {isOpeningEditor ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Pencil className="w-3.5 h-3.5" />
-              )}
-              <span>Editar no Postiz</span>
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{post.status === 'DRAFT' ? 'Agendar rascunho' : 'Editar agendamento'}</span>
             </Button>
           )}
 
@@ -675,6 +653,20 @@ export default function ClienteConteudoPreview() {
           </Card>
         </div>
       </div>
+
+      {/* Modal nativo Zafira para editar data e horário da publicação */}
+      {isEditable && (
+        <EditarAgendamentoModal
+          isOpen={isEditModalOpen}
+          onClose={() => setIsEditModalOpen(false)}
+          post={post}
+          clientId={clientId}
+          clientName={client?.name}
+          onSuccess={(updatedPost) => {
+            setPost(updatedPost);
+          }}
+        />
+      )}
     </div>
   );
 }

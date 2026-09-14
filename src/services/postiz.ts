@@ -203,10 +203,17 @@ export const postizIntegrationService = {
   },
 
   /**
-   * Obtém a URL do editor oficial do Postiz para uma publicação elegível (DRAFT, QUEUE, SCHEDULED).
+   * Reagenda uma publicação existente ou agenda um rascunho via backend do Hub.
    */
-  async getPostEditLink(clientId: string, postId: string): Promise<{ editorUrl: string }> {
-    return api.get<{ editorUrl: string }>(`/clients/${clientId}/content/postiz/${postId}/edit-link`);
+  async schedulePost(
+    clientId: string,
+    postId: string,
+    scheduledAt: string
+  ): Promise<{ status: string; message: string; post: ClientPostizPost }> {
+    return api.patch<{ status: string; message: string; post: ClientPostizPost }>(
+      `/clients/${clientId}/content/postiz/${postId}/schedule`,
+      { scheduledAt }
+    );
   },
 
   /**

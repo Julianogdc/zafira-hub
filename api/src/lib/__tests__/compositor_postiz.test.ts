@@ -639,32 +639,65 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
   });
 
   // =========================================================================
-  // ETAPA 3G — TESTES OBRIGATÓRIOS: EDITAR AGENDAMENTO COM SEGURANÇA (EDIT-LINK)
+  // ETAPA 3G — TESTES OBRIGATÓRIOS: EDITAR AGENDAMENTO DENTRO DO HUB
   // =========================================================================
 
-  await t.test('14. Admin e Manager conseguem obter link de edição para DRAFT', async () => {
+  await t.test('14. Admin altera a data/hora de post SCHEDULED e chama rotina nativa do Postiz', async () => {
+    let rescheduleCalledWith: any = null;
+
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        rescheduleCalledWith = payload;
+        return { ok: true };
+      },
+    };
+
     const mockPost = {
-      id: 'post_draft_1',
+      id: 'post_sched_1',
+      integrationId: 'int_insta_123',
+      platform: 'instagram',
+      accountName: 'Zafira Oficial',
+      status: 'SCHEDULED',
+      content: 'Post agendado inicial',
+      scheduledAt: '2026-10-01T14:00:00.000Z',
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/img.jpg', type: 'IMAGE' }],
+      settings: { post_type: 'post' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    const newDate = '2026-10-05T18:30:00.000Z';
+    const result = await service.rescheduleClientPost('cli_123', 'post_sched_1', newDate, 'org_zafira');
+
+    assert.ok(rescheduleCalledWith, 'reschedulePost deve ser chamado');
+    assert.strictEqual(rescheduleCalledWith.postId, 'post_sched_1');
+    assert.strictEqual(rescheduleCalledWith.integrationId, 'int_insta_123');
+    assert.strictEqual(rescheduleCalledWith.date, newDate);
+    assert.strictEqual(result.post.scheduledAt, newDate);
+    assert.strictEqual(result.post.status, 'QUEUE');
+  });
+
+  await t.test('15. Manager autorizado altera a data/hora via PATCH endpoint', async () => {
+    const mockPost = {
+      id: 'post_sched_2',
       integrationId: 'int_123',
       platform: 'instagram',
       accountName: 'Zafira Hub',
-      status: 'DRAFT',
-      content: 'Rascunho de post',
-      scheduledAt: null,
-      publishedAt: null,
-      createdAt: '2026-09-14T12:00:00.000Z',
+      status: 'QUEUE',
+      content: 'Post na fila',
+      scheduledAt: '2026-10-02T10:00:00.000Z',
     };
 
     const mockService: any = {
-      getClientPostById: async (clientId: string, postId: string) => {
-        assert.strictEqual(clientId, 'cli_123');
-        assert.strictEqual(postId, 'post_draft_1');
-        return { post: mockPost };
-      },
-      getPostEditLink: async (clientId: string, postId: string, organizationId?: string) => {
-        const { post } = await mockService.getClientPostById(clientId, postId, organizationId);
-        assert.strictEqual(post.status, 'DRAFT');
-        return { editorUrl: 'https://postiz.lab.zafiramkt.com.br/launches' };
+      rescheduleClientPost: async (clientId: string, postId: string, scheduledAt: string) => {
+        return {
+          post: {
+            ...mockPost,
+            scheduledAt,
+            status: 'QUEUE',
+          },
+        };
       },
     };
 
@@ -672,21 +705,21 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
     await app.register(cookie, { secret: 'test_cookie_secret_32bytes_long' });
     await app.register(jwt, { secret: 'test_jwt_secret_32bytes_long' });
 
-    // Rota com autenticação simulada de ADMIN
-    app.get(
-      '/clients/:clientId/content/postiz/:postId/edit-link',
+    // Endpoint simulando autenticação de MANAGER
+    app.patch(
+      '/clients/:clientId/content/postiz/:postId/schedule',
       {
         preHandler: [
           async (req) => {
             req.authContext = {
               type: 'user',
-              userId: 'usr_admin',
-              email: 'admin@zafira.com.br',
+              userId: 'usr_manager',
+              email: 'manager@zafira.com.br',
               memberships: [
                 {
                   organizationId: 'org_zafira',
                   organizationSlug: 'zafira',
-                  role: 'ADMIN',
+                  role: 'MANAGER',
                 },
               ],
             };
@@ -695,67 +728,125 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
         ],
       },
       async (req, reply) => {
-        const result = await mockService.getPostEditLink(
+        const body = req.body as any;
+        const res = await mockService.rescheduleClientPost(
           (req.params as any).clientId,
-          (req.params as any).postId
+          (req.params as any).postId,
+          body.scheduledAt
         );
-        return reply.status(200).send(result);
+        return reply.status(200).send({ status: 'ok', post: res.post });
       }
     );
 
     await app.ready();
 
+    const futureDate = '2026-10-10T15:00:00.000Z';
     const res = await app.inject({
-      method: 'GET',
-      url: '/clients/cli_123/content/postiz/post_draft_1/edit-link',
+      method: 'PATCH',
+      url: '/clients/cli_123/content/postiz/post_sched_2/schedule',
+      payload: { scheduledAt: futureDate },
     });
 
-    assert.strictEqual(res.statusCode, 200, 'Admin deve obter link com status 200');
+    assert.strictEqual(res.statusCode, 200);
     const body = res.json();
-    assert.strictEqual(body.editorUrl, 'https://postiz.lab.zafiramkt.com.br/launches');
-    assert.strictEqual(Object.keys(body).length, 1, 'Resposta deve conter estritamente editorUrl');
+    assert.strictEqual(body.post.scheduledAt, futureDate);
+    assert.strictEqual(body.post.status, 'QUEUE');
   });
 
-  await t.test('15. Manager consegue obter link de edição para QUEUE / SCHEDULED posicionado no dia', async () => {
-    const mockPost = {
-      id: 'post_sched_1',
-      integrationId: 'int_123',
-      platform: 'instagram',
-      accountName: 'Zafira Hub',
-      status: 'SCHEDULED',
-      content: 'Post agendado para o dia 20',
-      scheduledAt: '2026-09-20T14:30:00.000Z',
-      publishedAt: null,
-      createdAt: '2026-09-14T12:00:00.000Z',
+  await t.test('16. Rascunho (DRAFT) passa para agendado (QUEUE) com data/hora válida', async () => {
+    let calledPayload: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        calledPayload = payload;
+        return { ok: true };
+      },
     };
 
-    const mockClient: any = {
-      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+    const mockDraftPost = {
+      id: 'post_draft_99',
+      integrationId: 'int_draft_1',
+      platform: 'instagram',
+      accountName: 'Zafira',
+      status: 'DRAFT',
+      content: 'Rascunho agora será agendado',
+      scheduledAt: null,
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/draft.jpg', type: 'IMAGE' }],
+      settings: {},
     };
 
     const service = new PostizService(mockClient, null as any);
-    // Mock getClientPostById
-    (service as any).getClientPostById = async () => ({ post: mockPost });
+    (service as any).getClientPostById = async () => ({ post: mockDraftPost });
 
-    const result = await service.getPostEditLink('cli_123', 'post_sched_1', 'org_zafira');
-    assert.strictEqual(
-      result.editorUrl,
-      'https://postiz.lab.zafiramkt.com.br/launches?startDate=2026-09-20&endDate=2026-09-20&display=day',
-      'Link deve incluir data do post para foco no calendário'
+    const futureDate = '2026-11-01T12:00:00.000Z';
+    const result = await service.rescheduleClientPost('cli_123', 'post_draft_99', futureDate, 'org_zafira');
+
+    assert.strictEqual(calledPayload.postId, 'post_draft_99');
+    assert.strictEqual(calledPayload.date, futureDate);
+    assert.strictEqual(result.post.status, 'QUEUE');
+    assert.strictEqual(result.post.scheduledAt, futureDate);
+  });
+
+  await t.test('17. Data no passado é rejeitada com status 400 (DATE_MUST_BE_FUTURE)', async () => {
+    const service = new PostizService(null as any, null as any);
+    (service as any).getClientPostById = async () => ({
+      post: { id: 'post_1', status: 'QUEUE', integrationId: 'int_1' },
+    });
+
+    const pastDate = '2020-01-01T10:00:00.000Z';
+    await assert.rejects(
+      async () => service.rescheduleClientPost('cli_123', 'post_1', pastDate, 'org_zafira'),
+      (err: any) => {
+        assert.ok(err instanceof PostizIntegrationError);
+        assert.strictEqual(err.statusCode, 400);
+        assert.strictEqual(err.code, 'DATE_MUST_BE_FUTURE');
+        return true;
+      }
     );
   });
 
-  await t.test('16. Usuário MEMBER recebe 403 Forbidden ao solicitar edit-link', async () => {
+  await t.test('18. Post PUBLISHED e ERROR são rejeitados com erro 400', async () => {
+    const service = new PostizService(null as any, null as any);
+
+    // Rejeição para PUBLISHED
+    (service as any).getClientPostById = async () => ({
+      post: { id: 'post_pub', status: 'PUBLISHED', integrationId: 'int_1' },
+    });
+    await assert.rejects(
+      async () => service.rescheduleClientPost('cli_123', 'post_pub', '2026-12-01T10:00:00.000Z', 'org_zafira'),
+      (err: any) => {
+        assert.ok(err instanceof PostizIntegrationError);
+        assert.strictEqual(err.statusCode, 400);
+        assert.strictEqual(err.code, 'POST_ALREADY_PUBLISHED');
+        return true;
+      }
+    );
+
+    // Rejeição para ERROR
+    (service as any).getClientPostById = async () => ({
+      post: { id: 'post_err', status: 'ERROR', integrationId: 'int_1' },
+    });
+    await assert.rejects(
+      async () => service.rescheduleClientPost('cli_123', 'post_err', '2026-12-01T10:00:00.000Z', 'org_zafira'),
+      (err: any) => {
+        assert.ok(err instanceof PostizIntegrationError);
+        assert.strictEqual(err.statusCode, 400);
+        assert.strictEqual(err.code, 'POST_STATUS_NOT_EDITABLE');
+        return true;
+      }
+    );
+  });
+
+  await t.test('19. MEMBER recebe 403 Forbidden ao tentar reagendar', async () => {
     const app = fastify();
 
-    app.get(
-      '/clients/:clientId/content/postiz/:postId/edit-link',
+    app.patch(
+      '/clients/:clientId/content/postiz/:postId/schedule',
       {
         preHandler: [
           async (req) => {
             req.authContext = {
               type: 'user',
-              userId: 'usr_member',
+              userId: 'usr_member_read_only',
               email: 'membro@zafira.com.br',
               memberships: [
                 {
@@ -775,27 +866,22 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
     await app.ready();
 
     const res = await app.inject({
-      method: 'GET',
-      url: '/clients/cli_123/content/postiz/post_draft_1/edit-link',
+      method: 'PATCH',
+      url: '/clients/cli_123/content/postiz/post_sched_1/schedule',
+      payload: { scheduledAt: '2026-10-15T10:00:00.000Z' },
     });
 
     assert.strictEqual(res.statusCode, 403, 'MEMBER deve receber 403 Forbidden');
-    const body = res.json();
-    assert.strictEqual(body.error, 'forbidden');
   });
 
-  await t.test('17. Post de outro cliente ou organização recebe 404 Not Found', async () => {
-    const mockClient: any = {
-      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
-    };
-
-    const service = new PostizService(mockClient, null as any);
+  await t.test('20. Post de outro cliente ou organização recebe 404 Not Found', async () => {
+    const service = new PostizService(null as any, null as any);
     (service as any).getClientPostById = async () => {
       throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     };
 
     await assert.rejects(
-      async () => service.getPostEditLink('cli_outro', 'post_123', 'org_zafira'),
+      async () => service.rescheduleClientPost('cli_outro', 'post_1', '2026-10-15T10:00:00.000Z', 'org_zafira'),
       (err: any) => {
         assert.ok(err instanceof PostizIntegrationError);
         assert.strictEqual(err.statusCode, 404);
@@ -805,69 +891,76 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
     );
   });
 
-  await t.test('18. Post publicado (PUBLISHED) não recebe link de edição (erro 400)', async () => {
-    const mockPublishedPost = {
-      id: 'post_pub_1',
-      integrationId: 'int_123',
-      platform: 'instagram',
-      accountName: 'Zafira Hub',
-      status: 'PUBLISHED',
-      content: 'Post já publicado',
-      scheduledAt: null,
-      publishedAt: '2026-09-10T10:00:00.000Z',
-      createdAt: '2026-09-09T10:00:00.000Z',
-    };
-
+  await t.test('21. Mídia, legenda, formato e conta social são preservados após reagendamento', async () => {
+    let sentToPostiz: any = null;
     const mockClient: any = {
-      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
     };
-
-    const service = new PostizService(mockClient, null as any);
-    (service as any).getClientPostById = async () => ({ post: mockPublishedPost });
-
-    await assert.rejects(
-      async () => service.getPostEditLink('cli_123', 'post_pub_1', 'org_zafira'),
-      (err: any) => {
-        assert.ok(err instanceof PostizIntegrationError);
-        assert.strictEqual(err.statusCode, 400);
-        assert.strictEqual(err.code, 'POST_ALREADY_PUBLISHED');
-        return true;
-      }
-    );
-  });
-
-  await t.test('19. Nenhuma credencial, token ou segredo aparece na resposta do edit-link', async () => {
-    process.env.POSTIZ_API_KEY = 'secret_postiz_key_12345';
 
     const mockPost = {
-      id: 'post_draft_sec',
-      integrationId: 'int_123',
+      id: 'post_story_preserve',
+      integrationId: 'int_social_instagram',
       platform: 'instagram',
-      accountName: 'Zafira Hub',
-      status: 'DRAFT',
-      content: 'Teste de segurança',
-      scheduledAt: null,
-      publishedAt: null,
-      createdAt: '2026-09-14T12:00:00.000Z',
-    };
-
-    const mockClient: any = {
-      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+      accountName: 'Zafira Preservada',
+      status: 'QUEUE',
+      content: 'Legenda original preservada',
+      rawContent: 'Legenda original preservada',
+      scheduledAt: '2026-10-01T10:00:00.000Z',
+      mediaItems: [
+        { url: 'https://postiz.lab.zafiramkt.com.br/uploads/story.mp4', type: 'VIDEO' },
+      ],
+      settings: { post_type: 'story' },
+      contentType: 'STORY_VIDEO',
+      isStory: true,
     };
 
     const service = new PostizService(mockClient, null as any);
     (service as any).getClientPostById = async () => ({ post: mockPost });
 
-    const result = await service.getPostEditLink('cli_123', 'post_draft_sec', 'org_zafira');
+    const newDate = '2026-10-20T19:00:00.000Z';
+    const result = await service.rescheduleClientPost('cli_123', 'post_story_preserve', newDate, 'org_zafira');
 
-    // Validação estrita
-    assert.strictEqual(typeof result.editorUrl, 'string');
-    assert.ok(!result.editorUrl.includes('secret_postiz_key_12345'), 'Não deve conter POSTIZ_API_KEY na URL');
-    assert.ok(!result.editorUrl.includes('Bearer'), 'Não deve conter tokens');
+    // Confirma que os dados enviados para o Postiz preservaram tudo
+    assert.strictEqual(sentToPostiz.postId, 'post_story_preserve');
+    assert.strictEqual(sentToPostiz.integrationId, 'int_social_instagram');
+    assert.strictEqual(sentToPostiz.content, 'Legenda original preservada');
+    assert.strictEqual(sentToPostiz.settings.post_type, 'story');
+    assert.strictEqual(sentToPostiz.mediaItems[0].path, 'https://postiz.lab.zafiramkt.com.br/uploads/story.mp4');
 
+    // Confirma que o post retornado preservou contentType e mídia
+    assert.strictEqual(result.post.contentType, 'STORY_VIDEO');
+    assert.strictEqual(result.post.isStory, true);
+    assert.strictEqual(result.post.mediaItems?.[0]?.url, 'https://postiz.lab.zafiramkt.com.br/uploads/story.mp4');
+    assert.strictEqual(result.post.scheduledAt, newDate);
+  });
+
+  await t.test('22. Nenhuma credencial, token ou segredo aparece na resposta do reagendamento', async () => {
+    process.env.POSTIZ_API_KEY = 'secret_key_never_leak';
+
+    const mockClient: any = {
+      reschedulePost: async () => ({ ok: true }),
+    };
+
+    const mockPost = {
+      id: 'post_sec_1',
+      integrationId: 'int_1',
+      platform: 'instagram',
+      accountName: 'Zafira',
+      status: 'QUEUE',
+      content: 'Conteúdo seguro',
+      scheduledAt: '2026-10-01T10:00:00.000Z',
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    const result = await service.rescheduleClientPost('cli_123', 'post_sec_1', '2026-10-20T10:00:00.000Z', 'org_zafira');
     const jsonStr = JSON.stringify(result);
-    assert.ok(!jsonStr.includes('secret_postiz_key_12345'), 'Nenhuma chave de API no payload JSON');
-    assert.ok(!jsonStr.includes('password'), 'Nenhuma menção a senhas');
-    assert.strictEqual(JSON.stringify(Object.keys(result)), JSON.stringify(['editorUrl']), 'Apenas editorUrl');
+
+    assert.ok(!jsonStr.includes('secret_key_never_leak'), 'Chave de API nunca pode aparecer');
+    assert.ok(!jsonStr.includes('password'), 'Senha não pode aparecer');
   });
 });

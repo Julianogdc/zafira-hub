@@ -1384,15 +1384,17 @@ export class PostizService {
   }
 
   /**
-   * Obtém a URL estável do editor do Postiz para um post elegível (DRAFT, QUEUE, SCHEDULED).
-   * Valida organização, cliente, contas vinculadas e elegibilidade do status.
-   * Não expõe credenciais, tokens ou chaves de API.
+   * Reagenda uma publicação existente ou agenda um rascunho.
+   * Aciona a rotina nativa do Postiz para atualizar a data, cancelar a execução anterior
+   * na fila e agendar a nova execução na data e hora especificadas.
+   * Preserva integralmente mídia, legenda, formato e conta social vinculada.
    */
-  async getPostEditLink(
+  async rescheduleClientPost(
     clientId: string,
     postId: string,
+    scheduledAt: string,
     organizationId?: string
-  ): Promise<PostEditLinkResponse> {
+  ): Promise<{ post: ClientPostizPost }> {
     // 1. Busca os detalhes do post validando cliente, organização e contas vinculadas
     const { post } = await this.getClientPostById(clientId, postId, organizationId);
 
@@ -1400,38 +1402,89 @@ export class PostizService {
     const statusUpper = (post.status || '').toUpperCase();
     if (statusUpper === 'PUBLISHED') {
       throw new PostizIntegrationError(
-        'Publicações já publicadas não podem ser editadas.',
+        'Publicações já publicadas não podem ser editadas ou reagendadas.',
         400,
         'POST_ALREADY_PUBLISHED'
       );
     }
 
-    const editableStatuses = ['DRAFT', 'QUEUE', 'SCHEDULED'];
-    if (!editableStatuses.includes(statusUpper)) {
+    if (statusUpper === 'ERROR') {
       throw new PostizIntegrationError(
-        `Publicações com status ${post.status} não permitem edição.`,
+        'Publicações com falha não podem ser reagendadas nesta etapa.',
         400,
         'POST_STATUS_NOT_EDITABLE'
       );
     }
 
-    // 3. Monta a URL oficial do editor do Postiz no módulo de lançamentos/calendário
-    const baseUrl = this.client.getBaseUrl().replace(/\/+$/, '');
-
-    let editorUrl = `${baseUrl}/launches`;
-    if (post.scheduledAt) {
-      const dateOnly = post.scheduledAt.split('T')[0];
-      if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
-        editorUrl = `${baseUrl}/launches?startDate=${dateOnly}&endDate=${dateOnly}&display=day`;
-      }
+    const eligibleStatuses = ['DRAFT', 'QUEUE', 'SCHEDULED'];
+    if (!eligibleStatuses.includes(statusUpper)) {
+      throw new PostizIntegrationError(
+        `Publicações com status ${post.status} não permitem agendamento nesta etapa.`,
+        400,
+        'POST_STATUS_NOT_EDITABLE'
+      );
     }
 
-    return { editorUrl };
-  }
-}
+    // 3. Validação de data futura
+    if (!scheduledAt || typeof scheduledAt !== 'string') {
+      throw new PostizIntegrationError(
+        'Data e horário do agendamento são obrigatórios.',
+        400,
+        'INVALID_SCHEDULE_DATE'
+      );
+    }
 
-export interface PostEditLinkResponse {
-  editorUrl: string;
+    const targetDate = new Date(scheduledAt);
+    if (isNaN(targetDate.getTime())) {
+      throw new PostizIntegrationError(
+        'Data e horário fornecidos são inválidos.',
+        400,
+        'INVALID_SCHEDULE_DATE'
+      );
+    }
+
+    if (targetDate.getTime() <= Date.now()) {
+      throw new PostizIntegrationError(
+        'A data e o horário do agendamento devem ser futuros.',
+        400,
+        'DATE_MUST_BE_FUTURE'
+      );
+    }
+
+    const targetDateIso = targetDate.toISOString();
+
+    // 4. Mapeamento defensivo das mídias existentes preservadas
+    const mediaItems = (post.mediaItems || []).map((m: any, idx: number) => ({
+      id: (m as any).id || `media_${idx}`,
+      path: m.url || m.path,
+    }));
+
+    if (mediaItems.length === 0 && post.mediaThumbnailUrl) {
+      mediaItems.push({
+        id: 'media_0',
+        path: post.mediaThumbnailUrl,
+      });
+    }
+
+    // 5. Aciona a rotina nativa do Postiz via reschedulePost
+    await this.client.reschedulePost({
+      postId,
+      integrationId: post.integrationId,
+      date: targetDateIso,
+      content: post.rawContent !== undefined ? post.rawContent : post.content,
+      mediaItems,
+      settings: post.settings || {},
+    });
+
+    // 6. Retorna o post atualizado com nova data de agendamento e status QUEUE
+    const updatedPost: ClientPostizPost = {
+      ...post,
+      status: 'QUEUE',
+      scheduledAt: targetDateIso,
+    };
+
+    return { post: updatedPost };
+  }
 }
 
 export interface CreateClientPostDto {

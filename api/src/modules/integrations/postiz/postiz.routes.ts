@@ -323,9 +323,13 @@ export function createPostizRoutes(customService?: PostizService) {
     );
 
     // =========================================================================
-    // 7b. GET /clients/:clientId/content/postiz/:postId/edit-link (Destino seguro de edição)
+    // 7b. PATCH /clients/:clientId/content/postiz/:postId/schedule (Reagendar publicação / Agendar rascunho)
     // =========================================================================
-    const getPostEditLinkHandler = async (
+    const reschedulePostSchema = z.object({
+      scheduledAt: z.string().min(1, 'scheduledAt é obrigatório'),
+    });
+
+    const reschedulePostHandler = async (
       request: FastifyRequest<{ Params: ClientParams & { postId: string } }>,
       reply: FastifyReply
     ) => {
@@ -333,23 +337,33 @@ export function createPostizRoutes(customService?: PostizService) {
         const clientId = extractClientId(request.params);
         const postId = (request.params.postId || '').trim();
         const organizationId = getOrganizationId(request);
+        const body = reschedulePostSchema.parse(request.body);
 
-        const result = await service.getPostEditLink(clientId, postId, organizationId);
-        return reply.status(200).send(result);
+        const result = await service.rescheduleClientPost(
+          clientId,
+          postId,
+          body.scheduledAt,
+          organizationId
+        );
+        return reply.status(200).send({
+          status: 'ok',
+          message: 'Agendamento atualizado com sucesso.',
+          post: result.post,
+        });
       } catch (error) {
         return handleError(error, reply);
       }
     };
 
-    app.get(
-      '/clients/:clientId/content/postiz/:postId/edit-link',
+    app.patch(
+      '/clients/:clientId/content/postiz/:postId/schedule',
       { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
-      getPostEditLinkHandler
+      reschedulePostHandler
     );
-    app.get(
-      '/api/clients/:clientId/content/postiz/:postId/edit-link',
+    app.patch(
+      '/api/clients/:clientId/content/postiz/:postId/schedule',
       { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
-      getPostEditLinkHandler
+      reschedulePostHandler
     );
 
     // =========================================================================

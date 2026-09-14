@@ -280,12 +280,51 @@ export class PostizClient {
       body: JSON.stringify(payload),
     });
   }
+
+  /**
+   * Reagenda ou agenda um post no Postiz.
+   * Utiliza a rotina nativa do Postiz passando o ID do post existente em value[0].id,
+   * o que aciona o upsert no banco do Postiz, cancela a execução anterior na fila
+   * e programa o novo agendamento na data/hora desejada.
+   */
+  async reschedulePost(payload: ReschedulePostPayload): Promise<any> {
+    return this.request<any>('/api/public/v1/posts', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'schedule',
+        date: payload.date,
+        shortLink: false,
+        posts: [
+          {
+            integration: { id: payload.integrationId },
+            value: [
+              {
+                id: payload.postId,
+                content: payload.content || '',
+                image: payload.mediaItems || [],
+              },
+            ],
+            settings: payload.settings || {},
+          },
+        ],
+      }),
+    });
+  }
 }
 
 export interface PostizUploadResponse {
   id: string;
   name: string;
   path: string;
+}
+
+export interface ReschedulePostPayload {
+  postId: string;
+  integrationId: string;
+  date: string;
+  content?: string;
+  mediaItems?: Array<{ id: string; path: string }>;
+  settings?: Record<string, any>;
 }
 
 export interface CreatePostPayload {
