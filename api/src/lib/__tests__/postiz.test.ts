@@ -1421,7 +1421,281 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     assert.strictEqual(bodyAfter.posts[0].id, 'post_novo_1');
     assert.strictEqual(bodyAfter.posts[0].integrationId, 'int_novo_1');
   });
+
+  await t.test('35. Sanitização de legenda: remove tags HTML e converte <p></p> em "Sem legenda"', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_vazio',
+        content: '<p></p>',
+        publishDate: '2026-09-13T10:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+      {
+        id: 'post_com_html',
+        content: '<p>Lançamento da nova coleção <strong>Zafira</strong>! &amp; novidades imperdíveis &nbsp; &lt;confira&gt;</p>',
+        publishDate: '2026-09-13T11:00:00.000Z',
+        state: 'PUBLISHED',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postVazio = body.posts.find((p: any) => p.id === 'post_vazio');
+    assert.strictEqual(postVazio.content, 'Sem legenda', '<p></p> DEVE resultar em "Sem legenda"');
+
+    const postComHtml = body.posts.find((p: any) => p.id === 'post_com_html');
+    assert.strictEqual(
+      postComHtml.content,
+      'Lançamento da nova coleção Zafira ! & novidades imperdíveis <confira>',
+      'Tags HTML devem ser removidas e entidades decodificadas'
+    );
+    assert.ok(!postComHtml.content.includes('<p>'), 'Nenhuma tag <p> deve restar no content');
+    assert.ok(!postComHtml.content.includes('</p>'), 'Nenhuma tag </p> deve restar no content');
+  });
+
+  await t.test('36. Mídia IMAGEM: normaliza URL relativa com baseUrl e detecta mediaType = "IMAGE"', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    process.env.POSTIZ_URL = 'https://postiz.lab.zafiramkt.com.br';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_img_relativa',
+        content: 'Imagem com caminho relativo no upload',
+        publishDate: '2026-09-13T10:00:00.000Z',
+        state: 'PUBLISHED',
+        image: JSON.stringify([{ path: '/uploads/img_foto_1.jpg', type: 'image' }]),
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+      {
+        id: 'post_img_absoluta',
+        content: 'Imagem com URL absoluta',
+        publishDate: '2026-09-13T11:00:00.000Z',
+        state: 'PUBLISHED',
+        image: [{ path: 'https://cdn.externo.com/foto_2.png', type: 'image' }],
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+
+    const postRel = body.posts.find((p: any) => p.id === 'post_img_relativa');
+    assert.strictEqual(postRel.mediaType, 'IMAGE');
+    assert.strictEqual(postRel.mediaCount, 1);
+    assert.strictEqual(postRel.mediaThumbnailUrl, 'https://postiz.lab.zafiramkt.com.br/uploads/img_foto_1.jpg');
+
+    const postAbs = body.posts.find((p: any) => p.id === 'post_img_absoluta');
+    assert.strictEqual(postAbs.mediaType, 'IMAGE');
+    assert.strictEqual(postAbs.mediaCount, 1);
+    assert.strictEqual(postAbs.mediaThumbnailUrl, 'https://cdn.externo.com/foto_2.png');
+  });
+
+  await t.test('37. Mídia VÍDEO / REEL: detecta arquivo mp4, define mediaType = "VIDEO" e preserva thumbnail', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_video_1',
+        content: 'Reel novo publicado',
+        publishDate: '2026-09-13T10:00:00.000Z',
+        state: 'PUBLISHED',
+        image: JSON.stringify([
+          {
+            path: 'https://postiz.lab.zafiramkt.com.br/uploads/video_reel.mp4',
+            type: 'video',
+            thumbnail: 'https://postiz.lab.zafiramkt.com.br/uploads/video_capa.jpg',
+          },
+        ]),
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postVideo = body.posts[0];
+    assert.strictEqual(postVideo.mediaType, 'VIDEO');
+    assert.strictEqual(postVideo.mediaCount, 1);
+    assert.strictEqual(postVideo.mediaThumbnailUrl, 'https://postiz.lab.zafiramkt.com.br/uploads/video_capa.jpg');
+    assert.strictEqual(postVideo.mediaItems[0].url, 'https://postiz.lab.zafiramkt.com.br/uploads/video_reel.mp4');
+  });
+
+  await t.test('38. Mídia CARROSSEL: detecta múltiplos itens, define mediaType = "CAROUSEL" e contagem correta', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_carrossel_5',
+        content: 'Carrossel com 5 slides',
+        publishDate: '2026-09-13T10:00:00.000Z',
+        state: 'QUEUE',
+        image: JSON.stringify([
+          { path: 'https://cdn.postiz.com/slide1.jpg' },
+          { path: 'https://cdn.postiz.com/slide2.jpg' },
+          { path: 'https://cdn.postiz.com/slide3.jpg' },
+          { path: 'https://cdn.postiz.com/slide4.jpg' },
+          { path: 'https://cdn.postiz.com/slide5.jpg' },
+        ]),
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postCarrossel = body.posts[0];
+    assert.strictEqual(postCarrossel.mediaType, 'CAROUSEL');
+    assert.strictEqual(postCarrossel.mediaCount, 5);
+    assert.strictEqual(postCarrossel.mediaThumbnailUrl, 'https://cdn.postiz.com/slide1.jpg');
+    assert.strictEqual(postCarrossel.mediaItems.length, 5);
+  });
+
+  await t.test('39. Conteúdo sem mídia: retorna mediaType = "NONE", mediaCount = 0 e mediaThumbnailUrl = null', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_texto_puro',
+        content: 'Post somente com texto sem anexos',
+        publishDate: '2026-09-13T10:00:00.000Z',
+        state: 'PUBLISHED',
+        image: null,
+        integration: { id: 'int_1', providerIdentifier: 'linkedin', name: 'Conta' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postTexto = body.posts[0];
+    assert.strictEqual(postTexto.mediaType, 'NONE');
+    assert.strictEqual(postTexto.mediaCount, 0);
+    assert.strictEqual(postTexto.mediaThumbnailUrl, null);
+    assert.strictEqual(postTexto.mediaItems.length, 0);
+  });
 });
+
 
 
 

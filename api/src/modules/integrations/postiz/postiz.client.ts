@@ -40,6 +40,8 @@ export interface PostizRawPost {
   group?: string;
   creationMethod?: string;
   settings?: any;
+  image?: any;
+  media?: any;
   tags?: Array<{ tag: { id: string; name: string } }>;
   integration: {
     id: string;

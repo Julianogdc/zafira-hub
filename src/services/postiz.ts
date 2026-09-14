@@ -21,6 +21,12 @@ export interface ClientPostizAccountsResponse {
   total: number;
 }
 
+export interface PostizMediaItem {
+  url: string;
+  type: 'IMAGE' | 'VIDEO' | 'OTHER';
+  thumbnailUrl?: string | null;
+}
+
 export interface ClientPostizPost {
   id: string;
   integrationId: string;
@@ -29,10 +35,35 @@ export interface ClientPostizPost {
   accountPicture?: string | null;
   status: 'QUEUE' | 'PUBLISHED' | 'ERROR' | 'DRAFT' | string;
   content: string;
+  rawContent?: string;
   scheduledAt?: string | null;
   publishedAt?: string | null;
   createdAt?: string | null;
   releaseUrl?: string | null;
+  mediaType?: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'NONE';
+  mediaThumbnailUrl?: string | null;
+  mediaCount?: number;
+  mediaItems?: PostizMediaItem[];
+}
+
+/**
+ * Sanitiza e limpa o texto da legenda no frontend como salvaguarda defensiva adicional.
+ */
+export function cleanPostContent(rawContent?: string | null): string {
+  if (!rawContent) return 'Sem legenda';
+
+  let cleaned = rawContent.replace(/<\/?[^>]+(>|$)/gi, ' ');
+  cleaned = cleaned
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'");
+
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+  return cleaned || 'Sem legenda';
 }
 
 export interface ClientPostizContentResponse {

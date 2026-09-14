@@ -40,6 +40,19 @@ export interface ClientPostizAccountsResponse {
   total: number;
 }
 
+export interface PostizMediaItem {
+  url: string;
+  type: 'IMAGE' | 'VIDEO' | 'OTHER';
+  thumbnailUrl?: string | null;
+}
+
+export interface NormalizedPostizMedia {
+  mediaType: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'NONE';
+  mediaThumbnailUrl: string | null;
+  mediaCount: number;
+  mediaItems: PostizMediaItem[];
+}
+
 export interface ClientPostizPost {
   id: string;
   integrationId: string;
@@ -48,10 +61,185 @@ export interface ClientPostizPost {
   accountPicture?: string | null;
   status: string;
   content: string;
+  rawContent?: string;
   scheduledAt?: string | null;
   publishedAt?: string | null;
   createdAt?: string | null;
   releaseUrl?: string | null;
+  mediaType: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'NONE';
+  mediaThumbnailUrl?: string | null;
+  mediaCount: number;
+  mediaItems?: PostizMediaItem[];
+}
+
+/**
+ * Sanitiza e limpa o texto da publicação:
+ * - Remove todas as tags HTML (<p>, <br>, etc.)
+ * - Converte entidades HTML comuns (&nbsp;, &amp;, etc.)
+ * - Normaliza espaços duplos e quebras repetidas
+ * - Retorna "Sem legenda" se o resultado for vazio
+ */
+export function cleanPostContent(rawContent?: string | null): string {
+  if (!rawContent) return 'Sem legenda';
+
+  // 1. Remove qualquer tag HTML
+  let cleaned = rawContent.replace(/<\/?[^>]+(>|$)/gi, ' ');
+
+  // 2. Decodifica entidades HTML comuns
+  cleaned = cleaned
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x27;/gi, "'");
+
+  // 3. Normaliza espaços múltiplos
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  // 4. Fallback caso fique vazio
+  if (!cleaned) {
+    return 'Sem legenda';
+  }
+
+  return cleaned;
+}
+
+/**
+ * Extrai e normaliza informações de mídia de um post do Postiz:
+ * - Suporta post.image (JSON string, array, objeto ou URL simples)
+ * - Suporta post.media e post.settings
+ * - Converte caminhos relativos (/uploads/...) em URLs absolutas seguras
+ * - Detecta vídeo (mp4, mov, webm ou type=video)
+ * - Detecta carrossel (> 1 mídia)
+ * - Retorna fallback NONE se não houver mídia válida
+ */
+export function extractPostizMedia(
+  post: any,
+  baseUrl = process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br'
+): NormalizedPostizMedia {
+  const cleanBaseUrl = (baseUrl || 'https://postiz.lab.zafiramkt.com.br').replace(/\/+$/, '');
+  const rawItems: any[] = [];
+
+  // 1. Tenta extrair de post.image
+  if (post?.image) {
+    if (typeof post.image === 'string') {
+      const trimmed = post.image.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            rawItems.push(...parsed);
+          } else if (parsed && typeof parsed === 'object') {
+            rawItems.push(parsed);
+          }
+        } catch {
+          rawItems.push({ path: trimmed });
+        }
+      } else if (trimmed.length > 0) {
+        rawItems.push({ path: trimmed });
+      }
+    } else if (Array.isArray(post.image)) {
+      rawItems.push(...post.image);
+    } else if (typeof post.image === 'object') {
+      rawItems.push(post.image);
+    }
+  }
+
+  // 2. Tenta extrair de post.media (se houver e rawItems vazio)
+  if (post?.media && rawItems.length === 0) {
+    if (Array.isArray(post.media)) {
+      rawItems.push(...post.media);
+    } else if (typeof post.media === 'object') {
+      rawItems.push(post.media);
+    }
+  }
+
+  // 3. Tenta extrair de post.settings
+  if (post?.settings && rawItems.length === 0) {
+    let settingsObj = post.settings;
+    if (typeof settingsObj === 'string') {
+      try {
+        settingsObj = JSON.parse(settingsObj);
+      } catch {
+        settingsObj = null;
+      }
+    }
+    if (settingsObj) {
+      if (Array.isArray(settingsObj.image)) {
+        rawItems.push(...settingsObj.image);
+      } else if (Array.isArray(settingsObj.media)) {
+        rawItems.push(...settingsObj.media);
+      } else if (Array.isArray(settingsObj.attachments)) {
+        rawItems.push(...settingsObj.attachments);
+      }
+    }
+  }
+
+  // Normalizador de URLs (relativas -> absolutas)
+  const normalizeUrl = (urlStr?: string | null): string | null => {
+    if (!urlStr || typeof urlStr !== 'string') return null;
+    const s = urlStr.trim();
+    if (!s) return null;
+    if (s.startsWith('http://') || s.startsWith('https://') || s.startsWith('data:')) {
+      return s;
+    }
+    const normalizedPath = s.startsWith('/') ? s : `/${s}`;
+    return `${cleanBaseUrl}${normalizedPath}`;
+  };
+
+  const isVideo = (item: any, finalUrl: string): boolean => {
+    const typeStr = String(item?.type || '').toLowerCase();
+    if (typeStr.includes('video')) return true;
+    const urlLower = finalUrl.toLowerCase();
+    return /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(urlLower);
+  };
+
+  const mediaItems: PostizMediaItem[] = [];
+
+  for (const item of rawItems) {
+    if (!item) continue;
+    const rawPath = item.path || item.url || item.src || (typeof item === 'string' ? item : null);
+    const finalUrl = normalizeUrl(rawPath);
+    if (!finalUrl) continue;
+
+    const isVid = isVideo(item, finalUrl);
+    const rawThumb = item.thumbnail || item.thumbnailUrl || item.thumb || null;
+    const finalThumb = normalizeUrl(rawThumb);
+
+    mediaItems.push({
+      url: finalUrl,
+      type: isVid ? 'VIDEO' : 'IMAGE',
+      thumbnailUrl: finalThumb || (isVid ? (finalThumb || null) : finalUrl),
+    });
+  }
+
+  if (mediaItems.length === 0) {
+    return {
+      mediaType: 'NONE',
+      mediaThumbnailUrl: null,
+      mediaCount: 0,
+      mediaItems: [],
+    };
+  }
+
+  if (mediaItems.length > 1) {
+    return {
+      mediaType: 'CAROUSEL',
+      mediaThumbnailUrl: mediaItems[0].thumbnailUrl || mediaItems[0].url,
+      mediaCount: mediaItems.length,
+      mediaItems,
+    };
+  }
+
+  const single = mediaItems[0];
+  return {
+    mediaType: single.type === 'VIDEO' ? 'VIDEO' : 'IMAGE',
+    mediaThumbnailUrl: single.thumbnailUrl || single.url,
+    mediaCount: 1,
+    mediaItems,
+  };
 }
 
 export interface ClientPostizContentResponse {
@@ -428,9 +616,14 @@ export class PostizService {
     });
 
     // 6. Normaliza os posts para formato seguro e padronizado
+    const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+
     const posts: ClientPostizPost[] = filteredPosts.map((post) => {
       const isPublished = post.state === 'PUBLISHED';
       const publishDateIso = post.publishDate ? new Date(post.publishDate).toISOString() : null;
+
+      const media = extractPostizMedia(post, baseUrl);
+      const cleanContent = cleanPostContent(post.content);
 
       return {
         id: post.id,
@@ -439,11 +632,16 @@ export class PostizService {
         accountName: post.integration.name || '',
         accountPicture: post.integration.picture || null,
         status: post.state,
-        content: post.content || '',
+        content: cleanContent,
+        rawContent: post.content || '',
         scheduledAt: !isPublished ? publishDateIso : null,
         publishedAt: isPublished ? publishDateIso : null,
         createdAt: publishDateIso,
         releaseUrl: post.releaseURL || null,
+        mediaType: media.mediaType,
+        mediaThumbnailUrl: media.mediaThumbnailUrl,
+        mediaCount: media.mediaCount,
+        mediaItems: media.mediaItems,
       };
     });
 

@@ -20,7 +20,9 @@ import {
   ClientPostizPost,
   ClientLinkedPostizAccount,
 } from '@/services/postiz';
+import { PostizContentCard } from './PostizContentCard';
 import { toast } from 'sonner';
+
 
 interface Cliente360ConteudoProps {
   clientId: string;
@@ -361,53 +363,14 @@ export function Cliente360Conteudo({
           <p className="text-xs text-zinc-400">Nenhuma publicação encontrada para o filtro selecionado.</p>
         </Card>
       ) : (
-        /* 5. GRID DE PUBLICAÇÕES */
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredPosts.map((post) => {
-            const displayDate = post.publishedAt || post.scheduledAt || post.createdAt;
-            return (
-              <Card
-                key={post.id}
-                className="bg-zinc-950/40 border-white/10 flex flex-col justify-between hover:border-white/20 transition-colors"
-              >
-                <CardHeader className="p-4 pb-2 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2">
-                      {renderPlatformBadge(post.platform)}
-                      <span className="text-xs text-zinc-400 truncate max-w-[120px]">{post.accountName}</span>
-                    </div>
-                    {renderStatusBadge(post.status)}
-                  </div>
-                </CardHeader>
-
-                <CardContent className="p-4 pt-1 flex-1 flex flex-col justify-between space-y-3">
-                  <div className="text-xs text-zinc-200 line-clamp-4 whitespace-pre-wrap font-sans bg-black/20 p-2.5 rounded border border-white/5">
-                    {post.content || <span className="italic text-zinc-500">Publicação sem texto (mídia)</span>}
-                  </div>
-
-                  <div className="pt-2 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-400">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-zinc-500" />
-                      {formatDate(displayDate)}
-                    </span>
-
-                    {post.releaseUrl && (
-                      <a
-                        href={post.releaseUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1 text-emerald-400 hover:underline font-medium ml-2"
-                      >
-                        Abrir <ExternalLink className="w-3 h-3" />
-                      </a>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+        /* 5. GRID DE PUBLICAÇÕES (CARDS RICOS COM MINIATURA 4:5) */
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {filteredPosts.map((post) => (
+            <PostizContentCard key={post.id} post={post} />
+          ))}
         </div>
       )}
     </div>
   );
 }
+
