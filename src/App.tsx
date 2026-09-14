@@ -27,6 +27,7 @@ const Configuracoes = lazy(() => import("./pages/Configuracoes"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Login = lazy(() => import("./pages/Login")); // Lazy load Login
 const AdminUsers = lazy(() => import("./pages/admin/Users"));
+const ConteudosAgenda = lazy(() => import("./pages/ConteudosAgenda"));
 import { ProtectedRoute } from "@/components/ProtectedRoute"; // Import ProtectedRoute
 import AsanaAuthCallback from "./pages/AsanaAuthCallback";
 
@@ -146,6 +147,7 @@ const App = () => {
                     <Route path="/" element={<Index />} />
 
                     {/* Business Routes (Admin + Manager) */}
+                    <Route path="/conteudos" element={<ManagerRoute><ConteudosAgenda /></ManagerRoute>} />
                     <Route path="/financas" element={<ManagerRoute><Financas /></ManagerRoute>} />
                     <Route path="/clientes" element={<ManagerRoute><Clientes /></ManagerRoute>} />
                     <Route path="/clientes/:id" element={<ManagerRoute><Cliente360 /></ManagerRoute>} />

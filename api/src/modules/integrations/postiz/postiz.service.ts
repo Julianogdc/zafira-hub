@@ -916,8 +916,356 @@ export class PostizService {
       'POSTIZ_POST_NOT_FOUND'
     );
   }
+
+  // Cache em memória leve para evitar chamadas excessivas ao Postiz
+  private aggregatedCache = new Map<string, { timestamp: number; posts: any[] }>();
+
+  /**
+   * Limpa o cache em memória (útil para testes ou refresh forçado)
+   */
+  clearCache(): void {
+    this.aggregatedCache.clear();
+  }
+
+  /**
+   * Obtém a visão agregada de conteúdos de todos os clientes vinculados da organização.
+   * Suporta filtros por cliente, integração, status, formato, busca e paginação.
+   */
+  async getAggregatedContent(
+    options: AggregatedContentOptions
+  ): Promise<AggregatedContentResponse> {
+    const effectiveOrgId = options.organizationId;
+
+    // 1. Busca todas as contas Postiz vinculadas a clientes da organização no Hub
+    const linkedIntegrations = await this.prismaClient.clientIntegration.findMany({
+      where: {
+        provider: 'POSTIZ',
+        ...(effectiveOrgId
+          ? {
+              client: {
+                organizationId: effectiveOrgId,
+              },
+            }
+          : {}),
+        ...(options.clientId ? { clientId: options.clientId } : {}),
+        ...(options.integrationId ? { externalId: options.integrationId } : {}),
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+            organizationId: true,
+          },
+        },
+      },
+    });
+
+    // Se nenhuma conta Postiz estiver vinculada, retorna estrutura vazia
+    if (linkedIntegrations.length === 0) {
+      return {
+        posts: [],
+        total: 0,
+        page: options.page || 1,
+        limit: options.limit || 50,
+        totalPages: 0,
+        summary: {
+          scheduledCount: 0,
+          publishedCount: 0,
+          errorCount: 0,
+          draftCount: 0,
+          nextPost: null,
+        },
+        clients: [],
+        accounts: [],
+      };
+    }
+
+    // Mapa de vínculo estrito: externalId -> { clientId, clientName }
+    const allowedMap = new Map<string, { clientId: string; clientName: string }>();
+    const clientsMap = new Map<string, { id: string; name: string }>();
+    const accountsList: { id: string; name: string; platform: string; clientId: string }[] = [];
+
+    for (const item of linkedIntegrations) {
+      if (item.client) {
+        allowedMap.set(item.externalId, {
+          clientId: item.client.id,
+          clientName: item.client.name,
+        });
+        clientsMap.set(item.client.id, {
+          id: item.client.id,
+          name: item.client.name,
+        });
+        const meta = (item.metadata as any) || {};
+        accountsList.push({
+          id: item.externalId,
+          name: meta.name || item.externalId,
+          platform: meta.providerIdentifier || '',
+          clientId: item.client.id,
+        });
+      }
+    }
+
+    // 2. Consulta de posts no Postiz com cache leve (60s)
+    const cacheKey = `${effectiveOrgId || 'all'}:${options.startDate || 'default'}:${options.endDate || 'default'}`;
+    const cached = this.aggregatedCache.get(cacheKey);
+    let rawPosts: any[] = [];
+
+    if (!options.forceRefresh && cached && Date.now() - cached.timestamp < 60000) {
+      rawPosts = cached.posts;
+    } else {
+      const res = await this.client.getPosts({
+        startDate: options.startDate,
+        endDate: options.endDate,
+      });
+      rawPosts = res.posts || [];
+      this.aggregatedCache.set(cacheKey, {
+        timestamp: Date.now(),
+        posts: rawPosts,
+      });
+    }
+
+    // 3. Filtra ESTRITAMENTE pelas integrações permitidas (descarte de contas não vinculadas / outras orgs)
+    const orgFilteredPosts = rawPosts.filter((post) => {
+      return post?.integration?.id && allowedMap.has(post.integration.id);
+    });
+
+    // 4. Enriquecimento transparente de mídias e post_type (settings)
+    const enrichedPosts = await Promise.all(
+      orgFilteredPosts.map(async (post) => {
+        const hasMedia =
+          (post.image && (typeof post.image === 'string' ? post.image.trim().length > 2 : true)) ||
+          (post.media && (typeof post.media === 'string' ? post.media.trim().length > 2 : true));
+
+        let hasPostType = false;
+        if (post?.settings) {
+          try {
+            const s = typeof post.settings === 'string' ? JSON.parse(post.settings) : post.settings;
+            if (s && s.post_type) {
+              hasPostType = true;
+            }
+          } catch {
+            // Ignora erro de parse
+          }
+        }
+
+        if ((!hasMedia || !hasPostType) && post.id && typeof (this.client as any).getPublicPost === 'function') {
+          try {
+            const fullPost = await this.client.getPublicPost(post.id);
+            if (fullPost) {
+              return {
+                ...post,
+                image: fullPost.image || post.image,
+                media: fullPost.media || post.media,
+                settings: fullPost.settings || post.settings,
+              };
+            }
+          } catch {
+            // Continua com o post original
+          }
+        }
+        return post;
+      })
+    );
+
+    // 5. Normalização para o contrato Hub Zafira
+    const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+
+    const normalizedPosts: AggregatedPostizPost[] = enrichedPosts.map((post) => {
+      const clientInfo = allowedMap.get(post.integration.id)!;
+      const isPublished = post.state === 'PUBLISHED';
+      const publishDateIso = post.publishDate ? new Date(post.publishDate).toISOString() : null;
+
+      const media = extractPostizMedia(post, baseUrl);
+      const cleanContent = cleanPostContent(post.content);
+      const formatInfo = determinePostFormat(post, media);
+
+      return {
+        id: post.id,
+        clientId: clientInfo.clientId,
+        clientName: clientInfo.clientName,
+        integrationId: post.integration.id,
+        platform: post.integration.providerIdentifier || '',
+        accountName: post.integration.name || '',
+        accountPicture: post.integration.picture || null,
+        status: post.state,
+        content: cleanContent,
+        rawContent: post.content || '',
+        scheduledAt: !isPublished ? publishDateIso : null,
+        publishedAt: isPublished ? publishDateIso : null,
+        createdAt: publishDateIso,
+        releaseUrl: post.releaseURL || null,
+        mediaType: media.mediaType,
+        mediaThumbnailUrl: media.mediaThumbnailUrl,
+        mediaCount: media.mediaCount,
+        mediaItems: media.mediaItems,
+        contentType: formatInfo.contentType,
+        isStory: formatInfo.isStory,
+        settings: post.settings || null,
+      };
+    });
+
+    // 6. Ordena cronologicamente por data decrescente
+    normalizedPosts.sort((a, b) => {
+      const dateA = new Date(a.publishedAt || a.scheduledAt || a.createdAt || 0).getTime();
+      const dateB = new Date(b.publishedAt || b.scheduledAt || b.createdAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    // 7. Calcula métricas reais de resumo operacional
+    let scheduledCount = 0;
+    let publishedCount = 0;
+    let errorCount = 0;
+    let draftCount = 0;
+    let nextPost: AggregatedPostizPost | null = null;
+    let minFutureDiff = Infinity;
+    const now = Date.now();
+
+    for (const p of normalizedPosts) {
+      if (p.status === 'PUBLISHED') {
+        publishedCount++;
+      } else if (p.status === 'QUEUE' || p.status === 'SCHEDULED') {
+        scheduledCount++;
+        const postTime = new Date(p.scheduledAt || p.createdAt || 0).getTime();
+        if (postTime >= now) {
+          const diff = postTime - now;
+          if (diff < minFutureDiff) {
+            minFutureDiff = diff;
+            nextPost = p;
+          }
+        }
+      } else if (p.status === 'ERROR') {
+        errorCount++;
+      } else if (p.status === 'DRAFT') {
+        draftCount++;
+      }
+    }
+
+    // Se não houver nenhum no futuro estrito, obtém o primeiro da fila agendada ordenado por data crescente
+    if (!nextPost) {
+      const upcoming = normalizedPosts.filter((p) => p.status === 'QUEUE' || p.status === 'SCHEDULED');
+      if (upcoming.length > 0) {
+        upcoming.sort((a, b) => {
+          const dA = new Date(a.scheduledAt || a.createdAt || 0).getTime();
+          const dB = new Date(b.scheduledAt || b.createdAt || 0).getTime();
+          return dA - dB;
+        });
+        nextPost = upcoming[0];
+      }
+    }
+
+    // 8. Aplica filtros combináveis
+    let filtered = [...normalizedPosts];
+
+    // Filtro por status
+    if (options.status && options.status !== 'ALL') {
+      const s = options.status.toUpperCase();
+      if (s === 'QUEUE' || s === 'SCHEDULED') {
+        filtered = filtered.filter((p) => p.status === 'QUEUE' || p.status === 'SCHEDULED');
+      } else {
+        filtered = filtered.filter((p) => p.status.toUpperCase() === s);
+      }
+    }
+
+    // Filtro por formato
+    if (options.format && options.format !== 'ALL') {
+      const f = options.format.toUpperCase();
+      if (f === 'STORY') {
+        filtered = filtered.filter(
+          (p) => p.isStory === true || p.contentType === 'STORY_IMAGE' || p.contentType === 'STORY_VIDEO'
+        );
+      } else if (f === 'REEL') {
+        filtered = filtered.filter((p) => !p.isStory && p.contentType === 'REEL');
+      } else if (f === 'FEED') {
+        filtered = filtered.filter((p) => !p.isStory && p.contentType === 'FEED_IMAGE');
+      } else if (f === 'CAROUSEL') {
+        filtered = filtered.filter((p) => !p.isStory && p.contentType === 'CAROUSEL');
+      }
+    }
+
+    // Filtro por busca textual (legenda, nome da conta ou cliente)
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        (p) =>
+          p.content.toLowerCase().includes(q) ||
+          p.accountName.toLowerCase().includes(q) ||
+          p.clientName.toLowerCase().includes(q)
+      );
+    }
+
+    const total = filtered.length;
+
+    // 9. Paginação (caso limit > 0)
+    let pagedPosts = filtered;
+    const page = Math.max(1, options.page || 1);
+    const limit = options.limit !== undefined ? options.limit : 0;
+    let totalPages = 1;
+
+    if (limit > 0) {
+      totalPages = Math.ceil(total / limit) || 1;
+      const offset = (page - 1) * limit;
+      pagedPosts = filtered.slice(offset, offset + limit);
+    }
+
+    return {
+      posts: pagedPosts,
+      total,
+      page,
+      limit,
+      totalPages,
+      summary: {
+        scheduledCount,
+        publishedCount,
+        errorCount,
+        draftCount,
+        nextPost,
+      },
+      clients: Array.from(clientsMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+      accounts: accountsList.sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+}
+
+export interface AggregatedPostizPost extends ClientPostizPost {
+  clientId: string;
+  clientName: string;
+}
+
+export interface AggregatedContentSummary {
+  scheduledCount: number;
+  publishedCount: number;
+  errorCount: number;
+  draftCount: number;
+  nextPost: AggregatedPostizPost | null;
+}
+
+export interface AggregatedContentOptions {
+  organizationId?: string;
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  integrationId?: string;
+  status?: string;
+  format?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+  forceRefresh?: boolean;
+}
+
+export interface AggregatedContentResponse {
+  posts: AggregatedPostizPost[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: AggregatedContentSummary;
+  clients: { id: string; name: string }[];
+  accounts: { id: string; name: string; platform: string; clientId: string }[];
 }
 
 export const postizService = new PostizService();
+
 
 

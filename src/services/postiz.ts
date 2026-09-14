@@ -99,6 +99,43 @@ export interface AvailablePostizAccountsResponse {
   total: number;
 }
 
+export interface AggregatedPostizPost extends ClientPostizPost {
+  clientId: string;
+  clientName: string;
+}
+
+export interface AggregatedContentSummary {
+  scheduledCount: number;
+  publishedCount: number;
+  errorCount: number;
+  draftCount: number;
+  nextPost: AggregatedPostizPost | null;
+}
+
+export interface AggregatedContentFilters {
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  integrationId?: string;
+  status?: string;
+  format?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+  forceRefresh?: boolean;
+}
+
+export interface AggregatedContentResponse {
+  posts: AggregatedPostizPost[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  summary: AggregatedContentSummary;
+  clients: { id: string; name: string }[];
+  accounts: { id: string; name: string; platform: string; clientId: string }[];
+}
+
 export const postizIntegrationService = {
   /**
    * Consulta status de conectividade do Hub com o Postiz Lab.
@@ -119,6 +156,28 @@ export const postizIntegrationService = {
    */
   async getAvailableAccounts(clientId: string): Promise<AvailablePostizAccountsResponse> {
     return api.get<AvailablePostizAccountsResponse>(`/clients/${clientId}/integrations/postiz/available`);
+  },
+
+  /**
+   * Obtém a visão agregada de conteúdos de todos os clientes vinculados da organização.
+   */
+  async getAggregatedContent(
+    filters?: AggregatedContentFilters
+  ): Promise<AggregatedContentResponse> {
+    const query = new URLSearchParams();
+    if (filters?.startDate) query.set('startDate', filters.startDate);
+    if (filters?.endDate) query.set('endDate', filters.endDate);
+    if (filters?.clientId) query.set('clientId', filters.clientId);
+    if (filters?.integrationId) query.set('integrationId', filters.integrationId);
+    if (filters?.status) query.set('status', filters.status);
+    if (filters?.format) query.set('format', filters.format);
+    if (filters?.search) query.set('search', filters.search);
+    if (filters?.page) query.set('page', String(filters.page));
+    if (filters?.limit !== undefined) query.set('limit', String(filters.limit));
+    if (filters?.forceRefresh) query.set('forceRefresh', 'true');
+
+    const qs = query.toString() ? `?${query.toString()}` : '';
+    return api.get<AggregatedContentResponse>(`/integrations/postiz/content${qs}`);
   },
 
   /**
@@ -157,5 +216,6 @@ export const postizIntegrationService = {
     return api.delete(`/clients/${clientId}/integrations/postiz/${externalId}`);
   },
 };
+
 
 

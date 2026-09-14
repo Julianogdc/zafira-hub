@@ -12,7 +12,7 @@ import {
   SidebarRail,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { LayoutDashboard, Settings2, Sparkles, Target, Users2, Wallet2, Wrench, Briefcase, Megaphone, Lock, TrendingUp } from "lucide-react";
+import { LayoutDashboard, Settings2, Sparkles, Target, Users2, Wallet2, Wrench, Briefcase, Megaphone, Lock, TrendingUp, CalendarDays } from "lucide-react";
 import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -26,6 +26,7 @@ type SidebarItem = {
 
 const items = [
   { label: "Dashboard", href: "/", icon: LayoutDashboard },
+  { label: "Conteúdos & Agenda", href: "/conteudos", icon: CalendarDays },
   { label: "Finanças", href: "/financas", icon: Wallet2 },
   { label: "Clientes", href: "/clientes", icon: Users2 },
   // { label: "Projetos", href: "/projetos", icon: Briefcase, locked: true }, // Operação oficial centralizada no Asana e Cliente 360
@@ -83,6 +84,7 @@ export function AppSidebar() {
                   if (user?.role === 'manager') return true;
 
                   // Member specific restrictions (Legacy hardcoded checks)
+                  if (item.href === '/conteudos') return false;
                   if (item.href === '/financas') return false;
                   if (item.href === '/clientes') return false;
                   if (item.href === '/crm') return false;

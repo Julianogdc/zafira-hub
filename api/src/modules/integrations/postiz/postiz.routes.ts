@@ -310,8 +310,69 @@ export function createPostizRoutes(customService?: PostizService) {
       { preHandler: [authenticate] },
       getClientPostByIdHandler
     );
+
+    // =========================================================================
+    // ROTA AGREGADA OPERACIONAL: CONTEÚDOS & AGENDA (ADMIN & MANAGER)
+    // =========================================================================
+    // 8. GET /integrations/postiz/content (Visão consolidada de conteúdos da organização)
+    const getAggregatedContentHandler = async (
+      request: FastifyRequest<{
+        Querystring: {
+          startDate?: string;
+          endDate?: string;
+          clientId?: string;
+          integrationId?: string;
+          status?: string;
+          format?: string;
+          search?: string;
+          page?: string;
+          limit?: string;
+          forceRefresh?: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        const q = request.query || {};
+
+        const page = q.page ? parseInt(q.page, 10) : 1;
+        const limit = q.limit !== undefined ? parseInt(q.limit, 10) : 0;
+        const forceRefresh = q.forceRefresh === 'true' || q.forceRefresh === '1';
+
+        const result = await service.getAggregatedContent({
+          organizationId,
+          startDate: q.startDate,
+          endDate: q.endDate,
+          clientId: q.clientId,
+          integrationId: q.integrationId,
+          status: q.status,
+          format: q.format,
+          search: q.search,
+          page: isNaN(page) ? 1 : page,
+          limit: isNaN(limit) ? 0 : limit,
+          forceRefresh,
+        });
+
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/integrations/postiz/content',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getAggregatedContentHandler
+    );
+    app.get(
+      '/api/integrations/postiz/content',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getAggregatedContentHandler
+    );
   };
 }
 
 export const postizRoutes = createPostizRoutes();
+
 
