@@ -1694,6 +1694,219 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     assert.strictEqual(postTexto.mediaThumbnailUrl, null);
     assert.strictEqual(postTexto.mediaItems.length, 0);
   });
+
+  await t.test('40. Post de vídeo/Reel com poster dedicado: mediaType = "VIDEO" e mediaThumbnailUrl aponta para o poster', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_video_com_poster',
+        content: '<p>Reel com capa dedicada</p>',
+        publishDate: '2026-09-14T10:00:00.000Z',
+        state: 'PUBLISHED',
+        image: [
+          {
+            path: 'https://cdn.postiz.com/video.mp4',
+            thumbnail: 'https://cdn.postiz.com/poster.jpg',
+          },
+        ],
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Instagram Lab' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postVideo = body.posts[0];
+    assert.strictEqual(postVideo.mediaType, 'VIDEO');
+    assert.strictEqual(postVideo.mediaCount, 1);
+    assert.strictEqual(postVideo.mediaThumbnailUrl, 'https://cdn.postiz.com/poster.jpg');
+    assert.strictEqual(postVideo.mediaItems[0].url, 'https://cdn.postiz.com/video.mp4');
+    assert.strictEqual(postVideo.mediaItems[0].thumbnailUrl, 'https://cdn.postiz.com/poster.jpg');
+  });
+
+  await t.test('41. Post de vídeo/Reel com apenas arquivo .mp4 sem poster: mediaType = "VIDEO" e mediaThumbnailUrl preserva a URL do vídeo', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_video_sem_poster',
+        content: '<p>Reel sem capa dedicada</p>',
+        publishDate: '2026-09-14T10:00:00.000Z',
+        state: 'PUBLISHED',
+        image: [
+          {
+            path: 'https://cdn.postiz.com/video.mp4',
+            thumbnail: null,
+          },
+        ],
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Instagram Lab' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const postVideo = body.posts[0];
+    assert.strictEqual(postVideo.mediaType, 'VIDEO');
+    assert.strictEqual(postVideo.mediaCount, 1);
+    assert.strictEqual(postVideo.mediaThumbnailUrl, 'https://cdn.postiz.com/video.mp4');
+    assert.strictEqual(postVideo.mediaItems[0].url, 'https://cdn.postiz.com/video.mp4');
+    assert.strictEqual(postVideo.mediaItems[0].thumbnailUrl, 'https://cdn.postiz.com/video.mp4');
+  });
+
+  await t.test('42. Post com payload real do diagnóstico (cmu0iex0s0002qv767osni1ml): normaliza corretamente como VIDEO', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'cmu0iex0s0002qv767osni1ml',
+        content: '<p></p>',
+        publishDate: '2026-09-14T03:00:00.000Z',
+        state: 'SCHEDULED',
+        image: '[{"id":"1de384b3-fde9-4922-b601-877c5c346094","path":"https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/41038d53138084b621d37036e6bdcc501.mp4","alt":null,"thumbnail":null}]',
+        settings: '{"post_type":"story","collaborators":[],"is_trial_reel":false,"__type":"instagram"}',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta Instagram' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    const reel = body.posts[0];
+    assert.strictEqual(reel.mediaType, 'VIDEO');
+    assert.strictEqual(reel.mediaCount, 1);
+    assert.strictEqual(
+      reel.mediaThumbnailUrl,
+      'https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/41038d53138084b621d37036e6bdcc501.mp4'
+    );
+    assert.strictEqual(reel.mediaItems.length, 1);
+    assert.strictEqual(reel.mediaItems[0].type, 'VIDEO');
+  });
+
+  await t.test('43. Enriquecimento via getPublicPost quando getPosts retorna post sem coluna image', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    // getPosts retorna sem image (comportamento da API pública do Postiz)
+    const mockPosts = [
+      {
+        id: 'post_sem_image_na_listagem',
+        content: '<p>Reel sem image no select da query</p>',
+        publishDate: '2026-09-14T03:00:00.000Z',
+        state: 'SCHEDULED',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Conta Instagram' },
+      },
+    ];
+
+    // getPublicPost retorna o post completo com image
+    let calledGetPublicPostWith: string | null = null;
+    const mockClient = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      getPosts: async () => ({ posts: mockPosts }),
+      getPublicPost: async (id: string) => {
+        calledGetPublicPostWith = id;
+        return {
+          id,
+          content: '<p>Reel sem image no select da query</p>',
+          image: '[{"path":"https://postiz.lab.zafiramkt.com.br/uploads/video.mp4","thumbnail":null}]',
+        };
+      },
+    };
+
+    const service = new PostizService(mockClient as any, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(calledGetPublicPostWith, 'post_sem_image_na_listagem');
+    const body = res.json();
+    const post = body.posts[0];
+    assert.strictEqual(post.mediaType, 'VIDEO');
+    assert.strictEqual(post.mediaThumbnailUrl, 'https://postiz.lab.zafiramkt.com.br/uploads/video.mp4');
+  });
 });
 
 

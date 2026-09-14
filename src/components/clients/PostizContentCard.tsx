@@ -130,6 +130,15 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
     );
   };
 
+  // Auxiliar para identificar se a URL aponta diretamente para um arquivo de vídeo
+  const isVideoFile = (url?: string | null): boolean => {
+    if (!url || typeof url !== 'string') return false;
+    const clean = url.split('?')[0].toLowerCase();
+    return /\.(mp4|mov|webm|m4v|avi|mkv|ogv)$/i.test(clean);
+  };
+
+  const isDirectVideo = mediaType === 'VIDEO' && isVideoFile(thumbnailUrl);
+
   return (
     <div className="bg-zinc-950/40 border border-white/10 rounded-xl hover:border-white/20 transition-all overflow-hidden flex flex-col sm:flex-row group">
       {/* 1. MINIATURA VISUAL (4:5) */}
@@ -139,13 +148,24 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
       >
         {hasValidMedia ? (
           <>
-            <img
-              src={thumbnailUrl!}
-              alt="Prévia do post"
-              onError={() => setImageError(true)}
-              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
-              loading="lazy"
-            />
+            {isDirectVideo ? (
+              <video
+                src={thumbnailUrl!}
+                muted
+                playsInline
+                preload="metadata"
+                className="w-full h-full object-cover pointer-events-none transition-transform duration-300 group-hover:scale-[1.02]"
+                onError={() => setImageError(true)}
+              />
+            ) : (
+              <img
+                src={thumbnailUrl!}
+                alt="Prévia do post"
+                onError={() => setImageError(true)}
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                loading="lazy"
+              />
+            )}
 
             {/* Selo de Carrossel */}
             {mediaType === 'CAROUSEL' && (

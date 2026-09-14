@@ -212,5 +212,31 @@ export class PostizClient {
       method: 'GET',
     });
   }
+
+  /**
+   * GET /api/public/posts/:id
+   * Consulta pública de detalhes de um post, retornando inclusive a coluna image/mídias.
+   * Utilizado para enriquecimento transparente quando a listagem omitir a coluna de mídias.
+   */
+  async getPublicPost(id: string): Promise<PostizRawPost | null> {
+    if (!id || typeof id !== 'string') return null;
+    try {
+      const response = await this.request<any>(`/api/public/posts/${encodeURIComponent(id.trim())}`, {
+        method: 'GET',
+      });
+
+      if (Array.isArray(response) && response.length > 0) {
+        return response[0] as PostizRawPost;
+      }
+      if (response && typeof response === 'object' && response.id) {
+        return response as PostizRawPost;
+      }
+      return null;
+    } catch {
+      // Falha graciosa mantendo isolamento e sem impactar a resposta principal
+      return null;
+    }
+  }
 }
+
 

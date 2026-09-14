@@ -122,6 +122,25 @@ export function extractPostizMedia(
   const cleanBaseUrl = (baseUrl || 'https://postiz.lab.zafiramkt.com.br').replace(/\/+$/, '');
   const rawItems: any[] = [];
 
+  let settingsObj: any = post?.settings;
+  if (typeof settingsObj === 'string') {
+    try {
+      settingsObj = JSON.parse(settingsObj);
+    } catch {
+      settingsObj = null;
+    }
+  }
+
+  // Helper para adicionar item bruto com segurança
+  const pushItem = (item: any) => {
+    if (!item) return;
+    if (Array.isArray(item)) {
+      rawItems.push(...item);
+    } else {
+      rawItems.push(item);
+    }
+  };
+
   // 1. Tenta extrair de post.image
   if (post?.image) {
     if (typeof post.image === 'string') {
@@ -129,11 +148,7 @@ export function extractPostizMedia(
       if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
         try {
           const parsed = JSON.parse(trimmed);
-          if (Array.isArray(parsed)) {
-            rawItems.push(...parsed);
-          } else if (parsed && typeof parsed === 'object') {
-            rawItems.push(parsed);
-          }
+          pushItem(parsed);
         } catch {
           rawItems.push({ path: trimmed });
         }
@@ -149,31 +164,43 @@ export function extractPostizMedia(
 
   // 2. Tenta extrair de post.media (se houver e rawItems vazio)
   if (post?.media && rawItems.length === 0) {
-    if (Array.isArray(post.media)) {
+    if (typeof post.media === 'string') {
+      const trimmed = post.media.trim();
+      if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          pushItem(parsed);
+        } catch {
+          rawItems.push({ path: trimmed });
+        }
+      } else if (trimmed.length > 0) {
+        rawItems.push({ path: trimmed });
+      }
+    } else if (Array.isArray(post.media)) {
       rawItems.push(...post.media);
     } else if (typeof post.media === 'object') {
       rawItems.push(post.media);
     }
   }
 
-  // 3. Tenta extrair de post.settings
-  if (post?.settings && rawItems.length === 0) {
-    let settingsObj = post.settings;
-    if (typeof settingsObj === 'string') {
-      try {
-        settingsObj = JSON.parse(settingsObj);
-      } catch {
-        settingsObj = null;
-      }
-    }
-    if (settingsObj) {
-      if (Array.isArray(settingsObj.image)) {
-        rawItems.push(...settingsObj.image);
-      } else if (Array.isArray(settingsObj.media)) {
-        rawItems.push(...settingsObj.media);
-      } else if (Array.isArray(settingsObj.attachments)) {
-        rawItems.push(...settingsObj.attachments);
-      }
+  // 3. Tenta extrair de post.settings (se rawItems ainda vazio)
+  if (settingsObj && rawItems.length === 0) {
+    if (settingsObj.image) {
+      pushItem(settingsObj.image);
+    } else if (settingsObj.media) {
+      pushItem(settingsObj.media);
+    } else if (settingsObj.attachments) {
+      pushItem(settingsObj.attachments);
+    } else if (settingsObj.files) {
+      pushItem(settingsObj.files);
+    } else if (settingsObj.video) {
+      pushItem(typeof settingsObj.video === 'string' ? { path: settingsObj.video, type: 'video' } : settingsObj.video);
+    } else if (settingsObj.video_url || settingsObj.videoUrl) {
+      pushItem({ path: settingsObj.video_url || settingsObj.videoUrl, type: 'video' });
+    } else if (settingsObj.reel && typeof settingsObj.reel === 'object') {
+      pushItem(settingsObj.reel);
+    } else if (settingsObj.thumbnail) {
+      pushItem(typeof settingsObj.thumbnail === 'string' ? { path: settingsObj.thumbnail } : settingsObj.thumbnail);
     }
   }
 
@@ -193,7 +220,11 @@ export function extractPostizMedia(
     const typeStr = String(item?.type || '').toLowerCase();
     if (typeStr.includes('video')) return true;
     const urlLower = finalUrl.toLowerCase();
-    return /\.(mp4|mov|webm|m4v|avi|mkv)(\?|$)/i.test(urlLower);
+    if (/\.(mp4|mov|webm|m4v|avi|mkv|ogv)(\?|$)/i.test(urlLower)) return true;
+    const postType = String(settingsObj?.post_type || '').toLowerCase();
+    if (postType === 'reel' || postType === 'reels') return true;
+    if (Boolean(settingsObj?.is_trial_reel)) return true;
+    return false;
   };
 
   const mediaItems: PostizMediaItem[] = [];
@@ -205,13 +236,25 @@ export function extractPostizMedia(
     if (!finalUrl) continue;
 
     const isVid = isVideo(item, finalUrl);
-    const rawThumb = item.thumbnail || item.thumbnailUrl || item.thumb || null;
-    const finalThumb = normalizeUrl(rawThumb);
+    const rawThumb =
+      item.thumbnail ||
+      item.thumbnailUrl ||
+      item.thumb ||
+      item.poster ||
+      item.cover ||
+      item.coverUrl ||
+      settingsObj?.thumbnail ||
+      settingsObj?.poster ||
+      null;
+
+    const finalThumb = normalizeUrl(typeof rawThumb === 'string' ? rawThumb : rawThumb?.path || rawThumb?.url);
 
     mediaItems.push({
       url: finalUrl,
       type: isVid ? 'VIDEO' : 'IMAGE',
-      thumbnailUrl: finalThumb || (isVid ? (finalThumb || null) : finalUrl),
+      // Se for vídeo e houver poster dedicado, usa o poster. Se não houver, preserva a URL do vídeo
+      // para que o frontend renderize o elemento <video> sem fallback incorreto.
+      thumbnailUrl: isVid ? (finalThumb || finalUrl) : (finalThumb || finalUrl),
     });
   }
 
@@ -615,10 +658,36 @@ export class PostizService {
       return post?.integration?.id && allowedIntegrationIds.has(post.integration.id);
     });
 
+    // 5b. Enriquecimento automático de mídias caso a listagem tenha omitido a coluna image
+    const enrichedPosts = await Promise.all(
+      filteredPosts.map(async (post) => {
+        const hasMedia =
+          (post.image && (typeof post.image === 'string' ? post.image.trim().length > 2 : true)) ||
+          (post.media && (typeof post.media === 'string' ? post.media.trim().length > 2 : true));
+
+        if (!hasMedia && post.id && typeof (this.client as any).getPublicPost === 'function') {
+          try {
+            const fullPost = await this.client.getPublicPost(post.id);
+            if (fullPost) {
+              return {
+                ...post,
+                image: fullPost.image || post.image,
+                media: fullPost.media || post.media,
+                settings: fullPost.settings || post.settings,
+              };
+            }
+          } catch {
+            // Continua com o post original caso falhe
+          }
+        }
+        return post;
+      })
+    );
+
     // 6. Normaliza os posts para formato seguro e padronizado
     const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
 
-    const posts: ClientPostizPost[] = filteredPosts.map((post) => {
+    const posts: ClientPostizPost[] = enrichedPosts.map((post) => {
       const isPublished = post.state === 'PUBLISHED';
       const publishDateIso = post.publishDate ? new Date(post.publishDate).toISOString() : null;
 
