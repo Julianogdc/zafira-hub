@@ -5,7 +5,7 @@ export type ApiClientStatus = 'LEAD' | 'ACTIVE' | 'PAUSED' | 'INACTIVE';
 export interface ClientIntegration {
   id: string;
   clientId: string;
-  provider: 'TWENTY' | 'ASANA' | 'POSTIZ' | 'META' | 'GOOGLE_ADS';
+  provider: 'TWENTY' | 'ASANA' | 'POSTIZ' | 'META' | 'GOOGLE_ADS' | 'ASAAS';
   externalId: string;
   metadata?: Record<string, any> | null;
   createdAt: string;

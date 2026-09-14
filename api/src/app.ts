@@ -10,6 +10,7 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { clientRoutes } from './modules/clients/clients.routes.js';
 import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
 import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
+import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -93,6 +94,9 @@ export function buildApp(): FastifyInstance {
 
   // 9. Rotas de Integração Postiz
   app.register(postizRoutes);
+
+  // 10. Rotas de Integração Asaas
+  app.register(asaasRoutes);
 
   return app;
 }

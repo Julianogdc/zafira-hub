@@ -37,6 +37,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Cliente360Projetos } from '@/components/clients/Cliente360Projetos';
 import { Cliente360Conteudo } from '@/components/clients/Cliente360Conteudo';
 import { ManagePostizIntegrationsModal } from '@/components/clients/ManagePostizIntegrationsModal';
+import { Cliente360Financeiro } from '@/components/clients/tabs/Cliente360Financeiro';
 import { Badge } from '@/components/ui/badge';
 
 import { Button } from '@/components/ui/button';
@@ -459,15 +460,9 @@ export default function Cliente360() {
           </div>
         </TabsContent>
 
-        {/* 2. ABA: FINANCEIRO (PLACEHOLDER) */}
+        {/* 2. ABA: FINANCEIRO (INTEGRAÇÃO ASAAS REAL) */}
         <TabsContent value="financeiro" className="outline-none">
-          <Card className="bg-zinc-950/40 border-white/10 p-12 text-center space-y-3">
-            <DollarSign className="w-10 h-10 text-zinc-600 mx-auto opacity-50" />
-            <h3 className="text-base font-semibold text-white">Módulo Financeiro</h3>
-            <p className="text-sm text-zinc-400 max-w-md mx-auto">
-              Financeiro será conectado ao módulo financeiro do Hub 2.0.
-            </p>
-          </Card>
+          <Cliente360Financeiro clientId={client.id} canManage={canManage} />
         </TabsContent>
 
         {/* 3. ABA: CRM (PLACEHOLDER) */}
