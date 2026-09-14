@@ -288,12 +288,25 @@ export class PostizClient {
    * e programa o novo agendamento na data/hora desejada.
    */
   async reschedulePost(payload: ReschedulePostPayload): Promise<any> {
+    const rawSettings = { ...(payload.settings || {}) };
+
+    // Normalização defensiva obrigatória: Postiz só aceita 'story' ou 'post'.
+    // Nunca enviar tipos internos do Hub como STORY_VIDEO, REEL, CAROUSEL, etc.
+    const postTypeCandidate = String(rawSettings.post_type || '').toLowerCase();
+    const isStory =
+      postTypeCandidate === 'story' ||
+      postTypeCandidate === 'story_video' ||
+      postTypeCandidate === 'story_image';
+
+    rawSettings.post_type = isStory ? 'story' : 'post';
+
     return this.request<any>('/api/public/v1/posts', {
       method: 'POST',
       body: JSON.stringify({
         type: 'schedule',
         date: payload.date,
         shortLink: false,
+        tags: [],
         posts: [
           {
             integration: { id: payload.integrationId },
@@ -304,7 +317,7 @@ export class PostizClient {
                 image: payload.mediaItems || [],
               },
             ],
-            settings: payload.settings || {},
+            settings: rawSettings,
           },
         ],
       }),

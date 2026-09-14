@@ -7,7 +7,7 @@ import multipart from '@fastify/multipart';
 import { PostizService } from '../../modules/integrations/postiz/postiz.service.js';
 import { createPostizRoutes } from '../../modules/integrations/postiz/postiz.routes.js';
 import { requireRole } from '../../middleware/auth.js';
-import { PostizIntegrationError } from '../../modules/integrations/postiz/postiz.client.js';
+import { PostizClient, PostizIntegrationError } from '../../modules/integrations/postiz/postiz.client.js';
 
 test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t) => {
   const originalFetch = globalThis.fetch;
@@ -355,7 +355,7 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
 
     const mockClient: any = {
       createPost: async (payload: any) => {
-        if (payload.posts[0].settings?.post_type === 'reel') {
+        if (payload.posts[0].settings?.is_reel || payload.posts[0].value[0].content?.includes('vídeo')) {
           capturedReelPayload = payload;
         } else {
           capturedFeedPayload = payload;
@@ -391,7 +391,10 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
     );
 
     assert.strictEqual(capturedReelPayload.posts[0].value[0].content, 'Confira nosso novo vídeo #zafira');
+    assert.strictEqual(capturedReelPayload.posts[0].settings.post_type, 'post');
+    assert.strictEqual(capturedReelPayload.posts[0].settings.is_reel, true);
     assert.strictEqual(capturedFeedPayload.posts[0].value[0].content, 'Foto do feed #marketing');
+    assert.strictEqual(capturedFeedPayload.posts[0].settings.post_type, 'post');
   });
 
   await t.test('8. Carrossel respeita e envia múltiplas mídias no array image', async () => {
@@ -962,5 +965,226 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
 
     assert.ok(!jsonStr.includes('secret_key_never_leak'), 'Chave de API nunca pode aparecer');
     assert.ok(!jsonStr.includes('password'), 'Senha não pode aparecer');
+  });
+
+  await t.test('23. Regressão: Story em vídeo envia tags: [] e settings.post_type: story', async () => {
+    let sentToPostiz: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
+    };
+
+    const mockPost = {
+      id: 'post_story_vid',
+      integrationId: 'int_story_vid',
+      platform: 'instagram',
+      status: 'DRAFT',
+      content: '',
+      contentType: 'STORY_VIDEO',
+      isStory: true,
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/story.mp4', type: 'VIDEO' }],
+      settings: { post_type: 'story', __type: 'instagram' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    await service.rescheduleClientPost('cli_123', 'post_story_vid', '2026-10-15T10:00:00.000Z', 'org_1');
+
+    assert.ok(sentToPostiz, 'reschedulePost deve ser chamado');
+    assert.strictEqual(sentToPostiz.settings.post_type, 'story', 'Story em vídeo deve ter post_type: story');
+    assert.strictEqual(sentToPostiz.settings.__type, 'instagram', '__type deve ser preservado');
+  });
+
+  await t.test('24. Regressão: Story com imagem envia settings.post_type: story', async () => {
+    let sentToPostiz: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
+    };
+
+    const mockPost = {
+      id: 'post_story_img',
+      integrationId: 'int_story_img',
+      platform: 'instagram',
+      status: 'QUEUE',
+      content: '',
+      contentType: 'STORY_IMAGE',
+      isStory: true,
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/story.jpg', type: 'IMAGE' }],
+      settings: { __type: 'instagram' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    await service.rescheduleClientPost('cli_123', 'post_story_img', '2026-10-15T11:00:00.000Z', 'org_1');
+
+    assert.ok(sentToPostiz);
+    assert.strictEqual(sentToPostiz.settings.post_type, 'story', 'Story com imagem deve ter post_type: story');
+  });
+
+  await t.test('25. Regressão: Reel envia settings.post_type: post e is_reel: true', async () => {
+    let sentToPostiz: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
+    };
+
+    const mockPost = {
+      id: 'post_reel_1',
+      integrationId: 'int_reel',
+      platform: 'instagram',
+      status: 'QUEUE',
+      content: 'Vídeo do reel com legenda',
+      contentType: 'REEL',
+      isStory: false,
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/reel.mp4', type: 'VIDEO' }],
+      settings: { post_type: 'reel', __type: 'instagram' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    await service.rescheduleClientPost('cli_123', 'post_reel_1', '2026-10-15T12:00:00.000Z', 'org_1');
+
+    assert.ok(sentToPostiz);
+    assert.strictEqual(sentToPostiz.settings.post_type, 'post', 'Reel deve enviar post_type: post');
+    assert.strictEqual(sentToPostiz.settings.is_reel, true, 'Reel deve conter flag is_reel: true');
+  });
+
+  await t.test('26. Regressão: Feed envia settings.post_type: post', async () => {
+    let sentToPostiz: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
+    };
+
+    const mockPost = {
+      id: 'post_feed_1',
+      integrationId: 'int_feed',
+      platform: 'instagram',
+      status: 'SCHEDULED',
+      content: 'Foto no feed',
+      contentType: 'FEED_IMAGE',
+      isStory: false,
+      mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/feed.jpg', type: 'IMAGE' }],
+      settings: { post_type: 'feed', __type: 'instagram' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    await service.rescheduleClientPost('cli_123', 'post_feed_1', '2026-10-15T13:00:00.000Z', 'org_1');
+
+    assert.ok(sentToPostiz);
+    assert.strictEqual(sentToPostiz.settings.post_type, 'post', 'Feed deve enviar post_type: post');
+  });
+
+  await t.test('27. Regressão: Carrossel envia settings.post_type: post', async () => {
+    let sentToPostiz: any = null;
+    const mockClient: any = {
+      reschedulePost: async (payload: any) => {
+        sentToPostiz = payload;
+        return { ok: true };
+      },
+    };
+
+    const mockPost = {
+      id: 'post_car_1',
+      integrationId: 'int_car',
+      platform: 'instagram',
+      status: 'DRAFT',
+      content: 'Carrossel com várias imagens',
+      contentType: 'CAROUSEL',
+      isStory: false,
+      mediaItems: [
+        { url: 'https://postiz.lab.zafiramkt.com.br/uploads/1.jpg', type: 'IMAGE' },
+        { url: 'https://postiz.lab.zafiramkt.com.br/uploads/2.jpg', type: 'IMAGE' },
+      ],
+      settings: { __type: 'instagram' },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    await service.rescheduleClientPost('cli_123', 'post_car_1', '2026-10-15T14:00:00.000Z', 'org_1');
+
+    assert.ok(sentToPostiz);
+    assert.strictEqual(sentToPostiz.settings.post_type, 'post', 'Carrossel deve enviar post_type: post');
+  });
+
+  await t.test('28. Regressão: Nenhum tipo interno do Hub pode chegar ao Postiz no campo post_type', async () => {
+    const internalHubTypes = ['STORY_VIDEO', 'STORY_IMAGE', 'REEL', 'FEED_IMAGE', 'CAROUSEL'];
+
+    for (const hubType of internalHubTypes) {
+      let sentToPostiz: any = null;
+      const mockClient: any = {
+        reschedulePost: async (payload: any) => {
+          sentToPostiz = payload;
+          return { ok: true };
+        },
+      };
+
+      const mockPost = {
+        id: `post_${hubType}`,
+        integrationId: 'int_test',
+        platform: 'instagram',
+        status: 'QUEUE',
+        content: 'Teste tipo interno',
+        contentType: hubType as any,
+        isStory: hubType.startsWith('STORY'),
+        mediaItems: [{ url: 'https://postiz.lab.zafiramkt.com.br/uploads/media.jpg', type: 'IMAGE' }],
+        settings: { post_type: hubType }, // Simula valor interno inserido indevidamente
+      };
+
+      const service = new PostizService(mockClient, null as any);
+      (service as any).getClientPostById = async () => ({ post: mockPost });
+
+      await service.rescheduleClientPost('cli_123', `post_${hubType}`, '2026-10-15T15:00:00.000Z', 'org_1');
+
+      assert.ok(sentToPostiz);
+      const resultingType = sentToPostiz.settings.post_type;
+      assert.ok(
+        resultingType === 'post' || resultingType === 'story',
+        `Tipo ${hubType} deve ser convertido exclusivamente para 'post' ou 'story', recebido: ${resultingType}`
+      );
+      assert.ok(
+        !internalHubTypes.includes(resultingType),
+        `Tipo interno do Hub ${resultingType} NUNCA pode vazar para o Postiz`
+      );
+    }
+  });
+
+  await t.test('29. Regressão: PostizClient.reschedulePost monta payload com tags: [] no nível superior', async () => {
+    let capturedBody: any = null;
+    const client = new PostizClient();
+    (client as any).request = async (_endpoint: string, options: any) => {
+      capturedBody = JSON.parse(options.body);
+      return { ok: true };
+    };
+
+    await client.reschedulePost({
+      postId: 'test_p1',
+      integrationId: 'test_int_1',
+      date: '2026-10-15T16:00:00.000Z',
+      content: 'Legenda do post',
+      mediaItems: [{ id: 'm1', path: '/uploads/file.mp4' }],
+      settings: { post_type: 'STORY_VIDEO', __type: 'instagram' },
+    });
+
+    assert.ok(capturedBody);
+    assert.deepStrictEqual(capturedBody.tags, [], 'tags deve ser array vazio no nível superior');
+    assert.strictEqual(capturedBody.posts[0].settings.post_type, 'story', 'post_type deve ser convertido para story');
+    assert.strictEqual(capturedBody.posts[0].value[0].id, 'test_p1');
+    assert.strictEqual(capturedBody.posts[0].value[0].image[0].path, '/uploads/file.mp4');
   });
 });

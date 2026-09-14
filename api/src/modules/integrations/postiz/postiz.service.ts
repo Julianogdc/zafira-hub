@@ -1292,9 +1292,11 @@ export class PostizService {
 
     if (isStory) {
       settings.post_type = 'story';
-    } else if (data.format === 'REEL') {
-      settings.post_type = 'reel';
-      settings.is_reel = true;
+    } else {
+      settings.post_type = 'post';
+      if (data.format === 'REEL') {
+        settings.is_reel = true;
+      }
     }
 
     // Story não deve receber/enviar legenda
@@ -1454,33 +1456,101 @@ export class PostizService {
     const targetDateIso = targetDate.toISOString();
 
     // 4. Mapeamento defensivo das mídias existentes preservadas
-    const mediaItems = (post.mediaItems || []).map((m: any, idx: number) => ({
-      id: (m as any).id || `media_${idx}`,
-      path: m.url || m.path,
-    }));
+    // Tenta buscar o post bruto do Postiz para ter a estrutura fiel de image e settings
+    let rawPostFromPostiz: any = null;
+    if (typeof (this.client as any).getPublicPost === 'function') {
+      try {
+        rawPostFromPostiz = await this.client.getPublicPost(postId);
+      } catch {
+        // Fallback para os dados já normalizados de getClientPostById
+      }
+    }
 
-    if (mediaItems.length === 0 && post.mediaThumbnailUrl) {
+    // Extrai mídias brutas: array de { id, path }
+    let mediaItems: Array<{ id: string; path: string }> = [];
+    let rawImage = rawPostFromPostiz?.image;
+    if (typeof rawImage === 'string') {
+      try {
+        rawImage = JSON.parse(rawImage);
+      } catch {
+        rawImage = null;
+      }
+    }
+
+    if (Array.isArray(rawImage) && rawImage.length > 0) {
+      mediaItems = rawImage.map((m: any, idx: number) => ({
+        id: String(m.id || `media_${idx}`),
+        path: String(m.path || m.url || ''),
+      }));
+    } else if (post.mediaItems && post.mediaItems.length > 0) {
+      mediaItems = post.mediaItems.map((m: any, idx: number) => ({
+        id: String((m as any).id || `media_${idx}`),
+        path: String(m.url || m.path || ''),
+      }));
+    } else if (post.mediaThumbnailUrl) {
       mediaItems.push({
         id: 'media_0',
         path: post.mediaThumbnailUrl,
       });
     }
 
-    // 5. Aciona a rotina nativa do Postiz via reschedulePost
-    await this.client.reschedulePost({
-      postId,
-      integrationId: post.integrationId,
-      date: targetDateIso,
-      content: post.rawContent !== undefined ? post.rawContent : post.content,
-      mediaItems,
-      settings: post.settings || {},
-    });
+    // 5. Normalização estrita de settings conforme contrato oficial do Postiz:
+    // - Story com foto ou vídeo -> post_type: 'story'
+    // - Feed, Reel ou Carrossel -> post_type: 'post'
+    // - NUNCA enviar valores internos do Hub como STORY_VIDEO, STORY_IMAGE, REEL, CAROUSEL, FEED_IMAGE
+    const originalSettings = {
+      ...(rawPostFromPostiz?.settings || post.settings || {}),
+    };
 
-    // 6. Retorna o post atualizado com nova data de agendamento e status QUEUE
+    if (!originalSettings.__type && post.platform) {
+      originalSettings.__type = post.platform;
+    }
+
+    const isStory = Boolean(
+      post.isStory ||
+      post.contentType === 'STORY_VIDEO' ||
+      post.contentType === 'STORY_IMAGE' ||
+      String(originalSettings.post_type || '').toLowerCase() === 'story' ||
+      String(rawPostFromPostiz?.settings?.post_type || '').toLowerCase() === 'story'
+    );
+
+    originalSettings.post_type = isStory ? 'story' : 'post';
+
+    if (!isStory && (post.contentType === 'REEL' || originalSettings.is_reel)) {
+      originalSettings.is_reel = true;
+    }
+
+    // Preserva integralmente o conteúdo/legenda original do post
+    const contentToSend =
+      rawPostFromPostiz?.content !== undefined
+        ? rawPostFromPostiz.content
+        : (post.rawContent !== undefined ? post.rawContent : post.content || '');
+
+    // 6. Aciona a rotina nativa do Postiz via reschedulePost
+    try {
+      await this.client.reschedulePost({
+        postId,
+        integrationId: rawPostFromPostiz?.integration?.id || post.integrationId,
+        date: targetDateIso,
+        content: contentToSend,
+        mediaItems,
+        settings: originalSettings,
+      });
+    } catch (error: any) {
+      console.error('[PostizService] Erro ao reagendar no Postiz:', error?.message || error);
+      throw new PostizIntegrationError(
+        'Não foi possível atualizar o agendamento. Revise os dados e tente novamente.',
+        error?.statusCode && error.statusCode < 500 ? error.statusCode : 502,
+        'POSTIZ_RESCHEDULE_FAILED'
+      );
+    }
+
+    // 7. Retorna o post atualizado com nova data de agendamento e status QUEUE
     const updatedPost: ClientPostizPost = {
       ...post,
       status: 'QUEUE',
       scheduledAt: targetDateIso,
+      settings: originalSettings,
     };
 
     return { post: updatedPost };

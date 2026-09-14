@@ -141,11 +141,8 @@ export default function EditarAgendamentoModal({
       onSuccess(res.post);
       onClose();
     } catch (err: any) {
-      const msg =
-        err?.data?.message ||
-        err?.message ||
-        'Não foi possível atualizar o agendamento. Tente novamente.';
-      toast.error(msg);
+      console.error('[EditarAgendamentoModal] Erro técnico ao atualizar agendamento:', err);
+      toast.error('Não foi possível atualizar o agendamento. Revise os dados e tente novamente.');
     } finally {
       setIsSaving(false);
     }
