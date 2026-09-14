@@ -24,9 +24,15 @@ import { toast } from 'sonner';
 
 interface Cliente360ConteudoProps {
   clientId: string;
+  refreshTrigger?: number;
+  onManageIntegrations?: () => void;
 }
 
-export function Cliente360Conteudo({ clientId }: Cliente360ConteudoProps) {
+export function Cliente360Conteudo({
+  clientId,
+  refreshTrigger,
+  onManageIntegrations,
+}: Cliente360ConteudoProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -69,7 +75,8 @@ export function Cliente360Conteudo({ clientId }: Cliente360ConteudoProps) {
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, [fetchData, refreshTrigger]);
+
 
   // Filtragem local por status
   const filteredPosts = useMemo(() => {
@@ -223,10 +230,19 @@ export function Cliente360Conteudo({ clientId }: Cliente360ConteudoProps) {
             Vincule as contas sociais do Postiz para que as publicações sejam visualizadas diretamente nesta aba.
           </p>
         </div>
-        <div className="pt-2">
+        <div className="pt-2 flex items-center justify-center gap-3">
           <Badge variant="outline" className="text-xs text-zinc-400 border-zinc-800">
             Postiz Lab Operacional
           </Badge>
+          {onManageIntegrations && (
+            <Button
+              size="sm"
+              onClick={onManageIntegrations}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs gap-1.5 shadow-sm"
+            >
+              <Share2 className="w-3.5 h-3.5" /> Vincular Conta Postiz
+            </Button>
+          )}
         </div>
       </Card>
     );
@@ -247,6 +263,17 @@ export function Cliente360Conteudo({ clientId }: Cliente360ConteudoProps) {
         </div>
 
         <div className="flex items-center gap-2">
+          {onManageIntegrations && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onManageIntegrations}
+              className="border-white/10 hover:bg-white/5 text-xs text-zinc-300 gap-1.5"
+            >
+              <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+              Gerenciar Contas
+            </Button>
+          )}
           {/* Botão de Atualizar */}
           <Button
             variant="outline"

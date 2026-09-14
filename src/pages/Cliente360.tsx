@@ -22,6 +22,7 @@ import {
   FileSpreadsheet,
   AlertCircle,
   Loader2,
+  Plus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -35,7 +36,9 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { Cliente360Projetos } from '@/components/clients/Cliente360Projetos';
 import { Cliente360Conteudo } from '@/components/clients/Cliente360Conteudo';
+import { ManagePostizIntegrationsModal } from '@/components/clients/ManagePostizIntegrationsModal';
 import { Badge } from '@/components/ui/badge';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -72,6 +75,15 @@ export default function Cliente360() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState<UpdateClientDTO>({});
+
+  // Estado do Modal de Integrações Postiz
+  const [isManagePostizOpen, setIsManagePostizOpen] = useState(false);
+  const [contentRefreshKey, setContentRefreshKey] = useState(0);
+
+  const handleIntegrationsChanged = () => {
+    fetchClient();
+    setContentRefreshKey((prev) => prev + 1);
+  };
 
   const fetchClient = async () => {
     if (!id) return;
@@ -382,13 +394,24 @@ export default function Cliente360() {
 
             {/* Seção de Integrações */}
             <Card className="bg-zinc-950/40 border-white/10">
-              <CardHeader>
-                <CardTitle className="text-base font-medium text-white flex items-center gap-2">
-                  <Link2 className="w-4 h-4 text-emerald-400" /> Integrações Conectadas
-                </CardTitle>
-                <CardDescription className="text-xs text-zinc-500">
-                  Pontes de dados externas do Cliente 360
-                </CardDescription>
+              <CardHeader className="flex flex-row items-start justify-between pb-3 space-y-0">
+                <div className="space-y-1">
+                  <CardTitle className="text-base font-medium text-white flex items-center gap-2">
+                    <Link2 className="w-4 h-4 text-emerald-400" /> Integrações Conectadas
+                  </CardTitle>
+                  <CardDescription className="text-xs text-zinc-500">
+                    Pontes de dados externas do Cliente 360
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsManagePostizOpen(true)}
+                  className="border-white/10 hover:bg-white/5 text-xs text-zinc-300 gap-1.5 h-8 shrink-0"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Gerenciar Postiz
+                </Button>
               </CardHeader>
               <CardContent className="space-y-3">
                 {client.integrations && client.integrations.length > 0 ? (
@@ -412,9 +435,17 @@ export default function Cliente360() {
                     </div>
                   ))
                 ) : (
-                  <div className="py-8 text-center space-y-2">
+                  <div className="py-8 text-center space-y-3">
                     <Link2 className="w-8 h-8 text-zinc-600 mx-auto opacity-40" />
                     <p className="text-xs text-zinc-500">Nenhuma integração conectada a este cliente.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsManagePostizOpen(true)}
+                      className="border-white/10 hover:bg-white/5 text-xs text-emerald-400 gap-1.5 mx-auto"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Conectar Postiz
+                    </Button>
                   </div>
                 )}
               </CardContent>
@@ -451,11 +482,16 @@ export default function Cliente360() {
 
         {/* 5. ABA: CONTEÚDO (POSTIZ REAL) */}
         <TabsContent value="conteudo" className="outline-none">
-          <Cliente360Conteudo clientId={client.id} />
+          <Cliente360Conteudo
+            clientId={client.id}
+            refreshTrigger={contentRefreshKey}
+            onManageIntegrations={() => setIsManagePostizOpen(true)}
+          />
         </TabsContent>
 
         {/* 6. ABA: PERFORMANCE (PLACEHOLDER) */}
         <TabsContent value="performance" className="outline-none">
+
           <Card className="bg-zinc-950/40 border-white/10 p-12 text-center space-y-3">
             <BarChart3 className="w-10 h-10 text-zinc-600 mx-auto opacity-50" />
             <h3 className="text-base font-semibold text-white">Métricas & Mídia Paga</h3>
@@ -641,6 +677,19 @@ export default function Cliente360() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Gestão de Integrações Postiz */}
+      {client && (
+        <ManagePostizIntegrationsModal
+          open={isManagePostizOpen}
+          onOpenChange={setIsManagePostizOpen}
+          clientId={client.id}
+          clientName={client.name}
+          canManage={canManage}
+          onIntegrationsChanged={handleIntegrationsChanged}
+        />
+      )}
     </div>
   );
 }
+

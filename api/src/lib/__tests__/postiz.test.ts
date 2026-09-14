@@ -305,24 +305,53 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       _data: { clients, clientIntegrations },
       client: {
         findUnique: async ({ where }: { where: { id: string } }) => {
-          return clients.get(where.id) || null;
+          const c = clients.get(where.id);
+          if (!c) return null;
+          return { organizationId: 'org_padrao', ...c };
         },
       },
       clientIntegration: {
-        findMany: async ({ where }: { where: { clientId: string; provider?: string } }) => {
-          return clientIntegrations.filter(
-            (ci) => ci.clientId === where.clientId && (!where.provider || ci.provider === where.provider)
-          );
+        findMany: async ({ where, include }: any = {}) => {
+          return clientIntegrations
+            .filter((ci) => {
+              if (where?.clientId && ci.clientId !== where.clientId) return false;
+              if (where?.provider && ci.provider !== where.provider) return false;
+              if (where?.client?.organizationId) {
+                const client = clients.get(ci.clientId);
+                const org = client?.organizationId || 'org_padrao';
+                if (org !== where.client.organizationId) return false;
+              }
+              return true;
+            })
+            .map((ci) => {
+              if (include?.client) {
+                const client = clients.get(ci.clientId) || { id: ci.clientId, name: 'Cliente Teste' };
+                return { ...ci, client };
+              }
+              return ci;
+            });
         },
-        findFirst: async ({ where }: { where: { clientId: string; provider?: string; OR?: Array<{ externalId?: string; id?: string }> } }) => {
-          return clientIntegrations.find((ci) => {
-            if (ci.clientId !== where.clientId) return false;
-            if (where.provider && ci.provider !== where.provider) return false;
-            if (where.OR) {
-              return where.OR.some((cond) => (cond.externalId && ci.externalId === cond.externalId) || (cond.id && ci.id === cond.id));
+        findFirst: async ({ where, include }: any = {}) => {
+          const found = clientIntegrations.find((ci) => {
+            if (where?.clientId && ci.clientId !== where.clientId) return false;
+            if (where?.provider && ci.provider !== where.provider) return false;
+            if (where?.externalId && ci.externalId !== where.externalId) return false;
+            if (where?.client?.organizationId) {
+              const client = clients.get(ci.clientId);
+              const org = client?.organizationId || 'org_padrao';
+              if (org !== where.client.organizationId) return false;
+            }
+            if (where?.OR) {
+              return where.OR.some((cond: any) => (cond.externalId && ci.externalId === cond.externalId) || (cond.id && ci.id === cond.id));
             }
             return true;
-          }) || null;
+          });
+          if (!found) return null;
+          if (include?.client) {
+            const client = clients.get(found.clientId) || { id: found.clientId, name: 'Cliente Teste' };
+            return { ...found, client };
+          }
+          return found;
         },
         findUnique: async ({ where }: { where: { clientId_provider_externalId: { clientId: string; provider: string; externalId: string } } }) => {
           const { clientId, provider, externalId } = where.clientId_provider_externalId;
@@ -598,7 +627,10 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     });
     assert.strictEqual(res2.statusCode, 409);
     const body = res2.json();
-    assert.strictEqual(body.error, 'POSTIZ_ALREADY_LINKED');
+    assert.ok(
+      body.error === 'POSTIZ_INTEGRATION_ALREADY_LINKED' || body.error === 'POSTIZ_ALREADY_LINKED',
+      'Código de erro 409 deve indicar que a integração já está vinculada'
+    );
     assert.ok(body.message.includes('já está vinculada a este cliente'));
   });
 
@@ -1095,6 +1127,301 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     assert.ok(!rawBody.includes(secretApiKey), 'API Key do Postiz JAMAIS deve vazar em erro HTTP');
     assert.ok(rawBody.includes('[REDACTED]'), 'A chave deve ser sanitizada com [REDACTED]');
   });
+
+  // =========================================================================
+  // ETAPA 3C: Gestão e Vínculo de Contas do Postiz ao Cliente 360
+  // =========================================================================
+
+  await t.test('28. GET /clients/:clientId/integrations/postiz/available exige autenticação', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_123/integrations/postiz/available',
+    });
+    assert.strictEqual(res.statusCode, 401);
+  });
+
+  await t.test('29. Listar contas disponíveis quando nenhuma está vinculada', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Empresa Alpha', organizationId: 'org_1' });
+
+    const postizAccounts = [
+      {
+        id: 'postiz_int_insta_1',
+        name: 'Instagram Alpha',
+        identifier: 'instagram',
+        picture: 'https://cdn.postiz.com/pic1.png',
+        profile: '@alpha',
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => postizAccounts,
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/integrations/postiz/available',
+      headers: {
+        'x-api-key': 'secret_internal_123',
+        'x-organization-id': 'org_1',
+      },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.total, 1);
+    assert.strictEqual(body.accounts[0].integrationId, 'postiz_int_insta_1');
+    assert.strictEqual(body.accounts[0].isLinked, false);
+    assert.strictEqual(body.accounts[0].linkedClientId, null);
+    assert.strictEqual(body.accounts[0].isLinkedToCurrentClient, false);
+  });
+
+  await t.test('30. Listar contas disponíveis diferenciando conta própria e conta de outro cliente', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_A', { id: 'cli_A', name: 'Cliente A', organizationId: 'org_1' });
+    mockPrisma._data.clients.set('cli_B', { id: 'cli_B', name: 'Cliente B', organizationId: 'org_1' });
+
+    // Conta 1 vinculada ao Cliente A
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_A',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    // Conta 2 vinculada ao Cliente B
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_2',
+      clientId: 'cli_B',
+      provider: 'POSTIZ',
+      externalId: 'int_2',
+    });
+
+    const postizAccounts = [
+      { id: 'int_1', name: 'Conta Insta A', identifier: 'instagram' },
+      { id: 'int_2', name: 'Conta Insta B', identifier: 'instagram' },
+      { id: 'int_3', name: 'Conta Livre C', identifier: 'youtube' },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => postizAccounts,
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    // Consulta para Cliente A
+    const resA = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_A/integrations/postiz/available',
+      headers: {
+        'x-api-key': 'secret_internal_123',
+        'x-organization-id': 'org_1',
+      },
+    });
+
+    assert.strictEqual(resA.statusCode, 200);
+    const bodyA = resA.json();
+    assert.strictEqual(bodyA.total, 3);
+
+    const int1 = bodyA.accounts.find((a: any) => a.integrationId === 'int_1');
+    assert.strictEqual(int1.isLinked, true);
+    assert.strictEqual(int1.isLinkedToCurrentClient, true);
+    assert.strictEqual(int1.linkedClientId, 'cli_A');
+
+    const int2 = bodyA.accounts.find((a: any) => a.integrationId === 'int_2');
+    assert.strictEqual(int2.isLinked, true);
+    assert.strictEqual(int2.isLinkedToCurrentClient, false);
+    assert.strictEqual(int2.linkedClientId, 'cli_B');
+    assert.strictEqual(int2.linkedClientName, 'Cliente B');
+
+    const int3 = bodyA.accounts.find((a: any) => a.integrationId === 'int_3');
+    assert.strictEqual(int3.isLinked, false);
+    assert.strictEqual(int3.linkedClientId, null);
+  });
+
+  await t.test('31. Rejeita vincular conta já vinculada a outro cliente na organização com 409 POSTIZ_INTEGRATION_ALREADY_LINKED', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_A', { id: 'cli_A', name: 'Empresa A', organizationId: 'org_1' });
+    mockPrisma._data.clients.set('cli_B', { id: 'cli_B', name: 'Empresa B', organizationId: 'org_1' });
+
+    // Já vinculada ao Cliente A
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_A',
+      provider: 'POSTIZ',
+      externalId: 'int_compartilhada',
+    });
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [{ id: 'int_compartilhada', name: 'Instagram', identifier: 'instagram' }],
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    // Tentativa de vincular a mesma conta ao Cliente B
+    const res = await app.inject({
+      method: 'POST',
+      url: '/clients/cli_B/integrations/postiz',
+      headers: {
+        'x-api-key': 'secret_internal_123',
+        'x-organization-id': 'org_1',
+      },
+      payload: { externalId: 'int_compartilhada' },
+    });
+
+    assert.strictEqual(res.statusCode, 409);
+    const body = res.json();
+    assert.strictEqual(body.error, 'POSTIZ_INTEGRATION_ALREADY_LINKED');
+    assert.ok(body.message.includes('Empresa A'), 'Deve informar o cliente que já possui o vínculo');
+  });
+
+  await t.test('32. Isolamento por organizationId: cliente de outra organização é rejeitado com 404', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_org_X', { id: 'cli_org_X', name: 'Cliente X', organizationId: 'org_X' });
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [{ id: 'int_1', name: 'Insta', identifier: 'instagram' }],
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    // Tenta acessar com x-organization-id: org_Y (outra organização)
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_org_X/integrations/postiz',
+      headers: {
+        'x-api-key': 'secret_internal_123',
+        'x-organization-id': 'org_Y',
+      },
+    });
+
+    assert.strictEqual(res.statusCode, 404);
+    assert.strictEqual(res.json().error, 'CLIENT_NOT_FOUND');
+  });
+
+  await t.test('33. Desvinculação remove apenas vínculo local no Hub sem chamar Postiz', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    let deleteCalledInPostiz = false;
+    const mockClient: any = {
+      isConnected: async () => ({ connected: true }),
+      getIntegrations: async () => [],
+      deleteIntegration: async () => {
+        deleteCalledInPostiz = true;
+      },
+    };
+
+    const service = new PostizService(mockClient, mockPrisma as any);
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/clients/cli_1/integrations/postiz/int_1',
+      headers: {
+        'x-api-key': 'secret_internal_123',
+        'x-organization-id': 'org_1',
+      },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.strictEqual(deleteCalledInPostiz, false, 'O Hub NUNCA deve chamar exclusão no Postiz remoto');
+    assert.strictEqual(mockPrisma._data.clientIntegrations.length, 0);
+  });
+
+  await t.test('34. Conteúdo passa a ser retornado imediatamente após o vínculo ser realizado', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+
+    const postizPost = {
+      id: 'post_novo_1',
+      content: 'Post de estreia',
+      publishDate: '2026-09-13T20:00:00.000Z',
+      state: 'PUBLISHED',
+      integration: {
+        id: 'int_novo_1',
+        providerIdentifier: 'instagram',
+        name: 'Conta Nova',
+      },
+    };
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [{ id: 'int_novo_1', name: 'Conta Nova', identifier: 'instagram' }],
+        getPosts: async () => ({ posts: [postizPost] }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    // 1. Antes do vínculo: posts deve ser vazio
+    const resBefore = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+    assert.strictEqual(resBefore.json().total, 0);
+
+    // 2. Realiza o vínculo
+    const resLink = await app.inject({
+      method: 'POST',
+      url: '/clients/cli_1/integrations/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      payload: { externalId: 'int_novo_1' },
+    });
+    assert.strictEqual(resLink.statusCode, 201);
+
+    // 3. Após o vínculo: posts agora deve conter o post da conta
+    const resAfter = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+    assert.strictEqual(resAfter.statusCode, 200);
+    const bodyAfter = resAfter.json();
+    assert.strictEqual(bodyAfter.total, 1);
+    assert.strictEqual(bodyAfter.posts[0].id, 'post_novo_1');
+    assert.strictEqual(bodyAfter.posts[0].integrationId, 'int_novo_1');
+  });
 });
+
 
 

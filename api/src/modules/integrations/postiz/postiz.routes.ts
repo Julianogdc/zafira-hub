@@ -58,6 +58,23 @@ export function createPostizRoutes(customService?: PostizService) {
       return (params.clientId || params.id || '').trim();
     }
 
+    function getOrganizationId(request: FastifyRequest): string | undefined {
+      const auth = request.authContext;
+      if (!auth) return undefined;
+
+      if (auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
+        const org = auth.memberships.find((m) => m.organizationSlug === 'zafira') || auth.memberships[0];
+        return org?.organizationId;
+      }
+
+      const headerOrg = request.headers['x-organization-id'];
+      if (typeof headerOrg === 'string' && headerOrg.trim()) {
+        return headerOrg.trim();
+      }
+
+      return undefined;
+    }
+
     // =========================================================================
     // ROTAS GLOBAIS DE INTEGRAÇÃO POSTIZ
     // =========================================================================
@@ -88,6 +105,28 @@ export function createPostizRoutes(customService?: PostizService) {
     app.get('/integrations/postiz/accounts', { preHandler: [authenticate] }, getAccountsHandler);
     app.get('/api/integrations/postiz/accounts', { preHandler: [authenticate] }, getAccountsHandler);
 
+    // 2b. GET /integrations/postiz/available-accounts (Contas disponíveis e status de vínculo na organização)
+    const getOrgAvailableAccountsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        const result = await service.getAvailableAccounts(organizationId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/integrations/postiz/available-accounts',
+      { preHandler: [authenticate] },
+      getOrgAvailableAccountsHandler
+    );
+    app.get(
+      '/api/integrations/postiz/available-accounts',
+      { preHandler: [authenticate] },
+      getOrgAvailableAccountsHandler
+    );
+
     // =========================================================================
     // ROTAS DE ASSOCIAÇÃO CLIENTE 360 ↔ CONTAS POSTIZ
     // =========================================================================
@@ -99,7 +138,8 @@ export function createPostizRoutes(customService?: PostizService) {
     ) => {
       try {
         const clientId = extractClientId(request.params);
-        const result = await service.getClientAccounts(clientId);
+        const organizationId = getOrganizationId(request);
+        const result = await service.getClientAccounts(clientId, organizationId);
         return reply.status(200).send(result);
       } catch (error) {
         return handleError(error, reply);
@@ -117,6 +157,32 @@ export function createPostizRoutes(customService?: PostizService) {
       getClientAccountsHandler
     );
 
+    // 3b. GET /clients/:clientId/integrations/postiz/available (Contas disponíveis para este cliente)
+    const getClientAvailableAccountsHandler = async (
+      request: FastifyRequest<{ Params: ClientParams }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
+        const result = await service.getAvailableAccounts(organizationId, clientId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/clients/:clientId/integrations/postiz/available',
+      { preHandler: [authenticate] },
+      getClientAvailableAccountsHandler
+    );
+    app.get(
+      '/api/clients/:clientId/integrations/postiz/available',
+      { preHandler: [authenticate] },
+      getClientAvailableAccountsHandler
+    );
+
     // 4. POST /clients/:clientId/integrations/postiz (Vincular conta Postiz)
     const linkAccountHandler = async (
       request: FastifyRequest<{ Params: ClientParams }>,
@@ -124,8 +190,9 @@ export function createPostizRoutes(customService?: PostizService) {
     ) => {
       try {
         const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
         const body = linkAccountSchema.parse(request.body);
-        const account = await service.linkAccountToClient(clientId, body.externalId);
+        const account = await service.linkAccountToClient(clientId, body.externalId, organizationId);
 
         return reply.status(201).send({
           status: 'ok',
@@ -155,9 +222,10 @@ export function createPostizRoutes(customService?: PostizService) {
     ) => {
       try {
         const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
         const externalId = (request.params.externalId || '').trim();
 
-        const result = await service.unlinkAccountFromClient(clientId, externalId);
+        const result = await service.unlinkAccountFromClient(clientId, externalId, organizationId);
 
         return reply.status(200).send({
           status: 'ok',
@@ -191,9 +259,10 @@ export function createPostizRoutes(customService?: PostizService) {
     ) => {
       try {
         const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
         const { startDate, endDate } = request.query || {};
 
-        const result = await service.getClientPosts(clientId, { startDate, endDate });
+        const result = await service.getClientPosts(clientId, { startDate, endDate }, organizationId);
 
         return reply.status(200).send(result);
       } catch (error) {

@@ -60,6 +60,23 @@ export interface ClientPostizContentResponse {
   total: number;
 }
 
+export interface AvailablePostizAccount {
+  integrationId: string;
+  platform: string;
+  accountName: string;
+  accountPicture: string | null;
+  profile: string | null;
+  isLinked: boolean;
+  linkedClientId: string | null;
+  linkedClientName: string | null;
+  isLinkedToCurrentClient: boolean;
+}
+
+export interface AvailablePostizAccountsResponse {
+  accounts: AvailablePostizAccount[];
+  total: number;
+}
+
 export class PostizService {
   private readonly client: PostizClient;
   private readonly prismaClient: typeof defaultPrisma;
@@ -110,14 +127,85 @@ export class PostizService {
   }
 
   /**
-   * Consulta quais contas Postiz estão vinculadas a um determinado cliente.
+   * Lista as contas do Postiz Lab enriquecidas com o status de vínculo
+   * na organização (indicando se já está vinculada e a qual cliente).
    */
-  async getClientAccounts(clientId: string): Promise<ClientPostizAccountsResponse> {
-    const client = await this.prismaClient.client.findUnique({
-      where: { id: clientId },
+  async getAvailableAccounts(
+    organizationId?: string,
+    currentClientId?: string
+  ): Promise<AvailablePostizAccountsResponse> {
+    const postizData = await this.getAccounts();
+    const rawAccounts = postizData.accounts || [];
+
+    // Busca todas as integrações POSTIZ no Hub (filtrando por organizationId se informado)
+    const linkedIntegrations = await this.prismaClient.clientIntegration.findMany({
+      where: {
+        provider: 'POSTIZ',
+        ...(organizationId
+          ? {
+              client: {
+                organizationId,
+              },
+            }
+          : {}),
+      },
+      include: {
+        client: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
 
-    if (!client) {
+    const linkedMap = new Map<string, { clientId: string; clientName: string }>();
+    for (const item of linkedIntegrations) {
+      linkedMap.set(item.externalId, {
+        clientId: item.clientId,
+        clientName: item.client?.name || '',
+      });
+    }
+
+    const accounts: AvailablePostizAccount[] = rawAccounts.map((acc) => {
+      const linked = linkedMap.get(acc.id);
+      const isLinked = !!linked;
+      const linkedClientId = linked ? linked.clientId : null;
+      const linkedClientName = linked ? linked.clientName : null;
+      const isLinkedToCurrentClient = !!(currentClientId && linkedClientId === currentClientId);
+
+      return {
+        integrationId: acc.id,
+        platform: acc.providerIdentifier,
+        accountName: acc.name,
+        accountPicture: acc.picture,
+        profile: acc.profile,
+        isLinked,
+        linkedClientId,
+        linkedClientName,
+        isLinkedToCurrentClient,
+      };
+    });
+
+    return {
+      accounts,
+      total: accounts.length,
+    };
+  }
+
+  /**
+   * Consulta quais contas Postiz estão vinculadas a um determinado cliente.
+   */
+  async getClientAccounts(
+    clientId: string,
+    organizationId?: string
+  ): Promise<ClientPostizAccountsResponse> {
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, organizationId: true },
+    });
+
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
       throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     }
 
@@ -151,15 +239,20 @@ export class PostizService {
 
   /**
    * Vincula uma conta do Postiz a um cliente.
-   * Valida se cliente existe, se a conta existe no Postiz e se já não está vinculada.
+   * Valida se cliente existe, se a conta existe no Postiz e se já não está vinculada na organização.
    */
-  async linkAccountToClient(clientId: string, externalId: string): Promise<ClientLinkedPostizAccount> {
-    // 1. Valida se o cliente existe
+  async linkAccountToClient(
+    clientId: string,
+    externalId: string,
+    organizationId?: string
+  ): Promise<ClientLinkedPostizAccount> {
+    // 1. Valida se o cliente existe e pertence à organização
     const client = await this.prismaClient.client.findUnique({
       where: { id: clientId },
+      select: { id: true, name: true, organizationId: true },
     });
 
-    if (!client) {
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
       throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     }
 
@@ -175,22 +268,35 @@ export class PostizService {
       );
     }
 
-    // 3. Impede duplicidade do mesmo vínculo para o cliente
-    const existing = await this.prismaClient.clientIntegration.findUnique({
+    // 3. Impede que a mesma conta seja vinculada a múltiplos clientes na mesma organização
+    const effectiveOrgId = organizationId || client.organizationId;
+    const existingInOrg = await this.prismaClient.clientIntegration.findFirst({
       where: {
-        clientId_provider_externalId: {
-          clientId,
-          provider: 'POSTIZ',
-          externalId,
+        provider: 'POSTIZ',
+        externalId,
+        ...(effectiveOrgId
+          ? {
+              client: {
+                organizationId: effectiveOrgId,
+              },
+            }
+          : {}),
+      },
+      include: {
+        client: {
+          select: { id: true, name: true },
         },
       },
     });
 
-    if (existing) {
+    if (existingInOrg) {
+      const isSameClient = existingInOrg.clientId === clientId;
       throw new PostizIntegrationError(
-        'Esta conta do Postiz já está vinculada a este cliente',
+        isSameClient
+          ? 'Esta conta do Postiz já está vinculada a este cliente'
+          : `Esta conta do Postiz já está vinculada ao cliente "${existingInOrg.client?.name || existingInOrg.clientId}" nesta organização`,
         409,
-        'POSTIZ_ALREADY_LINKED'
+        'POSTIZ_INTEGRATION_ALREADY_LINKED'
       );
     }
 
@@ -225,13 +331,18 @@ export class PostizService {
    * Remove o vínculo de uma conta Postiz de um cliente.
    * Não executa nenhuma exclusão ou alteração no Postiz original.
    */
-  async unlinkAccountFromClient(clientId: string, externalId: string): Promise<{ unlinked: boolean; externalId: string }> {
-    // 1. Valida se o cliente existe
+  async unlinkAccountFromClient(
+    clientId: string,
+    externalId: string,
+    organizationId?: string
+  ): Promise<{ unlinked: boolean; externalId: string }> {
+    // 1. Valida se o cliente existe e pertence à organização
     const client = await this.prismaClient.client.findUnique({
       where: { id: clientId },
+      select: { id: true, organizationId: true },
     });
 
-    if (!client) {
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
       throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     }
 
@@ -272,14 +383,16 @@ export class PostizService {
    */
   async getClientPosts(
     clientId: string,
-    options?: { startDate?: string; endDate?: string }
+    options?: { startDate?: string; endDate?: string },
+    organizationId?: string
   ): Promise<ClientPostizContentResponse> {
-    // 1. Valida se o cliente existe
+    // 1. Valida se o cliente existe e pertence à organização
     const client = await this.prismaClient.client.findUnique({
       where: { id: clientId },
+      select: { id: true, organizationId: true },
     });
 
-    if (!client) {
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
       throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     }
 

@@ -41,6 +41,22 @@ export interface ClientPostizContentResponse {
   total: number;
 }
 
+export interface AvailablePostizAccount {
+  integrationId: string;
+  platform: string;
+  accountName: string;
+  accountPicture?: string | null;
+  isLinked: boolean;
+  linkedClientId?: string | null;
+  linkedClientName?: string | null;
+  isLinkedToCurrentClient: boolean;
+}
+
+export interface AvailablePostizAccountsResponse {
+  accounts: AvailablePostizAccount[];
+  total: number;
+}
+
 export const postizIntegrationService = {
   /**
    * Consulta status de conectividade do Hub com o Postiz Lab.
@@ -54,6 +70,13 @@ export const postizIntegrationService = {
    */
   async getClientAccounts(clientId: string): Promise<ClientPostizAccountsResponse> {
     return api.get<ClientPostizAccountsResponse>(`/clients/${clientId}/integrations/postiz`);
+  },
+
+  /**
+   * Lista as contas disponíveis do Postiz com status de vínculo para este cliente e organização.
+   */
+  async getAvailableAccounts(clientId: string): Promise<AvailablePostizAccountsResponse> {
+    return api.get<AvailablePostizAccountsResponse>(`/clients/${clientId}/integrations/postiz/available`);
   },
 
   /**
@@ -85,3 +108,4 @@ export const postizIntegrationService = {
     return api.delete(`/clients/${clientId}/integrations/postiz/${externalId}`);
   },
 };
+
