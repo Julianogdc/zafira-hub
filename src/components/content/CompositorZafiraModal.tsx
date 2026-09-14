@@ -71,6 +71,7 @@ export function CompositorZafiraModal({
 }: CompositorZafiraModalProps) {
   // Clientes e contas
   const [clients, setClients] = useState<{ id: string; name: string }[]>(providedClients || []);
+  const [loadingClients, setLoadingClients] = useState<boolean>(false);
   const [selectedClientId, setSelectedClientId] = useState<string>(initialClientId || '');
   const [clientAccounts, setClientAccounts] = useState<ClientLinkedPostizAccount[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
@@ -105,27 +106,79 @@ export function CompositorZafiraModal({
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Sincroniza se providedClients for alterado externamente
+  useEffect(() => {
+    if (providedClients && providedClients.length > 0) {
+      setClients(providedClients);
+      if (!selectedClientId) {
+        const defaultId =
+          initialClientId && providedClients.some((c) => c.id === initialClientId)
+            ? initialClientId
+            : providedClients[0].id;
+        setSelectedClientId(defaultId);
+      }
+    }
+  }, [providedClients, initialClientId, selectedClientId]);
+
   // Carrega lista de clientes caso não tenha sido fornecida
   useEffect(() => {
-    if (open && (!clients || clients.length === 0)) {
+    if (!open) return;
+
+    // Se já temos providedClients preenchido, usa ele
+    if (providedClients && providedClients.length > 0) {
+      setClients(providedClients);
+      if (initialClientId && providedClients.some((c) => c.id === initialClientId)) {
+        setSelectedClientId(initialClientId);
+      } else if (!selectedClientId) {
+        setSelectedClientId(providedClients[0].id);
+      }
+      return;
+    }
+
+    // Se clients estiver vazio, carrega via clientsService.listClients()
+    if (clients.length === 0) {
+      let isMounted = true;
+      setLoadingClients(true);
       clientsService
-        .getClients()
-        .then((res) => {
-          const list = (res || []).map((c: any) => ({ id: c.id, name: c.name }));
+        .listClients()
+        .then((res: HubClient[]) => {
+          if (!isMounted) return;
+          const list = (res || []).map((c) => ({ id: c.id, name: c.name }));
           setClients(list);
-          if (!selectedClientId && list.length > 0) {
-            setSelectedClientId(list[0].id);
+          if (list.length > 0) {
+            setSelectedClientId((prev) => {
+              if (initialClientId && list.some((c) => c.id === initialClientId)) {
+                return initialClientId;
+              }
+              if (prev && list.some((c) => c.id === prev)) {
+                return prev;
+              }
+              return list[0].id;
+            });
           }
         })
-        .catch(() => {});
-    }
-  }, [open, clients, selectedClientId]);
+        .catch((err) => {
+          console.error('Falha ao carregar lista de clientes:', err);
+        })
+        .finally(() => {
+          if (isMounted) setLoadingClients(false);
+        });
 
-  // Carrega contas sociais vinculadas ao cliente selecionado
+      return () => {
+        isMounted = false;
+      };
+    } else if (initialClientId && clients.some((c) => c.id === initialClientId)) {
+      setSelectedClientId(initialClientId);
+    }
+  }, [open, providedClients, initialClientId]);
+
+  // Carrega contas sociais vinculadas ao cliente selecionado (somente após carregar os clientes)
   useEffect(() => {
-    if (!selectedClientId) {
-      setClientAccounts([]);
-      setSelectedAccountId('');
+    if (!open || !selectedClientId || loadingClients) {
+      if (!selectedClientId) {
+        setClientAccounts([]);
+        setSelectedAccountId('');
+      }
       return;
     }
 
@@ -143,8 +196,12 @@ export function CompositorZafiraModal({
           setSelectedAccountId('');
         }
       })
-      .catch(() => {
-        if (isMounted) setClientAccounts([]);
+      .catch((err) => {
+        console.error('Falha ao carregar contas do Postiz para o cliente:', err);
+        if (isMounted) {
+          setClientAccounts([]);
+          setSelectedAccountId('');
+        }
       })
       .finally(() => {
         if (isMounted) setLoadingAccounts(false);
@@ -153,7 +210,7 @@ export function CompositorZafiraModal({
     return () => {
       isMounted = false;
     };
-  }, [selectedClientId]);
+  }, [open, selectedClientId, loadingClients]);
 
   // Informações do cliente e conta selecionados para preview
   const selectedClientName = useMemo(() => {
@@ -356,9 +413,21 @@ export function CompositorZafiraModal({
                 <label className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">
                   Cliente *
                 </label>
-                <Select value={selectedClientId} onValueChange={setSelectedClientId}>
+                <Select
+                  value={selectedClientId}
+                  onValueChange={setSelectedClientId}
+                  disabled={loadingClients || clients.length === 0}
+                >
                   <SelectTrigger className="bg-zinc-900 border-white/10 text-xs h-10">
-                    <SelectValue placeholder="Selecione um cliente" />
+                    <SelectValue
+                      placeholder={
+                        loadingClients
+                          ? 'Carregando clientes...'
+                          : clients.length === 0
+                          ? 'Nenhum cliente disponível'
+                          : 'Selecione um cliente'
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="bg-zinc-900 border-white/10 text-white text-xs">
                     {clients.map((c) => (
@@ -377,12 +446,14 @@ export function CompositorZafiraModal({
                 <Select
                   value={selectedAccountId}
                   onValueChange={setSelectedAccountId}
-                  disabled={loadingAccounts || clientAccounts.length === 0}
+                  disabled={loadingClients || loadingAccounts || clientAccounts.length === 0 || !selectedClientId}
                 >
                   <SelectTrigger className="bg-zinc-900 border-white/10 text-xs h-10">
                     <SelectValue
                       placeholder={
-                        loadingAccounts
+                        loadingClients
+                          ? 'Aguardando clientes...'
+                          : loadingAccounts
                           ? 'Carregando contas...'
                           : clientAccounts.length === 0
                           ? 'Nenhuma conta vinculada'
@@ -398,7 +469,7 @@ export function CompositorZafiraModal({
                     ))}
                   </SelectContent>
                 </Select>
-                {clientAccounts.length === 0 && !loadingAccounts && selectedClientId && (
+                {clientAccounts.length === 0 && !loadingAccounts && !loadingClients && selectedClientId && (
                   <p className="text-[11px] text-amber-400/90">
                     Este cliente não possui contas Postiz vinculadas no Cliente 360.
                   </p>
@@ -643,7 +714,14 @@ export function CompositorZafiraModal({
               <Button
                 type="button"
                 onClick={handleSubmit}
-                disabled={submitting || uploading || !selectedClientId || !selectedAccountId}
+                disabled={
+                  submitting ||
+                  uploading ||
+                  loadingClients ||
+                  loadingAccounts ||
+                  !selectedClientId ||
+                  !selectedAccountId
+                }
                 className="bg-purple-600 hover:bg-purple-500 text-white font-semibold text-xs h-10 px-5 gap-2 shadow-lg shadow-purple-600/20"
               >
                 {submitting ? (
