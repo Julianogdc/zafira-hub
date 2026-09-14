@@ -16,11 +16,15 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  Pencil,
+  RefreshCw,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { useAuthStore } from '@/store/useAuthStore';
 import {
   ClientPostizPost,
   postizIntegrationService,
@@ -43,6 +47,14 @@ export default function ClienteConteudoPreview() {
   const [loading, setLoading] = useState<boolean>(!statePost);
   const [error, setError] = useState<string | null>(null);
   const [selectedCarouselIndex, setSelectedCarouselIndex] = useState(0);
+
+  // Autenticação e RBAC (Editar no Postiz visível apenas para Admin e Manager)
+  const { user } = useAuthStore();
+  const [isOpeningEditor, setIsOpeningEditor] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const userRole = (user?.role || '').toLowerCase();
+  const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
 
   // Bloco técnico de detalhes da conta social (recolhido por padrão)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
@@ -85,6 +97,37 @@ export default function ClienteConteudoPreview() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Ação segura: obter destino e abrir o editor no Postiz em nova aba (somente ADMIN e MANAGER)
+  const handleEditInPostiz = async () => {
+    if (!clientId || !postId) return;
+    try {
+      setIsOpeningEditor(true);
+      const res = await postizIntegrationService.getPostEditLink(clientId, postId);
+      if (res?.editorUrl) {
+        window.open(res.editorUrl, '_blank', 'noopener,noreferrer');
+      } else {
+        throw new Error('URL inválida');
+      }
+    } catch {
+      toast.error('Não foi possível abrir este conteúdo para edição. Tente novamente.');
+    } finally {
+      setIsOpeningEditor(false);
+    }
+  };
+
+  // Recarrega os dados reais atualizados do post no Hub
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await loadData();
+      toast.success('Conteúdo atualizado.');
+    } catch {
+      toast.error('Não foi possível atualizar o conteúdo.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   // Formatação de data e hora em pt-BR
   const rawDate = post?.publishedAt || post?.scheduledAt || post?.createdAt;
@@ -240,6 +283,16 @@ export default function ClienteConteudoPreview() {
   const isFeedImage = (post.contentType === 'FEED_IMAGE' || (!isStory && !isVideo && !isCarousel)) && !!currentMediaUrl;
   const isNone = post.contentType === 'NONE' || (!currentMediaUrl && post.mediaCount === 0);
 
+  // Regras da Etapa 3G:
+  // DRAFT, QUEUE e SCHEDULED permitem edição; PUBLISHED e ERROR não permitem.
+  const isEditable =
+    isAdminOrManager &&
+    Boolean(
+      post.status === 'DRAFT' ||
+      post.status === 'QUEUE' ||
+      post.status === 'SCHEDULED'
+    );
+
   // Título rigoroso conforme regras de apresentação
   const getFormatHeaderTitle = () => {
     if (isStoryVideo) return 'Prévia de Story em vídeo';
@@ -305,19 +358,52 @@ export default function ClienteConteudoPreview() {
           </span>
         </div>
 
-        {post.releaseUrl && (
+        <div className="flex items-center gap-2">
+          {/* Ação discreta: Editar no Postiz (visível apenas para ADMIN e MANAGER em status elegíveis) */}
+          {isEditable && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleEditInPostiz}
+              disabled={isOpeningEditor}
+              className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 gap-2 text-xs"
+            >
+              {isOpeningEditor ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Pencil className="w-3.5 h-3.5" />
+              )}
+              <span>Editar no Postiz</span>
+            </Button>
+          )}
+
+          {/* Botão de Atualizar dados reais */}
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            asChild
-            className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 gap-2 text-xs"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="text-zinc-400 hover:text-white gap-1.5 text-xs hover:bg-white/5"
+            title="Atualizar dados do conteúdo"
           >
-            <a href={post.releaseUrl} target="_blank" rel="noopener noreferrer">
-              <span>Abrir post na rede social</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Atualizar</span>
           </Button>
-        )}
+
+          {post.releaseUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+              className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 gap-2 text-xs"
+            >
+              <a href={post.releaseUrl} target="_blank" rel="noopener noreferrer">
+                <span>Abrir post na rede social</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* 2. CABEÇALHO DO CONTEÚDO */}

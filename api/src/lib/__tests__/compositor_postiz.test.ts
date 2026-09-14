@@ -637,4 +637,237 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
     assert.strictEqual(result.name, 'story_video.mp4');
     assert.strictEqual(result.path, 'https://postiz.lab.zafiramkt.com.br/uploads/story_video.mp4');
   });
+
+  // =========================================================================
+  // ETAPA 3G — TESTES OBRIGATÓRIOS: EDITAR AGENDAMENTO COM SEGURANÇA (EDIT-LINK)
+  // =========================================================================
+
+  await t.test('14. Admin e Manager conseguem obter link de edição para DRAFT', async () => {
+    const mockPost = {
+      id: 'post_draft_1',
+      integrationId: 'int_123',
+      platform: 'instagram',
+      accountName: 'Zafira Hub',
+      status: 'DRAFT',
+      content: 'Rascunho de post',
+      scheduledAt: null,
+      publishedAt: null,
+      createdAt: '2026-09-14T12:00:00.000Z',
+    };
+
+    const mockService: any = {
+      getClientPostById: async (clientId: string, postId: string) => {
+        assert.strictEqual(clientId, 'cli_123');
+        assert.strictEqual(postId, 'post_draft_1');
+        return { post: mockPost };
+      },
+      getPostEditLink: async (clientId: string, postId: string, organizationId?: string) => {
+        const { post } = await mockService.getClientPostById(clientId, postId, organizationId);
+        assert.strictEqual(post.status, 'DRAFT');
+        return { editorUrl: 'https://postiz.lab.zafiramkt.com.br/launches' };
+      },
+    };
+
+    const app = fastify();
+    await app.register(cookie, { secret: 'test_cookie_secret_32bytes_long' });
+    await app.register(jwt, { secret: 'test_jwt_secret_32bytes_long' });
+
+    // Rota com autenticação simulada de ADMIN
+    app.get(
+      '/clients/:clientId/content/postiz/:postId/edit-link',
+      {
+        preHandler: [
+          async (req) => {
+            req.authContext = {
+              type: 'user',
+              userId: 'usr_admin',
+              email: 'admin@zafira.com.br',
+              memberships: [
+                {
+                  organizationId: 'org_zafira',
+                  organizationSlug: 'zafira',
+                  role: 'ADMIN',
+                },
+              ],
+            };
+          },
+          requireRole(['ADMIN', 'MANAGER']),
+        ],
+      },
+      async (req, reply) => {
+        const result = await mockService.getPostEditLink(
+          (req.params as any).clientId,
+          (req.params as any).postId
+        );
+        return reply.status(200).send(result);
+      }
+    );
+
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_123/content/postiz/post_draft_1/edit-link',
+    });
+
+    assert.strictEqual(res.statusCode, 200, 'Admin deve obter link com status 200');
+    const body = res.json();
+    assert.strictEqual(body.editorUrl, 'https://postiz.lab.zafiramkt.com.br/launches');
+    assert.strictEqual(Object.keys(body).length, 1, 'Resposta deve conter estritamente editorUrl');
+  });
+
+  await t.test('15. Manager consegue obter link de edição para QUEUE / SCHEDULED posicionado no dia', async () => {
+    const mockPost = {
+      id: 'post_sched_1',
+      integrationId: 'int_123',
+      platform: 'instagram',
+      accountName: 'Zafira Hub',
+      status: 'SCHEDULED',
+      content: 'Post agendado para o dia 20',
+      scheduledAt: '2026-09-20T14:30:00.000Z',
+      publishedAt: null,
+      createdAt: '2026-09-14T12:00:00.000Z',
+    };
+
+    const mockClient: any = {
+      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    // Mock getClientPostById
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    const result = await service.getPostEditLink('cli_123', 'post_sched_1', 'org_zafira');
+    assert.strictEqual(
+      result.editorUrl,
+      'https://postiz.lab.zafiramkt.com.br/launches?startDate=2026-09-20&endDate=2026-09-20&display=day',
+      'Link deve incluir data do post para foco no calendário'
+    );
+  });
+
+  await t.test('16. Usuário MEMBER recebe 403 Forbidden ao solicitar edit-link', async () => {
+    const app = fastify();
+
+    app.get(
+      '/clients/:clientId/content/postiz/:postId/edit-link',
+      {
+        preHandler: [
+          async (req) => {
+            req.authContext = {
+              type: 'user',
+              userId: 'usr_member',
+              email: 'membro@zafira.com.br',
+              memberships: [
+                {
+                  organizationId: 'org_zafira',
+                  organizationSlug: 'zafira',
+                  role: 'MEMBER',
+                },
+              ],
+            };
+          },
+          requireRole(['ADMIN', 'MANAGER']),
+        ],
+      },
+      async () => ({ ok: true })
+    );
+
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_123/content/postiz/post_draft_1/edit-link',
+    });
+
+    assert.strictEqual(res.statusCode, 403, 'MEMBER deve receber 403 Forbidden');
+    const body = res.json();
+    assert.strictEqual(body.error, 'forbidden');
+  });
+
+  await t.test('17. Post de outro cliente ou organização recebe 404 Not Found', async () => {
+    const mockClient: any = {
+      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => {
+      throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
+    };
+
+    await assert.rejects(
+      async () => service.getPostEditLink('cli_outro', 'post_123', 'org_zafira'),
+      (err: any) => {
+        assert.ok(err instanceof PostizIntegrationError);
+        assert.strictEqual(err.statusCode, 404);
+        assert.strictEqual(err.code, 'CLIENT_NOT_FOUND');
+        return true;
+      }
+    );
+  });
+
+  await t.test('18. Post publicado (PUBLISHED) não recebe link de edição (erro 400)', async () => {
+    const mockPublishedPost = {
+      id: 'post_pub_1',
+      integrationId: 'int_123',
+      platform: 'instagram',
+      accountName: 'Zafira Hub',
+      status: 'PUBLISHED',
+      content: 'Post já publicado',
+      scheduledAt: null,
+      publishedAt: '2026-09-10T10:00:00.000Z',
+      createdAt: '2026-09-09T10:00:00.000Z',
+    };
+
+    const mockClient: any = {
+      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPublishedPost });
+
+    await assert.rejects(
+      async () => service.getPostEditLink('cli_123', 'post_pub_1', 'org_zafira'),
+      (err: any) => {
+        assert.ok(err instanceof PostizIntegrationError);
+        assert.strictEqual(err.statusCode, 400);
+        assert.strictEqual(err.code, 'POST_ALREADY_PUBLISHED');
+        return true;
+      }
+    );
+  });
+
+  await t.test('19. Nenhuma credencial, token ou segredo aparece na resposta do edit-link', async () => {
+    process.env.POSTIZ_API_KEY = 'secret_postiz_key_12345';
+
+    const mockPost = {
+      id: 'post_draft_sec',
+      integrationId: 'int_123',
+      platform: 'instagram',
+      accountName: 'Zafira Hub',
+      status: 'DRAFT',
+      content: 'Teste de segurança',
+      scheduledAt: null,
+      publishedAt: null,
+      createdAt: '2026-09-14T12:00:00.000Z',
+    };
+
+    const mockClient: any = {
+      getBaseUrl: () => 'https://postiz.lab.zafiramkt.com.br',
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    (service as any).getClientPostById = async () => ({ post: mockPost });
+
+    const result = await service.getPostEditLink('cli_123', 'post_draft_sec', 'org_zafira');
+
+    // Validação estrita
+    assert.strictEqual(typeof result.editorUrl, 'string');
+    assert.ok(!result.editorUrl.includes('secret_postiz_key_12345'), 'Não deve conter POSTIZ_API_KEY na URL');
+    assert.ok(!result.editorUrl.includes('Bearer'), 'Não deve conter tokens');
+
+    const jsonStr = JSON.stringify(result);
+    assert.ok(!jsonStr.includes('secret_postiz_key_12345'), 'Nenhuma chave de API no payload JSON');
+    assert.ok(!jsonStr.includes('password'), 'Nenhuma menção a senhas');
+    assert.strictEqual(JSON.stringify(Object.keys(result)), JSON.stringify(['editorUrl']), 'Apenas editorUrl');
+  });
 });

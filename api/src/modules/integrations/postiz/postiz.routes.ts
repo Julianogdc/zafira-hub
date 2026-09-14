@@ -323,6 +323,36 @@ export function createPostizRoutes(customService?: PostizService) {
     );
 
     // =========================================================================
+    // 7b. GET /clients/:clientId/content/postiz/:postId/edit-link (Destino seguro de edição)
+    // =========================================================================
+    const getPostEditLinkHandler = async (
+      request: FastifyRequest<{ Params: ClientParams & { postId: string } }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const postId = (request.params.postId || '').trim();
+        const organizationId = getOrganizationId(request);
+
+        const result = await service.getPostEditLink(clientId, postId, organizationId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/clients/:clientId/content/postiz/:postId/edit-link',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getPostEditLinkHandler
+    );
+    app.get(
+      '/api/clients/:clientId/content/postiz/:postId/edit-link',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getPostEditLinkHandler
+    );
+
+    // =========================================================================
     // ROTA AGREGADA OPERACIONAL: CONTEÚDOS & AGENDA (ADMIN & MANAGER)
     // =========================================================================
     // 8. GET /integrations/postiz/content (Visão consolidada de conteúdos da organização)

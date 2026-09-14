@@ -203,6 +203,13 @@ export const postizIntegrationService = {
   },
 
   /**
+   * Obtém a URL do editor oficial do Postiz para uma publicação elegível (DRAFT, QUEUE, SCHEDULED).
+   */
+  async getPostEditLink(clientId: string, postId: string): Promise<{ editorUrl: string }> {
+    return api.get<{ editorUrl: string }>(`/clients/${clientId}/content/postiz/${postId}/edit-link`);
+  },
+
+  /**
    * Vincula uma conta do Postiz a um cliente.
    */
   async linkAccount(clientId: string, externalId: string) {

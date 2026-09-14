@@ -1382,6 +1382,56 @@ export class PostizService {
 
     return { post: normalizedPost };
   }
+
+  /**
+   * Obtém a URL estável do editor do Postiz para um post elegível (DRAFT, QUEUE, SCHEDULED).
+   * Valida organização, cliente, contas vinculadas e elegibilidade do status.
+   * Não expõe credenciais, tokens ou chaves de API.
+   */
+  async getPostEditLink(
+    clientId: string,
+    postId: string,
+    organizationId?: string
+  ): Promise<PostEditLinkResponse> {
+    // 1. Busca os detalhes do post validando cliente, organização e contas vinculadas
+    const { post } = await this.getClientPostById(clientId, postId, organizationId);
+
+    // 2. Validação estrita de status
+    const statusUpper = (post.status || '').toUpperCase();
+    if (statusUpper === 'PUBLISHED') {
+      throw new PostizIntegrationError(
+        'Publicações já publicadas não podem ser editadas.',
+        400,
+        'POST_ALREADY_PUBLISHED'
+      );
+    }
+
+    const editableStatuses = ['DRAFT', 'QUEUE', 'SCHEDULED'];
+    if (!editableStatuses.includes(statusUpper)) {
+      throw new PostizIntegrationError(
+        `Publicações com status ${post.status} não permitem edição.`,
+        400,
+        'POST_STATUS_NOT_EDITABLE'
+      );
+    }
+
+    // 3. Monta a URL oficial do editor do Postiz no módulo de lançamentos/calendário
+    const baseUrl = this.client.getBaseUrl().replace(/\/+$/, '');
+
+    let editorUrl = `${baseUrl}/launches`;
+    if (post.scheduledAt) {
+      const dateOnly = post.scheduledAt.split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) {
+        editorUrl = `${baseUrl}/launches?startDate=${dateOnly}&endDate=${dateOnly}&display=day`;
+      }
+    }
+
+    return { editorUrl };
+  }
+}
+
+export interface PostEditLinkResponse {
+  editorUrl: string;
 }
 
 export interface CreateClientPostDto {

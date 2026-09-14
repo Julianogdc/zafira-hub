@@ -74,6 +74,10 @@ export class PostizClient {
     this.timeoutMs = config?.timeoutMs ?? 10000;
   }
 
+  getBaseUrl(): string {
+    return this.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+  }
+
   private validateConfig(): void {
     if (!this.baseUrl || !this.apiKey) {
       throw new PostizIntegrationError(
