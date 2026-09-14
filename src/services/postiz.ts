@@ -215,7 +215,47 @@ export const postizIntegrationService = {
   async unlinkAccount(clientId: string, externalId: string) {
     return api.delete(`/clients/${clientId}/integrations/postiz/${externalId}`);
   },
+
+  /**
+   * Realiza upload de mídia via backend do Hub sem expor chave de API.
+   */
+  async uploadMedia(file: File): Promise<PostizUploadedMedia> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    return api.post<PostizUploadedMedia>('/integrations/postiz/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+  },
+
+  /**
+   * Cria ou agenda um post no Postiz via backend do Hub.
+   */
+  async createPost(
+    clientId: string,
+    payload: CreateClientPostPayload
+  ): Promise<{ post: ClientPostizPost }> {
+    return api.post<{ post: ClientPostizPost }>(`/clients/${clientId}/content/postiz`, payload);
+  },
 };
+
+export interface CreateClientPostPayload {
+  integrationId: string;
+  format: 'FEED' | 'REEL' | 'STORY_IMAGE' | 'STORY_VIDEO' | 'CAROUSEL';
+  content?: string;
+  mediaItems: Array<{ id: string; path: string }>;
+  isDraft?: boolean;
+  scheduledDate?: string;
+}
+
+export interface PostizUploadedMedia {
+  id: string;
+  name: string;
+  path: string;
+}
+
 
 
 

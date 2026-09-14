@@ -96,15 +96,22 @@ export class PostizClient {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
+    const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+    const defaultHeaders: Record<string, string> = {
+      Authorization: this.apiKey,
+      Accept: 'application/json',
+    };
+    if (!isFormData) {
+      defaultHeaders['Content-Type'] = 'application/json';
+    }
+
     try {
       const response = await fetch(url, {
         ...options,
         signal: controller.signal,
         headers: {
+          ...defaultHeaders,
           ...options.headers,
-          Authorization: this.apiKey,
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
         },
       });
 
@@ -237,6 +244,58 @@ export class PostizClient {
       return null;
     }
   }
+
+  /**
+   * POST /api/public/v1/upload
+   * Envia arquivo via multipart/form-data para o storage do Postiz.
+   */
+  async uploadMedia(
+    fileBuffer: Buffer,
+    filename: string,
+    mimeType: string
+  ): Promise<PostizUploadResponse> {
+    const formData = new FormData();
+    const blob = new Blob([fileBuffer], { type: mimeType });
+    formData.append('file', blob, filename);
+
+    return this.request<PostizUploadResponse>('/api/public/v1/upload', {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  /**
+   * POST /api/public/v1/posts
+   * Cria ou agenda um post no Postiz.
+   */
+  async createPost(payload: CreatePostPayload): Promise<any> {
+    return this.request<any>('/api/public/v1/posts', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 }
+
+export interface PostizUploadResponse {
+  id: string;
+  name: string;
+  path: string;
+}
+
+export interface CreatePostPayload {
+  type: 'draft' | 'schedule' | 'now';
+  date: string;
+  shortLink?: boolean;
+  tags?: any[];
+  posts: Array<{
+    integration: { id: string };
+    value: Array<{
+      content: string;
+      image: Array<{ id: string; path: string }>;
+    }>;
+    settings?: Record<string, any>;
+  }>;
+}
+
 
 

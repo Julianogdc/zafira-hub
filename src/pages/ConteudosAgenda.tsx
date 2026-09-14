@@ -51,8 +51,16 @@ import {
   AggregatedContentSummary,
 } from '@/services/postiz';
 
+import { useAuthStore } from '@/store/useAuthStore';
+import { CompositorZafiraModal } from '@/components/content/CompositorZafiraModal';
+
 export default function ConteudosAgenda() {
   const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const canCreate = user?.role === 'admin' || user?.role === 'manager';
+
+  // Estado do Compositor Zafira
+  const [compositorOpen, setCompositorOpen] = useState<boolean>(false);
 
   // Mês de navegação (data de referência)
   const [currentDate, setCurrentDate] = useState<Date>(() => {
@@ -480,6 +488,17 @@ export default function ConteudosAgenda() {
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-purple-400' : ''}`} />
               <span>Atualizar</span>
             </Button>
+
+            {canCreate && (
+              <Button
+                size="sm"
+                onClick={() => setCompositorOpen(true)}
+                className="bg-purple-600 hover:bg-purple-500 text-white gap-2 h-9 px-4 font-semibold shadow-md shadow-purple-600/20"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Criar conteúdo</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -1099,6 +1118,7 @@ export default function ConteudosAgenda() {
         {/* ========================================================================= */}
         {/* MODAL PARA DETALHE DE CONTEÚDOS DO DIA (+X) */}
         {/* ========================================================================= */}
+        {/* Modal de Detalhes do Dia */}
         <Dialog
           open={!!selectedDayPosts}
           onOpenChange={(open) => !open && setSelectedDayPosts(null)}
@@ -1156,6 +1176,17 @@ export default function ConteudosAgenda() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* Compositor Zafira de Conteúdo (Admin & Manager) */}
+        <CompositorZafiraModal
+          open={compositorOpen}
+          onOpenChange={setCompositorOpen}
+          clientsList={clientsList}
+          initialClientId={selectedClientId !== 'ALL' ? selectedClientId : undefined}
+          onSuccess={() => {
+            loadData(true);
+          }}
+        />
       </div>
     </TooltipProvider>
   );

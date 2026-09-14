@@ -1225,7 +1225,174 @@ export class PostizService {
       accounts: accountsList.sort((a, b) => a.name.localeCompare(b.name)),
     };
   }
+
+  /**
+   * Realiza upload de mídia via PostizClient sem expor chaves de API.
+   */
+  async uploadMedia(file: { buffer: Buffer; filename: string; mimetype: string }) {
+    if (!file || !file.buffer || file.buffer.length === 0) {
+      throw new PostizIntegrationError('Arquivo inválido ou vazio para upload.', 400, 'INVALID_FILE');
+    }
+    return this.client.uploadMedia(file.buffer, file.filename, file.mimetype);
+  }
+
+  /**
+   * Cria ou agenda um post no Postiz com isolamento estrito por cliente e organização.
+   */
+  async createClientPost(
+    clientId: string,
+    data: CreateClientPostDto,
+    organizationId?: string
+  ): Promise<{ post: ClientPostizPost }> {
+    if (!clientId || !clientId.trim()) {
+      throw new PostizIntegrationError('ID do cliente é obrigatório.', 400, 'POSTIZ_INVALID_CLIENT_ID');
+    }
+    if (!data.integrationId || !data.integrationId.trim()) {
+      throw new PostizIntegrationError('Conta social de destino é obrigatória.', 400, 'POSTIZ_INVALID_INTEGRATION_ID');
+    }
+    if (!data.mediaItems || data.mediaItems.length === 0) {
+      throw new PostizIntegrationError('Pelo menos uma mídia deve ser enviada para publicação.', 400, 'POSTIZ_MEDIA_REQUIRED');
+    }
+
+    // 1. Valida se o cliente existe e pertence à organização
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, name: true, organizationId: true },
+    });
+
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
+      throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
+    }
+
+    // 2. Valida se a conta Postiz está vinculada estritamente a este cliente
+    const integration = await this.prismaClient.clientIntegration.findFirst({
+      where: {
+        clientId,
+        provider: 'POSTIZ',
+        externalId: data.integrationId,
+      },
+    });
+
+    if (!integration) {
+      throw new PostizIntegrationError(
+        'A conta social informada não está vinculada a este cliente.',
+        403,
+        'POSTIZ_INTEGRATION_NOT_LINKED'
+      );
+    }
+
+    // 3. Monta configuração da plataforma e tipo de post
+    const meta = (integration.metadata as any) || {};
+    const platform = meta.providerIdentifier || 'instagram';
+    const isStory = data.format === 'STORY_IMAGE' || data.format === 'STORY_VIDEO';
+
+    const settings: Record<string, any> = {
+      __type: platform,
+    };
+
+    if (isStory) {
+      settings.post_type = 'story';
+    } else if (data.format === 'REEL') {
+      settings.post_type = 'reel';
+      settings.is_reel = true;
+    }
+
+    // Story não deve receber/enviar legenda
+    const content = isStory ? '' : (data.content || '').trim();
+
+    // Data de publicação
+    const isDraft = Boolean(data.isDraft);
+    const postType = isDraft ? 'draft' : 'schedule';
+    const dateStr = data.scheduledDate
+      ? new Date(data.scheduledDate).toISOString()
+      : new Date().toISOString();
+
+    // 4. Constrói o payload oficial do Postiz
+    const postPayload = {
+      type: postType as 'draft' | 'schedule' | 'now',
+      date: dateStr,
+      shortLink: false,
+      tags: [],
+      posts: [
+        {
+          integration: { id: data.integrationId },
+          value: [
+            {
+              content,
+              image: data.mediaItems.map((m) => ({ id: m.id, path: m.path })),
+            },
+          ],
+          settings,
+        },
+      ],
+    };
+
+    // 5. Envia ao Postiz
+    const postizResponse = await this.client.createPost(postPayload);
+
+    // 6. Invalida cache de agregação para exibição instantânea
+    this.clearCache();
+
+    // 7. Extrai o post retornado ou monta resposta normalizada
+    const rawPost = Array.isArray(postizResponse) ? postizResponse[0] : postizResponse?.post || postizResponse;
+    const postId = rawPost?.id || `gen_${Date.now()}`;
+    const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+
+    const postObjForNormalization = {
+      id: postId,
+      content,
+      state: isDraft ? 'DRAFT' : 'QUEUE',
+      publishDate: dateStr,
+      releaseURL: null,
+      settings,
+      image: data.mediaItems.map((m) => ({ id: m.id, path: m.path })),
+      integration: {
+        id: data.integrationId,
+        name: meta.name || client.name,
+        providerIdentifier: platform,
+        picture: meta.picture || null,
+      },
+    };
+
+    const media = extractPostizMedia(postObjForNormalization, baseUrl);
+    const cleanContent = cleanPostContent(content);
+    const formatInfo = determinePostFormat(postObjForNormalization, media);
+
+    const normalizedPost: ClientPostizPost = {
+      id: postId,
+      integrationId: data.integrationId,
+      platform,
+      accountName: meta.name || client.name,
+      accountPicture: meta.picture || null,
+      status: isDraft ? 'DRAFT' : 'QUEUE',
+      content: cleanContent,
+      rawContent: content,
+      scheduledAt: !isDraft ? dateStr : null,
+      publishedAt: null,
+      createdAt: dateStr,
+      releaseUrl: null,
+      mediaType: media.mediaType,
+      mediaThumbnailUrl: media.mediaThumbnailUrl,
+      mediaCount: media.mediaCount,
+      mediaItems: media.mediaItems,
+      contentType: formatInfo.contentType,
+      isStory: formatInfo.isStory,
+      settings,
+    };
+
+    return { post: normalizedPost };
+  }
 }
+
+export interface CreateClientPostDto {
+  integrationId: string;
+  format: 'FEED' | 'REEL' | 'STORY_IMAGE' | 'STORY_VIDEO' | 'CAROUSEL';
+  content?: string;
+  mediaItems: Array<{ id: string; path: string }>;
+  isDraft?: boolean;
+  scheduledDate?: string;
+}
+
 
 export interface AggregatedPostizPost extends ClientPostizPost {
   clientId: string;

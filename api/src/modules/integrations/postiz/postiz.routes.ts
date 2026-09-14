@@ -370,9 +370,96 @@ export function createPostizRoutes(customService?: PostizService) {
       { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
       getAggregatedContentHandler
     );
+
+    // =========================================================================
+    // 9. POST /integrations/postiz/upload (Upload de mídia seguro)
+    // =========================================================================
+    const uploadHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const fileData = await request.file();
+        if (!fileData) {
+          return reply.status(400).send({
+            status: 'error',
+            error: 'FILE_REQUIRED',
+            message: 'Nenhum arquivo enviado para upload.',
+          });
+        }
+
+        const buffer = await fileData.toBuffer();
+        const result = await service.uploadMedia({
+          buffer,
+          filename: fileData.filename,
+          mimetype: fileData.mimetype,
+        });
+
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.post(
+      '/integrations/postiz/upload',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      uploadHandler
+    );
+    app.post(
+      '/api/integrations/postiz/upload',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      uploadHandler
+    );
+
+    // =========================================================================
+    // 10. POST /clients/:clientId/content/postiz (Criar ou agendar publicação)
+    // =========================================================================
+    const createPostSchema = z.object({
+      integrationId: z.string().min(1, 'integrationId é obrigatório'),
+      format: z.enum(['FEED', 'REEL', 'STORY_IMAGE', 'STORY_VIDEO', 'CAROUSEL']),
+      content: z.string().optional(),
+      mediaItems: z.array(
+        z.object({
+          id: z.string(),
+          path: z.string(),
+        })
+      ).min(1, 'Pelo menos uma mídia é necessária'),
+      isDraft: z.boolean().optional(),
+      scheduledDate: z.string().optional(),
+    });
+
+    const createPostHandler = async (
+      request: FastifyRequest<{ Params: ClientParams }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
+        const body = createPostSchema.parse(request.body);
+
+        const result = await service.createClientPost(clientId, body, organizationId);
+        return reply.status(201).send({
+          status: 'ok',
+          message: body.isDraft ? 'Rascunho salvo com sucesso.' : 'Publicação agendada com sucesso.',
+          post: result.post,
+        });
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.post(
+      '/clients/:clientId/content/postiz',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      createPostHandler
+    );
+    app.post(
+      '/api/clients/:clientId/content/postiz',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      createPostHandler
+    );
   };
 }
 
 export const postizRoutes = createPostizRoutes();
+
 
 
