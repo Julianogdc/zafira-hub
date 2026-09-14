@@ -2231,6 +2231,164 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     assert.strictEqual(body.post.isStory, false);
     assert.strictEqual(body.post.mediaCount, 0);
   });
+
+  await t.test('51. Contrato/Integração: endpoint do Hub para post real cmu0iex0s0002qv767osni1ml retorna contentType STORY_VIDEO e isStory true', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'cmu0hm2vt0001qv763qwrfxgu',
+    });
+
+    const realPostizPayload = {
+      id: 'cmu0iex0s0002qv767osni1ml',
+      state: 'QUEUE',
+      publishDate: '2026-09-14T11:20:00.000Z',
+      organizationId: '7a448237-7fb3-4df8-b285-7a025a02ab42',
+      integrationId: 'cmu0hm2vt0001qv763qwrfxgu',
+      content: '<p></p>',
+      settings: '{"post_type":"story","collaborators":[],"is_trial_reel":false,"__type":"instagram"}',
+      image: '[{"id":"1de384b3-fde9-4922-b601-877c5c346094","path":"https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/41038d53138084b621d37036e6bdcc501.mp4","alt":null,"thumbnail":null}]',
+      integration: {
+        id: 'cmu0hm2vt0001qv763qwrfxgu',
+        name: 'ZAFIRA - MARKETING E VENDAS',
+        picture: 'https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/10d1059a510fddc14647e1e60ac2bb7a313.jpg',
+        providerIdentifier: 'instagram',
+        profile: 'zafiramkt',
+      },
+    };
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: [] }),
+        getPublicPost: async (id: string) => (id === 'cmu0iex0s0002qv767osni1ml' ? realPostizPayload : null),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.id, 'cmu0iex0s0002qv767osni1ml');
+    assert.strictEqual(body.post.contentType, 'STORY_VIDEO');
+    assert.strictEqual(body.post.isStory, true);
+    assert.strictEqual(body.post.mediaType, 'VIDEO');
+    assert.strictEqual(body.post.mediaCount, 1);
+    assert.ok(body.post.settings, 'settings deve estar presente no payload retornado');
+  });
+
+  await t.test('52. Resiliência: getClientPostById prioriza getPublicPost mesmo se a listagem vier com settings vazio', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'cmu0hm2vt0001qv763qwrfxgu',
+    });
+
+    // Listagem resumida que omitiu settings
+    const minifiedListPost = {
+      id: 'cmu0iex0s0002qv767osni1ml',
+      content: '',
+      publishDate: '2026-09-14T11:20:00.000Z',
+      state: 'QUEUE',
+      settings: null,
+      image: '[{"path":"https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/video.mp4"}]',
+      integration: { id: 'cmu0hm2vt0001qv763qwrfxgu', providerIdentifier: 'instagram', name: 'Zafira' },
+    };
+
+    // Detalhe completo retornado pelo Postiz
+    const detailedPost = {
+      ...minifiedListPost,
+      settings: '{"post_type":"story","__type":"instagram"}',
+    };
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: [minifiedListPost] }),
+        getPublicPost: async (id: string) => (id === 'cmu0iex0s0002qv767osni1ml' ? detailedPost : null),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'STORY_VIDEO');
+    assert.strictEqual(body.post.isStory, true);
+  });
+
+  await t.test('53. Enriquecimento de listagem: getClientPosts busca getPublicPost se settings não tiver post_type', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'cmu0hm2vt0001qv763qwrfxgu',
+    });
+
+    // Listagem com vídeo mp4 mas sem post_type em settings
+    const rawPostWithoutType = {
+      id: 'cmu0iex0s0002qv767osni1ml',
+      content: '',
+      publishDate: '2026-09-14T11:20:00.000Z',
+      state: 'QUEUE',
+      settings: '{}',
+      image: '[{"path":"https://postiz.lab.zafiramkt.com.br/uploads/video.mp4"}]',
+      integration: { id: 'cmu0hm2vt0001qv763qwrfxgu', providerIdentifier: 'instagram', name: 'Zafira' },
+    };
+
+    const enrichedFromPostiz = {
+      ...rawPostWithoutType,
+      settings: '{"post_type":"story","__type":"instagram"}',
+    };
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: [rawPostWithoutType] }),
+        getPublicPost: async (id: string) => (id === 'cmu0iex0s0002qv767osni1ml' ? enrichedFromPostiz : null),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.posts.length, 1);
+    assert.strictEqual(body.posts[0].contentType, 'STORY_VIDEO');
+    assert.strictEqual(body.posts[0].isStory, true);
+  });
 });
 
 

@@ -54,6 +54,7 @@ export interface ClientPostizPost {
   mediaItems?: PostizMediaItem[];
   contentType?: PostizContentType;
   isStory?: boolean;
+  settings?: any;
 }
 
 /**

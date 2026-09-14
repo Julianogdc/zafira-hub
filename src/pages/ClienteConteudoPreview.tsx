@@ -47,24 +47,25 @@ export default function ClienteConteudoPreview() {
   // Bloco técnico de detalhes da conta social (recolhido por padrão)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
-  // Carrega os dados caso o usuário venha direto por link ou aperte F5
+  // Carrega os dados garantindo revalidação obrigatória com a API do Hub mesmo se houver state prévio
   const loadData = useCallback(async () => {
     if (!clientId || !postId) return;
 
     try {
       setError(null);
-      // Carrega o post e os dados do cliente em paralelo
+      // Sempre consulta o endpoint oficial da API para obter formato e settings fidedignos
       const [postRes, clientData] = await Promise.allSettled([
-        post ? Promise.resolve({ post }) : postizIntegrationService.getClientPost(clientId, postId),
+        postizIntegrationService.getClientPost(clientId, postId),
         clientsService.getClientById(clientId).catch(() => null),
       ]);
 
-      if (postRes.status === 'fulfilled') {
+      if (postRes.status === 'fulfilled' && postRes.value?.post) {
         setPost(postRes.value.post);
-      } else {
+      } else if (!post) {
+        const reason = (postRes as any).reason;
         const msg =
-          (postRes.reason as any)?.data?.message ||
-          (postRes.reason as any)?.message ||
+          reason?.data?.message ||
+          reason?.message ||
           'Publicação não encontrada ou sem permissão de acesso.';
         setError(msg);
       }
@@ -73,11 +74,13 @@ export default function ClienteConteudoPreview() {
         setClient(clientData.value);
       }
     } catch (err: any) {
-      setError(err?.message || 'Erro ao carregar prévia do conteúdo.');
+      if (!post) {
+        setError(err?.message || 'Erro ao carregar prévia do conteúdo.');
+      }
     } finally {
       setLoading(false);
     }
-  }, [clientId, postId, post]);
+  }, [clientId, postId]);
 
   useEffect(() => {
     loadData();
@@ -221,6 +224,9 @@ export default function ClienteConteudoPreview() {
   const currentMediaUrl = currentItem?.url || post.mediaThumbnailUrl;
   const isVideo = post.mediaType === 'VIDEO' || isVideoFile(currentMediaUrl);
 
+  // Priorização estrita do backend:
+  // Se o backend marcou isStory ou contentType STORY_VIDEO / STORY_IMAGE, é estritamente STORY.
+  // Em hipótese alguma um vídeo é reclassificado como Reel se for Story.
   const isStory = Boolean(
     post.isStory ||
     post.contentType === 'STORY_VIDEO' ||
@@ -229,7 +235,7 @@ export default function ClienteConteudoPreview() {
 
   const isStoryVideo = post.contentType === 'STORY_VIDEO' || (isStory && isVideo);
   const isStoryImage = post.contentType === 'STORY_IMAGE' || (isStory && !isVideo);
-  const isCarousel = (post.mediaType === 'CAROUSEL' || post.contentType === 'CAROUSEL') && !isStory;
+  const isCarousel = (post.contentType === 'CAROUSEL' || post.mediaType === 'CAROUSEL') && !isStory;
   const isReel = (post.contentType === 'REEL' || (!isStory && isVideo)) && !isCarousel;
   const isFeedImage = (post.contentType === 'FEED_IMAGE' || (!isStory && !isVideo && !isCarousel)) && !!currentMediaUrl;
   const isNone = post.contentType === 'NONE' || (!currentMediaUrl && post.mediaCount === 0);
@@ -244,19 +250,12 @@ export default function ClienteConteudoPreview() {
     return 'Prévia indisponível';
   };
 
-  // Badge do formato
+  // Badge do formato conforme especificação estrita da Etapa 3F (Story, Reel, etc.)
   const getFormatBadge = () => {
-    if (isStoryVideo) {
+    if (isStory) {
       return (
         <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-500/20 text-xs px-2.5 py-1">
-          Story · Vídeo
-        </Badge>
-      );
-    }
-    if (isStoryImage) {
-      return (
-        <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-500/20 text-xs px-2.5 py-1">
-          Story · Imagem
+          Story
         </Badge>
       );
     }

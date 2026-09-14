@@ -80,6 +80,7 @@ export interface ClientPostizPost {
   mediaItems?: PostizMediaItem[];
   contentType: PostizContentType;
   isStory: boolean;
+  settings?: any;
 }
 
 /**
@@ -721,14 +722,27 @@ export class PostizService {
       return post?.integration?.id && allowedIntegrationIds.has(post.integration.id);
     });
 
-    // 5b. Enriquecimento automático de mídias caso a listagem tenha omitido a coluna image
+    // 5b. Enriquecimento automático de mídias e configurações caso a listagem tenha omitido a coluna image ou settings
     const enrichedPosts = await Promise.all(
       filteredPosts.map(async (post) => {
         const hasMedia =
           (post.image && (typeof post.image === 'string' ? post.image.trim().length > 2 : true)) ||
           (post.media && (typeof post.media === 'string' ? post.media.trim().length > 2 : true));
 
-        if (!hasMedia && post.id && typeof (this.client as any).getPublicPost === 'function') {
+        let hasPostType = false;
+        if (post?.settings) {
+          try {
+            const s = typeof post.settings === 'string' ? JSON.parse(post.settings) : post.settings;
+            if (s && s.post_type) {
+              hasPostType = true;
+            }
+          } catch {
+            // Ignora erro de parse
+          }
+        }
+
+        // Se faltar mídia OU se não contiver post_type explícito em settings, busca detalhes via getPublicPost
+        if ((!hasMedia || !hasPostType) && post.id && typeof (this.client as any).getPublicPost === 'function') {
           try {
             const fullPost = await this.client.getPublicPost(post.id);
             if (fullPost) {
@@ -777,6 +791,7 @@ export class PostizService {
         mediaItems: media.mediaItems,
         contentType: formatInfo.contentType,
         isStory: formatInfo.isStory,
+        settings: post.settings || null,
       };
     });
 
@@ -797,6 +812,7 @@ export class PostizService {
   /**
    * Obtém os detalhes de um post específico vinculado a um cliente.
    * Garante isolamento estrito: o post deve pertencer a uma conta Postiz vinculada ao cliente.
+   * Prioriza a consulta completa via getPublicPost para assegurar settings, formato e mídias fidedignas.
    */
   async getClientPostById(
     clientId: string,
@@ -810,33 +826,44 @@ export class PostizService {
       throw new PostizIntegrationError('ID da publicação é obrigatório.', 400, 'POSTIZ_INVALID_POST_ID');
     }
 
-    // 1. Tenta encontrar na listagem recente do cliente
-    const clientContent = await this.getClientPosts(clientId, undefined, organizationId);
-    const existingPost = clientContent.posts.find((p) => p.id === postId);
+    // 1. Valida se o cliente existe e pertence à organização
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, organizationId: true },
+    });
 
-    if (existingPost) {
-      return { post: existingPost };
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
+      throw new PostizIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
     }
 
-    // 2. Se não estiver na listagem padrão, busca diretamente pelo ID no Postiz
+    // 2. Busca vínculos de integração com provider POSTIZ do cliente para checagem estrita de autorização
+    const integrations = await this.prismaClient.clientIntegration.findMany({
+      where: {
+        clientId,
+        provider: 'POSTIZ',
+      },
+    });
+
+    if (integrations.length === 0) {
+      throw new PostizIntegrationError(
+        'Publicação não encontrada ou não vinculada a este cliente.',
+        404,
+        'POSTIZ_POST_NOT_FOUND'
+      );
+    }
+
+    const allowedIntegrationIds = new Set(integrations.map((item) => item.externalId));
+    const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+
+    // 3. PRIORIDADE: Busca os dados completos diretamente pelo ID no Postiz (para obter settings e payload real)
     if (typeof (this.client as any).getPublicPost === 'function') {
       try {
         const fullPost = await this.client.getPublicPost(postId);
         if (fullPost) {
-          // Busca os vínculos do cliente para validar autorização
-          const integrations = await this.prismaClient.clientIntegration.findMany({
-            where: {
-              clientId,
-              provider: 'POSTIZ',
-            },
-          });
-
-          const allowedIntegrationIds = new Set(integrations.map((item) => item.externalId));
-          const postIntegrationId = fullPost.integration?.id;
+          const postIntegrationId = fullPost.integration?.id || fullPost.integrationId;
 
           // Se tiver vínculo confirmado com o cliente
           if (postIntegrationId && allowedIntegrationIds.has(postIntegrationId)) {
-            const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
             const media = extractPostizMedia(fullPost, baseUrl);
             const cleanContent = cleanPostContent(fullPost.content);
             const isPublished = fullPost.state === 'PUBLISHED';
@@ -845,10 +872,10 @@ export class PostizService {
 
             const normalizedPost: ClientPostizPost = {
               id: fullPost.id,
-              integrationId: fullPost.integration.id,
-              platform: fullPost.integration.providerIdentifier || '',
-              accountName: fullPost.integration.name || '',
-              accountPicture: fullPost.integration.picture || null,
+              integrationId: fullPost.integration?.id || postIntegrationId,
+              platform: fullPost.integration?.providerIdentifier || '',
+              accountName: fullPost.integration?.name || '',
+              accountPicture: fullPost.integration?.picture || null,
               status: fullPost.state,
               content: cleanContent,
               rawContent: fullPost.content || '',
@@ -862,6 +889,7 @@ export class PostizService {
               mediaItems: media.mediaItems,
               contentType: formatInfo.contentType,
               isStory: formatInfo.isStory,
+              settings: fullPost.settings || null,
             };
 
             return { post: normalizedPost };
@@ -872,6 +900,14 @@ export class PostizService {
           throw err;
         }
       }
+    }
+
+    // 4. Fallback caso getPublicPost não esteja disponível: procura na listagem do cliente
+    const clientContent = await this.getClientPosts(clientId, undefined, organizationId);
+    const existingPost = clientContent.posts.find((p) => p.id === postId);
+
+    if (existingPost) {
+      return { post: existingPost };
     }
 
     throw new PostizIntegrationError(

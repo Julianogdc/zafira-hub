@@ -184,7 +184,7 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
     if (isStory) {
       return (
         <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[10px] font-semibold">
-          {isVideo ? 'Story · Vídeo' : 'Story'}
+          Story
         </Badge>
       );
     }
@@ -290,9 +290,7 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
             <span className="text-[11px] font-medium text-zinc-400">Prévia indisponível</span>
             <span className="text-[9px] text-zinc-600 mt-0.5 uppercase tracking-wide">
               {isStory
-                ? isVideo
-                  ? 'Story · Vídeo'
-                  : 'Story'
+                ? 'Story'
                 : post.contentType === 'REEL'
                 ? 'Reel'
                 : mediaType === 'CAROUSEL'
