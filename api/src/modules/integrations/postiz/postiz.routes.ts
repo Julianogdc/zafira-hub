@@ -39,6 +39,14 @@ export function createPostizRoutes(customService?: PostizService) {
         });
       }
 
+      if ((error as any)?.code === 'FST_REQ_FILE_TOO_LARGE') {
+        return reply.status(413).send({
+          status: 'error',
+          error: 'FILE_TOO_LARGE',
+          message: 'O arquivo excede o limite máximo permitido de upload (100MB).',
+        });
+      }
+
       if (error instanceof PostizIntegrationError) {
         return reply.status(error.statusCode).send({
           status: 'error',
@@ -46,6 +54,9 @@ export function createPostizRoutes(customService?: PostizService) {
           message: sanitizeMessage(error.message),
         });
       }
+
+      // Log seguro no servidor sem expor dados sensíveis ao cliente
+      app.log.error({ err: error }, 'Erro inesperado na rota Postiz');
 
       return reply.status(500).send({
         status: 'error',

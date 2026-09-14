@@ -46,6 +46,12 @@ export async function apiFetch<T = any>(endpoint: string, options: RequestInit =
     }
   }
 
+  // Se o body for FormData, NUNCA defina Content-Type manualmente (impede o navegador de anexar o boundary MIME)
+  if (isFormData) {
+    delete headers['Content-Type'];
+    delete headers['content-type'];
+  }
+
   const config: RequestInit = {
     ...options,
     credentials: 'include', // Obrigatório para cookies HTTP-only de sessão

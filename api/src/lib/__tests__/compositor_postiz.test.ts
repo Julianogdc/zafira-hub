@@ -611,4 +611,30 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
       }
     );
   });
+
+  await t.test('13. Upload de vídeo .mp4 para Story retorna id e path do Postiz', async () => {
+    const mockClient: any = {
+      uploadMedia: async (buffer: Buffer, filename: string, mimeType: string) => {
+        assert.ok(buffer.length > 0);
+        assert.strictEqual(filename, 'story_video.mp4');
+        assert.strictEqual(mimeType, 'video/mp4');
+        return {
+          id: 'postiz_media_video_999',
+          name: 'story_video.mp4',
+          path: 'https://postiz.lab.zafiramkt.com.br/uploads/story_video.mp4',
+        };
+      },
+    };
+
+    const service = new PostizService(mockClient, null as any);
+    const result = await service.uploadMedia({
+      buffer: Buffer.from('fake-mp4-binary-content-zafira-hub'),
+      filename: 'story_video.mp4',
+      mimetype: 'video/mp4',
+    });
+
+    assert.strictEqual(result.id, 'postiz_media_video_999');
+    assert.strictEqual(result.name, 'story_video.mp4');
+    assert.strictEqual(result.path, 'https://postiz.lab.zafiramkt.com.br/uploads/story_video.mp4');
+  });
 });

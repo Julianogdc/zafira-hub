@@ -282,12 +282,22 @@ export function CompositorZafiraModal({
       }
       toast.success('Mídia enviada com sucesso!');
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.message ||
-        err?.message ||
-        'Falha no envio da mídia para o Postiz.';
-      setErrorMessage(msg);
-      toast.error('Erro no upload', { description: msg });
+      console.error('[Compositor Upload Error]:', err);
+      let userMsg = 'Não foi possível enviar o arquivo. Tente novamente ou escolha outro vídeo.';
+      if (err?.data?.message) {
+        userMsg = err.data.message;
+      } else if (err?.status === 413) {
+        userMsg = 'O arquivo excede o limite máximo permitido de upload. Escolha um arquivo menor.';
+      } else if (
+        err?.message &&
+        !err.message.toLowerCase().includes('fetch') &&
+        !err.message.toLowerCase().includes('network') &&
+        !err.message.toLowerCase().includes('failed')
+      ) {
+        userMsg = err.message;
+      }
+      setErrorMessage(userMsg);
+      toast.error('Erro no upload', { description: userMsg });
     } finally {
       setUploading(false);
       if (fileInputRef.current) {

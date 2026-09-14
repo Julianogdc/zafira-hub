@@ -223,11 +223,7 @@ export const postizIntegrationService = {
     const formData = new FormData();
     formData.append('file', file);
 
-    return api.post<PostizUploadedMedia>('/integrations/postiz/upload', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
+    return api.post<PostizUploadedMedia>('/integrations/postiz/upload', formData);
   },
 
   /**

@@ -88,13 +88,14 @@ export class PostizClient {
    * Executa requisição HTTP autenticada contra a Public API do Postiz.
    * Não expõe segredos em erros ou cabeçalhos retornados.
    */
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit & { timeoutMs?: number } = {}): Promise<T> {
     this.validateConfig();
 
     const url = `${this.baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
+    const effectiveTimeout = options.timeoutMs ?? this.timeoutMs;
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
+    const timeoutId = setTimeout(() => controller.abort(), effectiveTimeout);
 
     const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
     const defaultHeaders: Record<string, string> = {
@@ -261,6 +262,7 @@ export class PostizClient {
     return this.request<PostizUploadResponse>('/api/public/v1/upload', {
       method: 'POST',
       body: formData,
+      timeoutMs: 60000,
     });
   }
 

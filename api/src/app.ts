@@ -71,10 +71,10 @@ export function buildApp(): FastifyInstance {
     global: false, // aplicado especificamente em rotas sensíveis como /auth/login
   });
 
-  // 4.1 Suporte a Uploads Multipart sem retenção na VPS (encaminhado diretamente ao Asana Cloud)
+  // 4.1 Suporte a Uploads Multipart sem retenção na VPS (encaminhado ao Asana e Postiz)
   app.register(multipart, {
     limits: {
-      fileSize: 25 * 1024 * 1024, // 25MB (limite da API Asana)
+      fileSize: 100 * 1024 * 1024, // 100MB (suporta vídeos de Reels e Stories para o Postiz)
       files: 1,
     },
   });
