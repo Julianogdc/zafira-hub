@@ -348,22 +348,45 @@ export default function ClienteConteudoPreview() {
           </div>
         </div>
 
-        {/* Data e Hora */}
+        {/* Data e Hora / Status de Agendamento */}
         <div className="flex flex-col md:items-end justify-center text-xs text-zinc-400 bg-zinc-900/50 p-3.5 rounded-lg border border-white/5 space-y-1">
-          <div className="flex items-center gap-2">
-            {post.status === 'PUBLISHED' ? (
-              <>
+          {post.status === 'DRAFT' ? (
+            <>
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
+                <span className="text-zinc-300 font-semibold text-sm">Rascunho — sem agendamento</span>
+              </div>
+              <span className="text-xs text-zinc-500">Salvo na fila de rascunhos da Zafira</span>
+            </>
+          ) : post.status === 'PUBLISHED' ? (
+            <>
+              <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span className="text-zinc-300 font-medium">Publicado em:</span>
-              </>
-            ) : (
-              <>
+              </div>
+              <span className="text-sm font-semibold text-white">{formatDate(rawDate)}</span>
+            </>
+          ) : post.status === 'ERROR' ? (
+            <>
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span className="text-red-400 font-medium">Falha na publicação</span>
+              </div>
+              {rawDate && (
+                <span className="text-xs text-zinc-500">
+                  Data prevista: {formatDate(rawDate)}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-400 shrink-0" />
                 <span className="text-zinc-300 font-medium">Programado para:</span>
-              </>
-            )}
-          </div>
-          <span className="text-sm font-semibold text-white">{formatDate(rawDate)}</span>
+              </div>
+              <span className="text-sm font-semibold text-white">{formatDate(rawDate)}</span>
+            </>
+          )}
         </div>
       </div>
 

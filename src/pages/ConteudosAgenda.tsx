@@ -1011,10 +1011,18 @@ export default function ConteudosAgenda() {
                         {/* Data e Horário */}
                         <td className="p-3 whitespace-nowrap">
                           <div className="font-semibold text-white group-hover:text-purple-300">
-                            {formatDateFull(post.scheduledAt || post.publishedAt || post.createdAt)}
+                            {post.status === 'DRAFT'
+                              ? 'Sem agendamento'
+                              : formatDateFull(post.scheduledAt || post.publishedAt || post.createdAt)}
                           </div>
                           <span className="text-[10px] text-zinc-500">
-                            {post.status === 'PUBLISHED' ? 'Publicado' : 'Agendado'}
+                            {post.status === 'PUBLISHED'
+                              ? 'Publicado'
+                              : post.status === 'DRAFT'
+                              ? 'Rascunho'
+                              : post.status === 'ERROR'
+                              ? 'Falha'
+                              : 'Agendado'}
                           </span>
                         </td>
 

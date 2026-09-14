@@ -353,10 +353,20 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
         {/* Linha 4: Rodapé com data, horário e dica visual discreta */}
         <div className="pt-2 border-t border-white/5 flex items-center justify-between gap-2 text-xs text-zinc-400">
           <div className="flex items-center gap-1.5 min-w-0 truncate">
-            {post.status === 'PUBLISHED' ? (
+            {post.status === 'DRAFT' ? (
+              <>
+                <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                <span className="truncate text-zinc-300 font-medium">Rascunho — sem agendamento</span>
+              </>
+            ) : post.status === 'PUBLISHED' ? (
               <>
                 <Calendar className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span className="truncate">Publicado em: {formatDate(rawDate)}</span>
+              </>
+            ) : post.status === 'ERROR' ? (
+              <>
+                <AlertCircle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                <span className="truncate text-red-400 font-medium">Falha na publicação</span>
               </>
             ) : (
               <>
