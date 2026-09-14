@@ -2003,6 +2003,234 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const body = res.json();
     assert.strictEqual(body.error, 'POSTIZ_POST_NOT_FOUND');
   });
+
+  await t.test('46. Payload real do Story em vídeo (post_type="story" + mp4): classificado como STORY_VIDEO e isStory=true', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'cmu0iex0s0002qv767osni1ml',
+        content: '<p></p>',
+        publishDate: '2026-09-14T11:20:00.000Z',
+        state: 'QUEUE',
+        settings: '{"post_type":"story","collaborators":[],"is_trial_reel":false,"__type":"instagram"}',
+        image: '[{"id":"1de384b3-fde9-4922-b601-877c5c346094","path":"https://postiz.lab.zafiramkt.com.br/uploads/2026/09/14/41038d53138084b621d37036e6bdcc501.mp4","alt":null,"thumbnail":null}]',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Zafira Instagram' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'STORY_VIDEO');
+    assert.strictEqual(body.post.isStory, true);
+    assert.strictEqual(body.post.mediaType, 'VIDEO');
+  });
+
+  await t.test('47. Story com imagem (post_type="story" + jpg): classificado como STORY_IMAGE e isStory=true', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_story_imagem',
+        content: '',
+        publishDate: '2026-09-14T11:20:00.000Z',
+        state: 'QUEUE',
+        settings: '{"post_type":"story","__type":"instagram"}',
+        image: '[{"path":"https://cdn.postiz.com/story.jpg"}]',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Zafira Instagram' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/post_story_imagem',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'STORY_IMAGE');
+    assert.strictEqual(body.post.isStory, true);
+    assert.strictEqual(body.post.mediaType, 'IMAGE');
+  });
+
+  await t.test('48. Reel com vídeo (post_type="post" ou sem post_type + mp4): classificado como REEL e isStory=false', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_reel_feed',
+        content: '<p>Legenda do meu Reel incrível</p>',
+        publishDate: '2026-09-14T11:20:00.000Z',
+        state: 'PUBLISHED',
+        settings: '{"post_type":"post","__type":"instagram"}',
+        image: '[{"path":"https://cdn.postiz.com/video_reel.mp4"}]',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Zafira Instagram' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/post_reel_feed',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'REEL');
+    assert.strictEqual(body.post.isStory, false);
+    assert.strictEqual(body.post.mediaType, 'VIDEO');
+  });
+
+  await t.test('49. Post de Carrossel: classificado como CAROUSEL e mantém contagem correta', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_carrossel_multi',
+        content: '<p>Dicas em carrossel</p>',
+        publishDate: '2026-09-14T11:20:00.000Z',
+        state: 'PUBLISHED',
+        image: '[{"path":"https://cdn.postiz.com/slide1.jpg"},{"path":"https://cdn.postiz.com/slide2.jpg"}]',
+        integration: { id: 'int_1', providerIdentifier: 'instagram', name: 'Zafira Instagram' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/post_carrossel_multi',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'CAROUSEL');
+    assert.strictEqual(body.post.isStory, false);
+    assert.strictEqual(body.post.mediaCount, 2);
+  });
+
+  await t.test('50. Conteúdo sem mídia: classificado como NONE e preserves fallback', async () => {
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_123';
+    const mockPrisma = createMockPrisma();
+    mockPrisma._data.clients.set('cli_1', { id: 'cli_1', name: 'Cliente 1', organizationId: 'org_1' });
+    mockPrisma._data.clientIntegrations.push({
+      id: 'ci_1',
+      clientId: 'cli_1',
+      provider: 'POSTIZ',
+      externalId: 'int_1',
+    });
+
+    const mockPosts = [
+      {
+        id: 'post_sem_midia',
+        content: 'Pensamento do dia sem imagem',
+        publishDate: '2026-09-14T11:20:00.000Z',
+        state: 'PUBLISHED',
+        image: null,
+        integration: { id: 'int_1', providerIdentifier: 'linkedin', name: 'Zafira LinkedIn' },
+      },
+    ];
+
+    const service = new PostizService(
+      {
+        isConnected: async () => ({ connected: true }),
+        getIntegrations: async () => [],
+        getPosts: async () => ({ posts: mockPosts }),
+      } as any,
+      mockPrisma as any
+    );
+    const app = await setupTestApp(service);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_1/content/postiz/post_sem_midia',
+      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+    });
+
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.strictEqual(body.post.contentType, 'NONE');
+    assert.strictEqual(body.post.isStory, false);
+    assert.strictEqual(body.post.mediaCount, 0);
+  });
 });
 
 

@@ -29,8 +29,14 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
   const displayLegend = cleanPostContent(post.content);
   const isDefaultEmpty = displayLegend === 'Sem legenda';
 
-  // Informações de mídia normalizadas
+  // Informações de formato e mídia normalizadas
+  const isStory = Boolean(
+    post.isStory ||
+    post.contentType === 'STORY_VIDEO' ||
+    post.contentType === 'STORY_IMAGE'
+  );
   const mediaType = post.mediaType || 'NONE';
+  const isVideo = mediaType === 'VIDEO' || post.contentType === 'STORY_VIDEO' || post.contentType === 'REEL';
   const thumbnailUrl = post.mediaThumbnailUrl || null;
   const mediaCount = post.mediaCount || 0;
   const hasValidMedia = !!thumbnailUrl && !imageError;
@@ -70,6 +76,16 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
   };
 
   const platformName = post.platform || 'rede social';
+  const formatText = isStory
+    ? isVideo
+      ? 'Story em vídeo'
+      : 'Story'
+    : post.contentType === 'REEL'
+    ? 'Reel'
+    : mediaType === 'CAROUSEL'
+    ? 'Carrossel'
+    : 'conteúdo';
+
   const statusDesc =
     post.status === 'PUBLISHED'
       ? 'publicado'
@@ -82,7 +98,7 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
   const ariaLabel =
     post.status === 'PUBLISHED' && post.releaseUrl
       ? `Abrir publicação no ${platformName} em nova aba`
-      : `Abrir prévia do conteúdo ${statusDesc} no ${platformName}`;
+      : `Abrir prévia de ${formatText} ${statusDesc} no ${platformName}`;
 
   // Badge de status
   const renderStatusBadge = (status: string) => {
@@ -163,6 +179,32 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
     );
   };
 
+  // Badge específico do formato (Story, Reel, etc.)
+  const renderFormatBadge = () => {
+    if (isStory) {
+      return (
+        <Badge variant="outline" className="bg-purple-500/10 text-purple-400 border-purple-500/20 text-[10px] font-semibold">
+          {isVideo ? 'Story · Vídeo' : 'Story'}
+        </Badge>
+      );
+    }
+    if (post.contentType === 'REEL') {
+      return (
+        <Badge variant="outline" className="bg-rose-500/10 text-rose-400 border-rose-500/20 text-[10px] font-semibold">
+          Reel
+        </Badge>
+      );
+    }
+    if (mediaType === 'CAROUSEL') {
+      return (
+        <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px] font-semibold">
+          Carrossel · {mediaCount} itens
+        </Badge>
+      );
+    }
+    return null;
+  };
+
   // Auxiliar para identificar se a URL aponta diretamente para um arquivo de vídeo
   const isVideoFile = (url?: string | null): boolean => {
     if (!url || typeof url !== 'string') return false;
@@ -170,7 +212,7 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
     return /\.(mp4|mov|webm|m4v|avi|mkv|ogv)$/i.test(clean);
   };
 
-  const isDirectVideo = mediaType === 'VIDEO' && isVideoFile(thumbnailUrl);
+  const isDirectVideo = isVideo && isVideoFile(thumbnailUrl);
 
   return (
     <div
@@ -217,8 +259,17 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
               </div>
             )}
 
+            {/* Selo de Story */}
+            {isStory && (
+              <div className="absolute top-2 left-2 z-10">
+                <span className="bg-purple-950/80 backdrop-blur-md text-purple-200 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-purple-500/30 flex items-center gap-1 shadow-md">
+                  Story
+                </span>
+              </div>
+            )}
+
             {/* Indicador de Vídeo / Reel com Play central */}
-            {mediaType === 'VIDEO' && (
+            {isVideo && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
                 <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm border border-white/25 flex items-center justify-center text-white shadow-xl transition-transform duration-300 group-hover:scale-110">
                   <Play className="w-4 h-4 fill-white ml-0.5" />
@@ -230,7 +281,7 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
           /* Fallback visual premium */
           <div className="w-full h-full flex flex-col items-center justify-center p-3 text-center bg-zinc-900/60 select-none">
             <div className="w-10 h-10 rounded-full bg-zinc-800/80 border border-white/10 flex items-center justify-center mb-2 text-zinc-400">
-              {mediaType === 'VIDEO' ? (
+              {isVideo ? (
                 <Play className="w-4 h-4 fill-zinc-400 text-zinc-400 ml-0.5" />
               ) : (
                 <ImageIcon className="w-4 h-4" />
@@ -238,7 +289,15 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
             </div>
             <span className="text-[11px] font-medium text-zinc-400">Prévia indisponível</span>
             <span className="text-[9px] text-zinc-600 mt-0.5 uppercase tracking-wide">
-              {mediaType === 'VIDEO' ? 'Vídeo / Reel' : mediaType === 'CAROUSEL' ? 'Carrossel' : 'Sem imagem'}
+              {isStory
+                ? isVideo
+                  ? 'Story · Vídeo'
+                  : 'Story'
+                : post.contentType === 'REEL'
+                ? 'Reel'
+                : mediaType === 'CAROUSEL'
+                ? 'Carrossel'
+                : 'Sem mídia'}
             </span>
           </div>
         )}
@@ -247,15 +306,11 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
       {/* 2. ÁREA DE INFORMAÇÕES OPERACIONAIS */}
       <div className="flex-1 p-4 flex flex-col justify-between min-w-0 space-y-3">
         <div className="space-y-2.5 min-w-0">
-          {/* Linha 1: Status e Plataforma */}
+          {/* Linha 1: Status, Plataforma e Formato */}
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="flex items-center gap-2">
               {renderPlatformBadge(post.platform)}
-              {mediaType === 'CAROUSEL' && (
-                <span className="text-[10px] text-zinc-400 hidden sm:inline-block">
-                  Carrossel · {mediaCount} itens
-                </span>
-              )}
+              {renderFormatBadge()}
             </div>
             {renderStatusBadge(post.status)}
           </div>
@@ -275,17 +330,26 @@ export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
             </span>
           </div>
 
-          {/* Linha 3: Legenda limpa e resumida */}
-          <div className="bg-zinc-900/50 rounded-lg p-2.5 border border-white/5">
-            <p
-              className={`text-xs leading-relaxed break-words line-clamp-3 ${
-                isDefaultEmpty ? 'text-zinc-500 italic' : 'text-zinc-200'
-              }`}
-              title={displayLegend}
-            >
-              {displayLegend}
-            </p>
-          </div>
+          {/* Linha 3: Legenda (oculta para Stories conforme regra de negócio) */}
+          {isStory ? (
+            <div className="bg-purple-500/5 rounded-lg p-2 border border-purple-500/10 flex items-center gap-1.5">
+              <span className="text-[11px] text-purple-300 font-medium">
+                {isVideo ? 'Story em vídeo' : 'Story com imagem'}
+              </span>
+              <span className="text-[10px] text-zinc-500">· Não possui legenda</span>
+            </div>
+          ) : (
+            <div className="bg-zinc-900/50 rounded-lg p-2.5 border border-white/5">
+              <p
+                className={`text-xs leading-relaxed break-words line-clamp-3 ${
+                  isDefaultEmpty ? 'text-zinc-500 italic' : 'text-zinc-200'
+                }`}
+                title={displayLegend}
+              >
+                {displayLegend}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Linha 4: Rodapé com data, horário e dica visual discreta */}

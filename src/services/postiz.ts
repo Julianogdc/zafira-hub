@@ -27,6 +27,14 @@ export interface PostizMediaItem {
   thumbnailUrl?: string | null;
 }
 
+export type PostizContentType =
+  | 'STORY_IMAGE'
+  | 'STORY_VIDEO'
+  | 'REEL'
+  | 'FEED_IMAGE'
+  | 'CAROUSEL'
+  | 'NONE';
+
 export interface ClientPostizPost {
   id: string;
   integrationId: string;
@@ -44,6 +52,8 @@ export interface ClientPostizPost {
   mediaThumbnailUrl?: string | null;
   mediaCount?: number;
   mediaItems?: PostizMediaItem[];
+  contentType?: PostizContentType;
+  isStory?: boolean;
 }
 
 /**

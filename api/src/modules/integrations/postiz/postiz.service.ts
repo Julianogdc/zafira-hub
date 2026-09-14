@@ -46,6 +46,14 @@ export interface PostizMediaItem {
   thumbnailUrl?: string | null;
 }
 
+export type PostizContentType =
+  | 'STORY_IMAGE'
+  | 'STORY_VIDEO'
+  | 'REEL'
+  | 'FEED_IMAGE'
+  | 'CAROUSEL'
+  | 'NONE';
+
 export interface NormalizedPostizMedia {
   mediaType: 'IMAGE' | 'VIDEO' | 'CAROUSEL' | 'NONE';
   mediaThumbnailUrl: string | null;
@@ -70,10 +78,65 @@ export interface ClientPostizPost {
   mediaThumbnailUrl?: string | null;
   mediaCount: number;
   mediaItems?: PostizMediaItem[];
+  contentType: PostizContentType;
+  isStory: boolean;
+}
+
+/**
+ * Determina o formato exato da publicação com base no payload real do Postiz:
+ * - settings.post_type === 'story' -> STORY_VIDEO (se vídeo) ou STORY_IMAGE (se imagem)
+ * - mediaCount > 1 -> CAROUSEL
+ * - mediaType === 'VIDEO' -> REEL
+ * - mediaType === 'IMAGE' -> FEED_IMAGE
+ * - sem mídia -> NONE
+ */
+export function determinePostFormat(
+  post: any,
+  media: NormalizedPostizMedia
+): { contentType: PostizContentType; isStory: boolean } {
+  // 1. Sem mídia
+  if (media.mediaCount === 0 || media.mediaType === 'NONE') {
+    return { contentType: 'NONE', isStory: false };
+  }
+
+  // 2. Extrai settings de forma segura (objeto ou string JSON)
+  let settingsObj = post?.settings;
+  if (typeof settingsObj === 'string') {
+    try {
+      settingsObj = JSON.parse(settingsObj);
+    } catch {
+      settingsObj = null;
+    }
+  }
+
+  const postType = String(settingsObj?.post_type || '').toLowerCase();
+
+  // 3. STORY (imagem ou vídeo)
+  if (postType === 'story') {
+    const isVideo = media.mediaType === 'VIDEO';
+    return {
+      contentType: isVideo ? 'STORY_VIDEO' : 'STORY_IMAGE',
+      isStory: true,
+    };
+  }
+
+  // 4. CARROSSEL (múltiplas mídias)
+  if (media.mediaCount > 1 || media.mediaType === 'CAROUSEL') {
+    return { contentType: 'CAROUSEL', isStory: false };
+  }
+
+  // 5. REEL / VÍDEO
+  if (media.mediaType === 'VIDEO') {
+    return { contentType: 'REEL', isStory: false };
+  }
+
+  // 6. FEED COM IMAGEM
+  return { contentType: 'FEED_IMAGE', isStory: false };
 }
 
 /**
  * Sanitiza e limpa o texto da publicação:
+
  * - Remove todas as tags HTML (<p>, <br>, etc.)
  * - Converte entidades HTML comuns (&nbsp;, &amp;, etc.)
  * - Normaliza espaços duplos e quebras repetidas
@@ -693,6 +756,7 @@ export class PostizService {
 
       const media = extractPostizMedia(post, baseUrl);
       const cleanContent = cleanPostContent(post.content);
+      const formatInfo = determinePostFormat(post, media);
 
       return {
         id: post.id,
@@ -711,6 +775,8 @@ export class PostizService {
         mediaThumbnailUrl: media.mediaThumbnailUrl,
         mediaCount: media.mediaCount,
         mediaItems: media.mediaItems,
+        contentType: formatInfo.contentType,
+        isStory: formatInfo.isStory,
       };
     });
 
@@ -775,6 +841,7 @@ export class PostizService {
             const cleanContent = cleanPostContent(fullPost.content);
             const isPublished = fullPost.state === 'PUBLISHED';
             const publishDateIso = fullPost.publishDate ? new Date(fullPost.publishDate).toISOString() : null;
+            const formatInfo = determinePostFormat(fullPost, media);
 
             const normalizedPost: ClientPostizPost = {
               id: fullPost.id,
@@ -793,6 +860,8 @@ export class PostizService {
               mediaThumbnailUrl: media.mediaThumbnailUrl,
               mediaCount: media.mediaCount,
               mediaItems: media.mediaItems,
+              contentType: formatInfo.contentType,
+              isStory: formatInfo.isStory,
             };
 
             return { post: normalizedPost };
