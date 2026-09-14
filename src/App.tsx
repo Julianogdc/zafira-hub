@@ -17,6 +17,7 @@ const Projetos = lazy(() => import("./pages/Projetos"));
 const Financas = lazy(() => import("./pages/Financas"));
 const Clientes = lazy(() => import("./pages/Clientes"));
 const Cliente360 = lazy(() => import("./pages/Cliente360"));
+const ClienteConteudoPreview = lazy(() => import("./pages/ClienteConteudoPreview"));
 const CRM = lazy(() => import("./pages/CRM"));
 const Performance = lazy(() => import("./pages/Performance"));
 const Metas = lazy(() => import("./pages/Metas"));
@@ -148,6 +149,7 @@ const App = () => {
                     <Route path="/financas" element={<ManagerRoute><Financas /></ManagerRoute>} />
                     <Route path="/clientes" element={<ManagerRoute><Clientes /></ManagerRoute>} />
                     <Route path="/clientes/:id" element={<ManagerRoute><Cliente360 /></ManagerRoute>} />
+                    <Route path="/clientes/:id/conteudo/:postId" element={<ManagerRoute><ClienteConteudoPreview /></ManagerRoute>} />
                     <Route path="/crm" element={<ManagerRoute><CRM /></ManagerRoute>} />
                     {/* <Route path="/performance" element={<ManagerRoute><Performance /></ManagerRoute>} /> */}
 

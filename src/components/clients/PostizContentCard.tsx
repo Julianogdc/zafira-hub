@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Calendar,
   Clock,
@@ -12,15 +13,16 @@ import {
   Share2,
 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { ClientPostizPost, cleanPostContent } from '@/services/postiz';
 
 interface PostizContentCardProps {
   post: ClientPostizPost;
+  clientId: string;
 }
 
-export function PostizContentCard({ post }: PostizContentCardProps) {
+export function PostizContentCard({ post, clientId }: PostizContentCardProps) {
+  const navigate = useNavigate();
   const [imageError, setImageError] = useState(false);
 
   // Sanitização garantida da legenda
@@ -50,6 +52,37 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
       return dateStr;
     }
   };
+
+  // Ação ao clicar no card inteiro
+  const handleClick = () => {
+    if (post.status === 'PUBLISHED' && post.releaseUrl && post.releaseUrl.trim() !== '') {
+      window.open(post.releaseUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      navigate(`/clientes/${clientId}/conteudo/${post.id}`, { state: { post } });
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      handleClick();
+    }
+  };
+
+  const platformName = post.platform || 'rede social';
+  const statusDesc =
+    post.status === 'PUBLISHED'
+      ? 'publicado'
+      : post.status === 'ERROR'
+      ? 'com falha'
+      : post.status === 'DRAFT'
+      ? 'em rascunho'
+      : 'agendado';
+
+  const ariaLabel =
+    post.status === 'PUBLISHED' && post.releaseUrl
+      ? `Abrir publicação no ${platformName} em nova aba`
+      : `Abrir prévia do conteúdo ${statusDesc} no ${platformName}`;
 
   // Badge de status
   const renderStatusBadge = (status: string) => {
@@ -140,7 +173,14 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
   const isDirectVideo = mediaType === 'VIDEO' && isVideoFile(thumbnailUrl);
 
   return (
-    <div className="bg-zinc-950/40 border border-white/10 rounded-xl hover:border-white/20 transition-all overflow-hidden flex flex-col sm:flex-row group">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      aria-label={ariaLabel}
+      className="bg-zinc-950/40 border border-white/10 rounded-xl hover:border-white/25 hover:bg-zinc-900/30 hover:shadow-lg hover:shadow-black/40 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/40 transition-all cursor-pointer select-none overflow-hidden flex flex-col sm:flex-row group"
+    >
       {/* 1. MINIATURA VISUAL (4:5) */}
       <div
         style={{ aspectRatio: '4/5' }}
@@ -154,7 +194,7 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
                 muted
                 playsInline
                 preload="metadata"
-                className="w-full h-full object-cover pointer-events-none transition-transform duration-300 group-hover:scale-[1.02]"
+                className="w-full h-full object-cover pointer-events-none transition-transform duration-300 group-hover:scale-[1.03]"
                 onError={() => setImageError(true)}
               />
             ) : (
@@ -162,7 +202,7 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
                 src={thumbnailUrl!}
                 alt="Prévia do post"
                 onError={() => setImageError(true)}
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.02]"
+                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                 loading="lazy"
               />
             )}
@@ -180,7 +220,7 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
             {/* Indicador de Vídeo / Reel com Play central */}
             {mediaType === 'VIDEO' && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/25 pointer-events-none">
-                <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm border border-white/25 flex items-center justify-center text-white shadow-xl">
+                <div className="w-10 h-10 rounded-full bg-black/60 backdrop-blur-sm border border-white/25 flex items-center justify-center text-white shadow-xl transition-transform duration-300 group-hover:scale-110">
                   <Play className="w-4 h-4 fill-white ml-0.5" />
                 </div>
               </div>
@@ -248,7 +288,7 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
           </div>
         </div>
 
-        {/* Linha 4: Rodapé com data, horário e ação externa */}
+        {/* Linha 4: Rodapé com data, horário e dica visual discreta */}
         <div className="pt-2 border-t border-white/5 flex items-center justify-between gap-2 text-xs text-zinc-400">
           <div className="flex items-center gap-1.5 min-w-0 truncate">
             {post.status === 'PUBLISHED' ? (
@@ -264,21 +304,19 @@ export function PostizContentCard({ post }: PostizContentCardProps) {
             )}
           </div>
 
-          {post.releaseUrl && (
-            <Button
-              variant="ghost"
-              size="sm"
-              asChild
-              className="h-7 px-2 text-xs text-zinc-400 hover:text-white hover:bg-white/5 shrink-0 gap-1"
-            >
-              <a href={post.releaseUrl} target="_blank" rel="noopener noreferrer">
-                <span>Ver post</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </Button>
+          {post.status === 'PUBLISHED' && post.releaseUrl ? (
+            <span className="text-[11px] text-zinc-500 group-hover:text-zinc-300 flex items-center gap-1 transition-colors shrink-0">
+              <span>Abrir na rede</span>
+              <ExternalLink className="w-3 h-3" />
+            </span>
+          ) : (
+            <span className="text-[11px] text-zinc-500 group-hover:text-zinc-300 flex items-center gap-1 transition-colors shrink-0">
+              <span>Ver prévia</span>
+            </span>
           )}
         </div>
       </div>
     </div>
   );
 }
+

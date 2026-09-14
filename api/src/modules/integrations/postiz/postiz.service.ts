@@ -727,7 +727,92 @@ export class PostizService {
       total: posts.length,
     };
   }
+
+  /**
+   * Obtém os detalhes de um post específico vinculado a um cliente.
+   * Garante isolamento estrito: o post deve pertencer a uma conta Postiz vinculada ao cliente.
+   */
+  async getClientPostById(
+    clientId: string,
+    postId: string,
+    organizationId?: string
+  ): Promise<{ post: ClientPostizPost }> {
+    if (!clientId || !clientId.trim()) {
+      throw new PostizIntegrationError('ID do cliente é obrigatório.', 400, 'POSTIZ_INVALID_CLIENT_ID');
+    }
+    if (!postId || !postId.trim()) {
+      throw new PostizIntegrationError('ID da publicação é obrigatório.', 400, 'POSTIZ_INVALID_POST_ID');
+    }
+
+    // 1. Tenta encontrar na listagem recente do cliente
+    const clientContent = await this.getClientPosts(clientId, undefined, organizationId);
+    const existingPost = clientContent.posts.find((p) => p.id === postId);
+
+    if (existingPost) {
+      return { post: existingPost };
+    }
+
+    // 2. Se não estiver na listagem padrão, busca diretamente pelo ID no Postiz
+    if (typeof (this.client as any).getPublicPost === 'function') {
+      try {
+        const fullPost = await this.client.getPublicPost(postId);
+        if (fullPost) {
+          // Busca os vínculos do cliente para validar autorização
+          const integrations = await this.prismaClient.clientIntegration.findMany({
+            where: {
+              clientId,
+              provider: 'POSTIZ',
+            },
+          });
+
+          const allowedIntegrationIds = new Set(integrations.map((item) => item.externalId));
+          const postIntegrationId = fullPost.integration?.id;
+
+          // Se tiver vínculo confirmado com o cliente
+          if (postIntegrationId && allowedIntegrationIds.has(postIntegrationId)) {
+            const baseUrl = (this.client as any)?.baseUrl || process.env.POSTIZ_URL || 'https://postiz.lab.zafiramkt.com.br';
+            const media = extractPostizMedia(fullPost, baseUrl);
+            const cleanContent = cleanPostContent(fullPost.content);
+            const isPublished = fullPost.state === 'PUBLISHED';
+            const publishDateIso = fullPost.publishDate ? new Date(fullPost.publishDate).toISOString() : null;
+
+            const normalizedPost: ClientPostizPost = {
+              id: fullPost.id,
+              integrationId: fullPost.integration.id,
+              platform: fullPost.integration.providerIdentifier || '',
+              accountName: fullPost.integration.name || '',
+              accountPicture: fullPost.integration.picture || null,
+              status: fullPost.state,
+              content: cleanContent,
+              rawContent: fullPost.content || '',
+              scheduledAt: !isPublished ? publishDateIso : null,
+              publishedAt: isPublished ? publishDateIso : null,
+              createdAt: publishDateIso,
+              releaseUrl: fullPost.releaseURL || null,
+              mediaType: media.mediaType,
+              mediaThumbnailUrl: media.mediaThumbnailUrl,
+              mediaCount: media.mediaCount,
+              mediaItems: media.mediaItems,
+            };
+
+            return { post: normalizedPost };
+          }
+        }
+      } catch (err) {
+        if (err instanceof PostizIntegrationError) {
+          throw err;
+        }
+      }
+    }
+
+    throw new PostizIntegrationError(
+      'Publicação não encontrada ou não vinculada a este cliente.',
+      404,
+      'POSTIZ_POST_NOT_FOUND'
+    );
+  }
 }
 
 export const postizService = new PostizService();
+
 

@@ -126,6 +126,13 @@ export const postizIntegrationService = {
   },
 
   /**
+   * Obtém os detalhes de uma publicação específica do Postiz vinculada ao cliente.
+   */
+  async getClientPost(clientId: string, postId: string): Promise<{ post: ClientPostizPost }> {
+    return api.get<{ post: ClientPostizPost }>(`/clients/${clientId}/content/postiz/${postId}`);
+  },
+
+  /**
    * Vincula uma conta do Postiz a um cliente.
    */
   async linkAccount(clientId: string, externalId: string) {
@@ -139,4 +146,5 @@ export const postizIntegrationService = {
     return api.delete(`/clients/${clientId}/integrations/postiz/${externalId}`);
   },
 };
+
 

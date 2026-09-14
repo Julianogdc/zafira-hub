@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   ArrowLeft,
   Edit2,
@@ -64,6 +64,8 @@ import {
 export default function Cliente360() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const currentTab = searchParams.get('tab') || 'visao-geral';
   const { user } = useAuthStore();
   const canManage = user?.role === 'admin' || user?.role === 'manager';
 
@@ -302,7 +304,11 @@ export default function Cliente360() {
       </div>
 
       {/* ABAS DO CLIENTE 360 */}
-      <Tabs defaultValue="visao-geral" className="space-y-6">
+      <Tabs
+        value={currentTab}
+        onValueChange={(val) => setSearchParams({ tab: val }, { replace: true })}
+        className="space-y-6"
+      >
         <TabsList className="bg-zinc-900/60 p-1 border border-white/10 rounded-lg flex flex-wrap h-auto gap-1">
           <TabsTrigger value="visao-geral" className="data-[state=on]:bg-emerald-600 data-[state=on]:text-white text-xs gap-1.5 py-1.5">
             <Layers className="w-3.5 h-3.5" /> Visão Geral

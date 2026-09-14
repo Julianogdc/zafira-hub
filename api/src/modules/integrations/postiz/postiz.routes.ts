@@ -280,7 +280,38 @@ export function createPostizRoutes(customService?: PostizService) {
       { preHandler: [authenticate] },
       getClientContentHandler
     );
+
+    // 7. GET /clients/:clientId/content/postiz/:postId (Buscar publicação específica do cliente)
+    const getClientPostByIdHandler = async (
+      request: FastifyRequest<{
+        Params: ClientParams & { postId?: string };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const postId = (request.params.postId || '').trim();
+        const organizationId = getOrganizationId(request);
+
+        const result = await service.getClientPostById(clientId, postId, organizationId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/clients/:clientId/content/postiz/:postId',
+      { preHandler: [authenticate] },
+      getClientPostByIdHandler
+    );
+    app.get(
+      '/api/clients/:clientId/content/postiz/:postId',
+      { preHandler: [authenticate] },
+      getClientPostByIdHandler
+    );
   };
 }
 
 export const postizRoutes = createPostizRoutes();
+

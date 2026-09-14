@@ -366,7 +366,7 @@ export function Cliente360Conteudo({
         /* 5. GRID DE PUBLICAÇÕES (CARDS RICOS COM MINIATURA 4:5) */
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {filteredPosts.map((post) => (
-            <PostizContentCard key={post.id} post={post} />
+            <PostizContentCard key={post.id} post={post} clientId={clientId} />
           ))}
         </div>
       )}
