@@ -54,6 +54,9 @@ export interface ClientSyncResult {
   linkStatusLabel: string;
   asaasCustomerId: string | null;
   syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
   timestamp: string;
 }
 
@@ -63,6 +66,24 @@ export interface AsaasSyncResult {
   linkedClients: number;
   unlinkedCustomers: number;
   syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
+  timestamp: string;
+}
+
+export interface AsaasWalletSyncResult {
+  success: boolean;
+  totalCustomersAsaas: number;
+  linkedClients: number;
+  createdClients: number;
+  syncedPayments: number;
+  ignoredWithoutDoc: number;
+  ambiguousCount: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
+  errors: string[];
   timestamp: string;
 }
 
@@ -126,18 +147,6 @@ export interface FinancialOverviewResponse {
   };
   hasUnsyncedData: boolean;
   disclaimer: string;
-}
-
-export interface AsaasWalletSyncResult {
-  success: boolean;
-  totalCustomersAsaas: number;
-  linkedClients: number;
-  createdClients: number;
-  syncedPayments: number;
-  ignoredWithoutDoc: number;
-  ambiguousCount: number;
-  errors: string[];
-  timestamp: string;
 }
 
 export const asaasService = {

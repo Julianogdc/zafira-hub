@@ -59,8 +59,9 @@ export function Cliente360Financeiro({ clientId, canManage }: Cliente360Financei
       setIsSyncing(true);
       const result = await asaasService.triggerClientSync(clientId);
       if (result.success) {
+        const deletedMsg = result.reconciledDeletedPayments ? `, ${result.reconciledDeletedPayments} removida(s)` : '';
         toast.success(
-          `Sincronização concluída: ${result.syncedPayments} cobrança(s) atualizada(s). Vínculo: ${result.linkStatusLabel}`
+          `Sincronização concluída: ${result.syncedPayments} cobrança(s) atualizada(s)${deletedMsg}. Vínculo: ${result.linkStatusLabel}`
         );
       } else {
         if (result.linkStatus === 'AMBIGUOUS') {

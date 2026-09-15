@@ -48,6 +48,9 @@ export interface ClientSyncResult {
   linkStatusLabel: string;
   asaasCustomerId: string | null;
   syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
   timestamp: string;
 }
 
@@ -57,6 +60,9 @@ export interface AsaasSyncResult {
   linkedClients: number;
   unlinkedCustomers: number;
   syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
   timestamp: string;
 }
 
@@ -68,9 +74,13 @@ export interface AsaasWalletSyncResult {
   syncedPayments: number;
   ignoredWithoutDoc: number;
   ambiguousCount: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
   errors: string[];
   timestamp: string;
 }
+
 
 
 export interface FinancialOverviewFilters {
@@ -464,6 +474,112 @@ export class AsaasService {
   }
 
   /**
+   * Reconcilia cobranças locais ainda ativas (PENDING ou OVERDUE) consultando individualmente
+   * o endpoint GET /payments/{externalId} do Asaas com concorrência baixa (máximo 5 por vez).
+   * 
+   * Casos fundamentais atendidos:
+   * 1. Cobranças removidas/canceladas no Asaas que deixam de constar nas listagens gerais paginadas.
+   * 2. Cobranças onde a listagem geral vem sem o campo deleted: true, mas o GET individual retorna deleted: true.
+   * 3. Atualização de status e valores oficiais do Asaas.
+   * 
+   * Regras de integridade:
+   * - Apenas chamadas GET são feitas ao Asaas (getPaymentById).
+   * - Se a consulta individual falhar, não marcar como deletada por suposição; registrar em errors.
+   */
+  private async reconcileActivePayments(
+    filterWhere: { organizationId?: string; clientId?: string }
+  ): Promise<{
+    reconciledCount: number;
+    deletedCount: number;
+    errors: string[];
+  }> {
+    if (
+      typeof this.prismaClient?.asaasPayment?.findMany !== 'function' ||
+      typeof this.client?.getPaymentById !== 'function'
+    ) {
+      return { reconciledCount: 0, deletedCount: 0, errors: [] };
+    }
+
+    const activePayments = await this.prismaClient.asaasPayment.findMany({
+      where: {
+        ...(filterWhere.organizationId ? { organizationId: filterWhere.organizationId } : {}),
+        ...(filterWhere.clientId ? { clientId: filterWhere.clientId } : {}),
+        status: { in: [AsaasPaymentStatus.PENDING, AsaasPaymentStatus.OVERDUE] },
+      },
+      select: {
+        id: true,
+        externalId: true,
+        status: true,
+        value: true,
+        netValue: true,
+        dueDate: true,
+        paymentDate: true,
+        clientPaymentDate: true,
+        invoiceUrl: true,
+        bankSlipUrl: true,
+      },
+    });
+
+    const validPayments = activePayments.filter((p) => p.externalId && p.externalId.trim().length > 0);
+
+    let reconciledCount = 0;
+    let deletedCount = 0;
+    const errors: string[] = [];
+
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < validPayments.length; i += BATCH_SIZE) {
+      const batch = validPayments.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (localPayment) => {
+          try {
+            const remote = await this.client.getPaymentById(localPayment.externalId);
+            reconciledCount += 1;
+
+            const isDeleted = remote.deleted === true || remote.status === 'DELETED';
+            const mappedStatus = mapAsaasPaymentStatus(remote.status, remote.deleted);
+            const effectiveStatus = isDeleted ? AsaasPaymentStatus.DELETED : mappedStatus;
+
+            if (isDeleted || effectiveStatus === AsaasPaymentStatus.DELETED) {
+              deletedCount += 1;
+            }
+
+            const dueDate = parseCalendarDate(remote.dueDate) || (remote.dueDate ? new Date(remote.dueDate) : localPayment.dueDate);
+            const paymentDate = remote.paymentDate ? (parseCalendarDate(remote.paymentDate) || new Date(remote.paymentDate)) : null;
+            const clientPaymentDate = remote.clientPaymentDate ? (parseCalendarDate(remote.clientPaymentDate) || new Date(remote.clientPaymentDate)) : null;
+
+            if (typeof this.prismaClient?.asaasPayment?.update === 'function') {
+              await this.prismaClient.asaasPayment.update({
+                where: { id: localPayment.id },
+                data: {
+                  status: effectiveStatus,
+                  value: remote.value !== undefined ? remote.value : localPayment.value,
+                  netValue: remote.netValue !== undefined ? remote.netValue : localPayment.netValue,
+                  dueDate,
+                  paymentDate,
+                  clientPaymentDate,
+                  invoiceUrl: remote.invoiceUrl || localPayment.invoiceUrl,
+                  bankSlipUrl: remote.bankSlipUrl || localPayment.bankSlipUrl,
+                  rawPayload: remote as any,
+                },
+              });
+            }
+          } catch (err: any) {
+            errors.push(
+              `Falha ao consultar cobrança individual ${localPayment.externalId}: ${err?.message || 'Erro desconhecido'}`
+            );
+          }
+        })
+      );
+    }
+
+    return {
+      reconciledCount,
+      deletedCount,
+      errors,
+    };
+  }
+
+  /**
    * Sincronização granular restrita a um único cliente (Etapa 4B Hardening).
    * Consulta e sincroniza SOMENTE os dados deste cliente Hub no Asaas.
    * Não afeta outros clientes nem faz varredura ampla.
@@ -630,6 +746,9 @@ export class AsaasService {
       syncedPayments += 1;
     }
 
+    // 4. Reconcilia cobranças ativas locais (PENDING/OVERDUE) deste cliente via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ clientId, organizationId });
+
     return {
       success: true,
       clientId,
@@ -637,6 +756,9 @@ export class AsaasService {
       linkStatusLabel: 'Vinculado',
       asaasCustomerId,
       syncedPayments,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
       timestamp: new Date().toISOString(),
     };
   }
@@ -774,12 +896,18 @@ export class AsaasService {
       syncedPayments += 1;
     }
 
+    // 4. Reconciliação de cobranças ativas locais (PENDING/OVERDUE) via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ organizationId });
+
     return {
       success: true,
       syncedCustomers: asaasCustomers.length,
       linkedClients,
       unlinkedCustomers,
       syncedPayments,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
       timestamp: new Date().toISOString(),
     };
   }
@@ -963,6 +1091,9 @@ export class AsaasService {
       syncedPayments += 1;
     }
 
+    // 4. Reconciliação de cobranças ativas locais (PENDING/OVERDUE) via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ organizationId });
+
     return {
       success: true,
       totalCustomersAsaas: asaasCustomers.length,
@@ -971,7 +1102,10 @@ export class AsaasService {
       syncedPayments,
       ignoredWithoutDoc,
       ambiguousCount,
-      errors,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
+      errors: [...errors, ...reconciliation.errors],
       timestamp: new Date().toISOString(),
     };
   }

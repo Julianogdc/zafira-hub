@@ -869,6 +869,42 @@ export default function Financas() {
                 </div>
               </div>
 
+              {/* Reconciliação Individual de Cobranças Ativas */}
+              <div className="p-3 rounded-lg bg-zinc-900/30 border border-white/5 space-y-2">
+                <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
+                  <RefreshCw className="w-3 h-3 text-cyan-400" />
+                  Reconciliação de Cobranças Ativas (GET individual)
+                </span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-zinc-950/60 p-2 rounded border border-white/5">
+                    <span className="text-zinc-500 text-[10px] block">Verificadas Individualmente</span>
+                    <span className="text-sm font-semibold text-zinc-200">
+                      {walletResult.reconciledActivePayments ?? 0}
+                    </span>
+                  </div>
+                  <div className="bg-zinc-950/60 p-2 rounded border border-white/5">
+                    <span className="text-zinc-500 text-[10px] block">Marcadas como Removidas</span>
+                    <span className={`text-sm font-semibold ${(walletResult.reconciledDeletedPayments ?? 0) > 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
+                      {walletResult.reconciledDeletedPayments ?? 0}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {walletResult.reconciliationErrors && walletResult.reconciliationErrors.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-300 space-y-1">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Erros de reconciliação individual:</span>
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-red-400">
+                    {walletResult.reconciliationErrors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {walletResult.ambiguousCount > 0 && (
                 <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />

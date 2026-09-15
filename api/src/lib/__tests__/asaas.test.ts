@@ -1579,6 +1579,193 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     assert.strictEqual(summary.kpis.pending, 0, 'Cobrança com rawPayload.deleted: true não deve ser somada em aberto no resumo');
     assert.strictEqual(summary.payments[0].status, AsaasPaymentStatus.DELETED);
   });
+
+  // ---------------------------------------------------------------------------
+  // 31. Reconciliação real de cobrança removida ausente da listagem geral do Asaas
+  // ---------------------------------------------------------------------------
+  await t.test('31. syncAllWallet reconcilia cobrança PENDING omitida da listagem geral via GET individual /payments/{id}', async () => {
+    const orgId = 'org_reconcile_real';
+    const calledAsaasMethods: string[] = [];
+
+    const now = new Date();
+    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-20`;
+    const pneutekDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-25`;
+
+    // 1. Estado inicial do banco local:
+    // PNEUTEK existe como PENDING R$ 1.594,00
+    // Cliente Teste Hub 2.0 existe como PENDING R$ 5,00
+    const localDatabase = new Map<string, any>();
+
+    localDatabase.set('pay_z9bl8vgevjcb5ty3', {
+      id: 'db_pay_pneutek',
+      externalId: 'pay_z9bl8vgevjcb5ty3',
+      organizationId: orgId,
+      clientId: 'cli_pneutek',
+      asaasCustomerId: 'cus_pneutek',
+      value: 1594,
+      netValue: 1590,
+      status: AsaasPaymentStatus.PENDING,
+      dueDate: parseCalendarDate(pneutekDueDateStr),
+      paymentDate: null,
+      clientPaymentDate: null,
+      rawPayload: { id: 'pay_z9bl8vgevjcb5ty3', status: 'PENDING' },
+      client: { id: 'cli_pneutek', name: 'PNEUTEK COMÉRCIO DE PNEUS LTDA' },
+    });
+
+    localDatabase.set('pay_xtm5d9d6kci3avnc', {
+      id: 'db_pay_teste',
+      externalId: 'pay_xtm5d9d6kci3avnc',
+      organizationId: orgId,
+      clientId: 'cli_teste',
+      asaasCustomerId: 'cus_teste',
+      value: 5,
+      netValue: 4.5,
+      status: AsaasPaymentStatus.PENDING,
+      dueDate: parseCalendarDate(currentMonthDueDateStr),
+      paymentDate: null,
+      clientPaymentDate: null,
+      rawPayload: { id: 'pay_xtm5d9d6kci3avnc', status: 'PENDING' },
+      client: { id: 'cli_teste', name: 'Cliente Teste Hub 2.0' },
+    });
+
+    // 2. Mock do Asaas Client:
+    // - getAllPayments NÃO contém a cobrança da PNEUTEK (ou omite deletadas como ocorre na API real do Asaas)
+    // - getPaymentById é chamado pelo reconciliador e retorna deleted: true para a cobrança da PNEUTEK
+    const mockAsaasClient: any = {
+      getAllCustomers: async () => {
+        calledAsaasMethods.push('GET /customers');
+        return [
+          { id: 'cus_pneutek', name: 'PNEUTEK', cpfCnpj: '27702502000194' },
+          { id: 'cus_teste', name: 'Cliente Teste Hub 2.0', cpfCnpj: '11122233344' },
+        ];
+      },
+      getAllPayments: async () => {
+        calledAsaasMethods.push('GET /payments (listagem)');
+        // A listagem geral NÃO inclui a cobrança cancelada/deletada pay_z9bl8vgevjcb5ty3
+        return [
+          {
+            id: 'pay_xtm5d9d6kci3avnc',
+            customer: 'cus_teste',
+            value: 5,
+            status: 'PENDING',
+            dueDate: currentMonthDueDateStr,
+            deleted: false,
+            billingType: 'PIX',
+          },
+        ];
+      },
+      getPaymentById: async (id: string) => {
+        calledAsaasMethods.push(`GET /payments/${id}`);
+        if (id === 'pay_z9bl8vgevjcb5ty3') {
+          // Consulta individual do Asaas confirma que está deletada
+          return {
+            id: 'pay_z9bl8vgevjcb5ty3',
+            customer: 'cus_pneutek',
+            value: 1594,
+            status: 'PENDING',
+            deleted: true,
+            dueDate: pneutekDueDateStr,
+            billingType: 'PIX',
+          };
+        }
+        if (id === 'pay_xtm5d9d6kci3avnc') {
+          return {
+            id: 'pay_xtm5d9d6kci3avnc',
+            customer: 'cus_teste',
+            value: 5,
+            status: 'PENDING',
+            deleted: false,
+            dueDate: currentMonthDueDateStr,
+            billingType: 'PIX',
+          };
+        }
+        throw new Error(`Cobrança ${id} não encontrada no mock do Asaas`);
+      },
+    };
+
+    // 3. Mock do Prisma:
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [
+          { id: 'cli_pneutek', document: '27702502000194', name: 'PNEUTEK COMÉRCIO DE PNEUS LTDA', integrations: [{ provider: 'ASAAS', externalId: 'cus_pneutek' }] },
+          { id: 'cli_teste', document: '11122233344', name: 'Cliente Teste Hub 2.0', integrations: [{ provider: 'ASAAS', externalId: 'cus_teste' }] },
+        ],
+        count: async () => 2,
+      },
+      clientIntegration: {
+        upsert: async () => ({}),
+      },
+      asaasPayment: {
+        upsert: async ({ where, create, update }: any) => {
+          const externalId = where.externalId;
+          const existing = localDatabase.get(externalId);
+          if (existing) {
+            const updated = { ...existing, ...update };
+            localDatabase.set(externalId, updated);
+            return updated;
+          } else {
+            const newRec = {
+              id: `db_${externalId}`,
+              externalId,
+              ...create,
+              client: { id: create.clientId, name: create.clientId === 'cli_pneutek' ? 'PNEUTEK' : 'Cliente Teste Hub 2.0' },
+            };
+            localDatabase.set(externalId, newRec);
+            return newRec;
+          }
+        },
+        findMany: async (args: any) => {
+          let list = Array.from(localDatabase.values());
+          if (args?.where?.status?.in) {
+            const allowed = args.where.status.in;
+            list = list.filter((p) => allowed.includes(p.status));
+          }
+          return list.map((p) => ({
+            ...p,
+            client: p.client || { id: p.clientId, name: p.clientId === 'cli_pneutek' ? 'PNEUTEK COMÉRCIO DE PNEUS LTDA' : 'Cliente Teste Hub 2.0' },
+          }));
+        },
+        count: async () => localDatabase.size,
+        update: async ({ where, data }: any) => {
+          for (const [key, val] of localDatabase.entries()) {
+            if (val.id === where.id || val.externalId === where.id) {
+              const updated = { ...val, ...data };
+              localDatabase.set(key, updated);
+              return updated;
+            }
+          }
+        },
+      },
+    };
+
+    const service = new AsaasService(mockAsaasClient, mockPrisma);
+
+    // 4. Executa a sincronização da carteira
+    const syncRes = await service.syncAllWallet(orgId);
+    assert.strictEqual(syncRes.success, true);
+    assert.strictEqual(syncRes.reconciledActivePayments, 2, 'Deve verificar individualmente as 2 cobranças ativas locais');
+    assert.strictEqual(syncRes.reconciledDeletedPayments, 1, 'Deve marcar exatamente 1 cobrança (PNEUTEK) como DELETED');
+    assert.strictEqual(syncRes.reconciliationErrors?.length, 0, 'Nenhum erro de reconciliação esperado');
+
+    // 5. Confirma que o registro local da PNEUTEK foi atualizado para DELETED no banco
+    const pneutekDb = localDatabase.get('pay_z9bl8vgevjcb5ty3');
+    assert.ok(pneutekDb, 'Registro da PNEUTEK deve existir');
+    assert.strictEqual(pneutekDb.status, AsaasPaymentStatus.DELETED, 'Registro da PNEUTEK deve passar para DELETED');
+
+    // 6. Confirma que o overview global fica exclusivamente com R$ 5,00 em aberto e 1 cobrança prevista
+    const overview = await service.getFinancialOverview(orgId, { period: 'current-month' });
+    assert.strictEqual(overview.kpis.pending, 5, 'Em aberto deve ser rigorosamente R$ 5,00');
+    assert.strictEqual(overview.kpis.pendingCount, 1, 'Deve haver apenas 1 cobrança prevista');
+    assert.strictEqual(overview.kpis.overdue, 0, 'Vencidos deve ser 0');
+    assert.strictEqual(overview.kpis.nextDueDate?.value, 5, 'Próximo vencimento deve ser o do Cliente Teste (R$ 5,00)');
+    assert.strictEqual(overview.kpis.nextDueDate?.clientName, 'Cliente Teste Hub 2.0');
+
+    // 7. Confirma que só houve chamadas de leitura GET contra a API do Asaas
+    assert.ok(calledAsaasMethods.length > 0);
+    for (const m of calledAsaasMethods) {
+      assert.ok(m.startsWith('GET '), `Método Asaas ${m} deve ser estritamente GET`);
+    }
+  });
 });
 
 
