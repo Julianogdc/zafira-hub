@@ -127,6 +127,18 @@ export interface FinancialOverviewResponse {
   disclaimer: string;
 }
 
+export interface AsaasWalletSyncResult {
+  success: boolean;
+  totalCustomersAsaas: number;
+  linkedClients: number;
+  createdClients: number;
+  syncedPayments: number;
+  ignoredWithoutDoc: number;
+  ambiguousCount: number;
+  errors: string[];
+  timestamp: string;
+}
+
 export const asaasService = {
   /**
    * Obtém o resumo financeiro consolidado e as cobranças do Asaas para o cliente.
@@ -155,6 +167,14 @@ export const asaasService = {
   },
 
   /**
+   * Sincroniza a carteira completa de clientes e cobranças do Asaas,
+   * criando novos clientes ausentes no Hub e vinculando existentes.
+   */
+  async syncAllWallet(): Promise<AsaasWalletSyncResult> {
+    return api.post<AsaasWalletSyncResult>('/integrations/asaas/sync-all');
+  },
+
+  /**
    * Obtém a visão financeira consolidada global da organização no Hub (Etapa 4C).
    * Consulta puramente os dados locais do Hub sem chamar a API externa do Asaas.
    */
@@ -174,3 +194,4 @@ export const asaasService = {
     return api.get<FinancialOverviewResponse>(endpoint);
   },
 };
+

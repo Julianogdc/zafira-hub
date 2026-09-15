@@ -211,4 +211,51 @@ export class AsaasClient {
     }
     return this.get<AsaasPaymentRaw>(`/payments/${encodeURIComponent(id.trim())}`);
   }
+
+  /**
+   * Consulta todos os clientes existentes no Asaas iterando por todas as páginas.
+   */
+  async getAllCustomers(batchSize = 100): Promise<AsaasCustomer[]> {
+    const allCustomers: AsaasCustomer[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const res = await this.getCustomers({ offset, limit: batchSize });
+      const items = res.data || [];
+      allCustomers.push(...items);
+
+      if (!res.hasMore || items.length === 0) {
+        hasMore = false;
+      } else {
+        offset += items.length;
+      }
+    }
+
+    return allCustomers;
+  }
+
+  /**
+   * Consulta todas as cobranças existentes no Asaas iterando por todas as páginas.
+   */
+  async getAllPayments(batchSize = 100): Promise<AsaasPaymentRaw[]> {
+    const allPayments: AsaasPaymentRaw[] = [];
+    let offset = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const res = await this.getPayments({ offset, limit: batchSize });
+      const items = res.data || [];
+      allPayments.push(...items);
+
+      if (!res.hasMore || items.length === 0) {
+        hasMore = false;
+      } else {
+        offset += items.length;
+      }
+    }
+
+    return allPayments;
+  }
 }
+

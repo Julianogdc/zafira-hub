@@ -193,6 +193,38 @@ export function createAsaasRoutes(customService?: AsaasService) {
       getFinancialOverviewHandler
     );
 
+    // =========================================================================
+    // 5. POST /integrations/asaas/sync-all (Sincronização completa da carteira Asaas)
+    // =========================================================================
+    const syncAllWalletHandler = async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        if (!organizationId) {
+          return reply.status(400).send({
+            status: 'error',
+            message: 'Organização do usuário não identificada para sincronização.',
+          });
+        }
+
+        const result = await service.syncAllWallet(organizationId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.post(
+      '/integrations/asaas/sync-all',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      syncAllWalletHandler
+    );
+    app.post(
+      '/api/integrations/asaas/sync-all',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      syncAllWalletHandler
+    );
+
+
 
 
     // =========================================================================

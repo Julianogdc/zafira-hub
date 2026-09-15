@@ -713,6 +713,329 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     const body = JSON.parse(res.payload);
     assert.strictEqual(body.error, 'forbidden');
   });
+
+  // ===========================================================================
+  // ETAPA: SINCRONIZAR CARTEIRA COMPLETA DO ASAAS (WALLET SYNC)
+  // ===========================================================================
+
+  // ---------------------------------------------------------------------------
+  // 17. Cliente Asaas novo com CNPJ válido cria um único cliente Hub
+  // ---------------------------------------------------------------------------
+  await t.test('17. Cliente Asaas novo com CNPJ válido cria um único cliente Hub', async () => {
+    let createdClientData: any = null;
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        {
+          id: 'cus_novo_1',
+          name: 'Empresa Alfa Ltda',
+          cpfCnpj: '12.345.678/0001-99',
+          email: 'contato@alfa.com.br',
+          phone: '(11) 98888-7777',
+        },
+      ],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [], // Nenhum cliente pré-existente
+        create: async ({ data }: any) => {
+          createdClientData = data;
+          return { id: 'cli_hub_novo_1', ...data };
+        },
+      },
+      clientIntegration: {
+        upsert: async () => ({}),
+      },
+      asaasPayment: {
+        upsert: async () => ({}),
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const result = await service.syncAllWallet('org_zafira');
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.createdClients, 1);
+    assert.strictEqual(result.linkedClients, 0);
+    assert.ok(createdClientData, 'Cliente deve ter sido criado no Prisma');
+    assert.strictEqual(createdClientData.name, 'Empresa Alfa Ltda');
+    assert.strictEqual(createdClientData.document, '12345678000199');
+    assert.strictEqual(createdClientData.status, 'ACTIVE');
+    assert.strictEqual(createdClientData.organizationId, 'org_zafira');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 18. Segunda sincronização não duplica cliente
+  // ---------------------------------------------------------------------------
+  await t.test('18. Segunda sincronização não duplica cliente (idempotência)', async () => {
+    let createCallCount = 0;
+    const existingDbClients = [
+      {
+        id: 'cli_ja_existe',
+        name: 'Empresa Alfa Ltda',
+        document: '12345678000199',
+        status: 'ACTIVE',
+        organizationId: 'org_zafira',
+        integrations: [{ provider: 'ASAAS', externalId: 'cus_novo_1' }],
+      },
+    ];
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        {
+          id: 'cus_novo_1',
+          name: 'Empresa Alfa Ltda',
+          cpfCnpj: '12.345.678/0001-99',
+        },
+      ],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => existingDbClients,
+        create: async () => {
+          createCallCount += 1;
+          return {};
+        },
+      },
+      clientIntegration: {
+        upsert: async () => ({}),
+      },
+      asaasPayment: {
+        upsert: async () => ({}),
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const result = await service.syncAllWallet('org_zafira');
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.createdClients, 0, 'Não deve criar novo cliente na segunda execução');
+    assert.strictEqual(result.linkedClients, 1, 'Deve vincular cliente já existente');
+    assert.strictEqual(createCallCount, 0, 'client.create não deve ser invocado');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 19. Cliente com mesmo CPF/CNPJ já no Hub é vinculado, sem sobrescrever dados manuais
+  // ---------------------------------------------------------------------------
+  await t.test('19. Cliente com mesmo CPF/CNPJ já no Hub é vinculado, sem sobrescrever dados manuais', async () => {
+    let clientUpdateCalled = false;
+    let clientIntegrationUpsertData: any = null;
+
+    const existingClient = {
+      id: 'cli_manual_1',
+      name: 'Nome Customizado Manualmente Pela Zafira',
+      document: '98765432000155',
+      status: 'LEAD',
+      email: 'manual@email.com',
+      phone: '11999999999',
+      contractValue: 5000,
+      integrations: [],
+    };
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        {
+          id: 'cus_asaas_diff',
+          name: 'Razão Social Asaas Divergente',
+          cpfCnpj: '98.765.432/0001-55',
+          email: 'outro@asaas.com',
+        },
+      ],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [existingClient],
+        update: async () => {
+          clientUpdateCalled = true;
+        },
+        create: async () => { throw new Error('Não deveria criar'); },
+      },
+      clientIntegration: {
+        upsert: async (args: any) => {
+          clientIntegrationUpsertData = args;
+          return {};
+        },
+      },
+      asaasPayment: {
+        upsert: async () => ({}),
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const result = await service.syncAllWallet('org_zafira');
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.linkedClients, 1);
+    assert.strictEqual(result.createdClients, 0);
+    assert.strictEqual(clientUpdateCalled, false, 'Dados manuais do cliente Hub jamais devem ser atualizados');
+    assert.strictEqual(existingClient.name, 'Nome Customizado Manualmente Pela Zafira');
+    assert.strictEqual(existingClient.status, 'LEAD', 'Status original deve ser mantido');
+    assert.ok(clientIntegrationUpsertData, 'Vínculo ClientIntegration deve ser garantido');
+    assert.strictEqual(clientIntegrationUpsertData.where.clientId_provider_externalId.clientId, 'cli_manual_1');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 20. Cliente sem documento válido é ignorado
+  // ---------------------------------------------------------------------------
+  await t.test('20. Cliente sem documento válido é ignorado e não é criado', async () => {
+    let createCalled = false;
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        { id: 'cus_no_doc', name: 'Cliente Sem CPF/CNPJ', cpfCnpj: null },
+        { id: 'cus_invalid_doc', name: 'Cliente Doc Incompleto', cpfCnpj: '123.456' },
+      ],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [],
+        create: async () => { createCalled = true; return {}; },
+      },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: { upsert: async () => ({}) },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const result = await service.syncAllWallet('org_zafira');
+
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(result.ignoredWithoutDoc, 2);
+    assert.strictEqual(result.createdClients, 0);
+    assert.strictEqual(createCalled, false, 'Nenhum cliente sem documento válido deve ser criado');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 21. Cliente de outra organização nunca é usado ou alterado
+  // ---------------------------------------------------------------------------
+  await t.test('21. Cliente de outra organização nunca é usado ou alterado', async () => {
+    let capturedOrgIdInQuery: string | null = null;
+    let createdWithOrgId: string | null = null;
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        { id: 'cus_1', name: 'Cliente Novo', cpfCnpj: '11222333000144' },
+      ],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async ({ where }: any) => {
+          capturedOrgIdInQuery = where.organizationId;
+          return [];
+        },
+        create: async ({ data }: any) => {
+          createdWithOrgId = data.organizationId;
+          return { id: 'c1', ...data };
+        },
+      },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: { upsert: async () => ({}) },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    await service.syncAllWallet('org_isolada_A');
+
+    assert.strictEqual(capturedOrgIdInQuery, 'org_isolada_A');
+    assert.strictEqual(createdWithOrgId, 'org_isolada_A');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 22. Pagamentos são vinculados ao cliente correto
+  // ---------------------------------------------------------------------------
+  await t.test('22. Pagamentos são vinculados ao cliente correto correspondente', async () => {
+    let upsertedPaymentClientId: string | null = null;
+
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        { id: 'cus_asaas_x', name: 'Cliente X', cpfCnpj: '55666777000188' },
+      ],
+      getAllPayments: async () => [
+        {
+          id: 'pay_x_1',
+          customer: 'cus_asaas_x',
+          value: 1800,
+          status: 'RECEIVED',
+          dueDate: '2026-10-10',
+        },
+      ],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [],
+        create: async ({ data }: any) => ({ id: 'cli_hub_gerado_x', ...data }),
+      },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: {
+        upsert: async ({ create }: any) => {
+          upsertedPaymentClientId = create.clientId;
+          return create;
+        },
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const res = await service.syncAllWallet('org_1');
+
+    assert.strictEqual(res.syncedPayments, 1);
+    assert.strictEqual(upsertedPaymentClientId, 'cli_hub_gerado_x', 'Cobrança deve ser vinculada ao cliente Hub criado');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 23. Nenhuma chamada de escrita é feita ao Asaas na sincronização de carteira
+  // ---------------------------------------------------------------------------
+  await t.test('23. Nenhuma chamada de escrita é feita ao Asaas (apenas leitura GET)', async () => {
+    const client = new AsaasClient('dummy');
+    assert.strictEqual(typeof (client as any).post, 'undefined');
+    assert.strictEqual(typeof (client as any).put, 'undefined');
+    assert.strictEqual(typeof (client as any).delete, 'undefined');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 24. MEMBER recebe 403 no endpoint POST /integrations/asaas/sync-all
+  // ---------------------------------------------------------------------------
+  await t.test('24. Endpoint POST /api/integrations/asaas/sync-all bloqueia MEMBER com 403 Forbidden', async () => {
+    const { requireRole } = await import('../../middleware/auth.js');
+    const app = fastify();
+
+    app.post(
+      '/api/integrations/asaas/sync-all-test',
+      {
+        preHandler: [
+          async (req) => {
+            req.authContext = {
+              type: 'user',
+              userId: 'usr_member_2',
+              email: 'member2@zafira.com.br',
+              memberships: [{ organizationId: 'org_1', organizationSlug: 'zafira', role: 'MEMBER' }],
+            };
+          },
+          requireRole(['ADMIN', 'MANAGER']),
+        ],
+      },
+      async () => ({ ok: true })
+    );
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/api/integrations/asaas/sync-all-test',
+    });
+
+    assert.strictEqual(res.statusCode, 403, 'Acesso de MEMBER em sync-all deve retornar 403 Forbidden');
+    const body = JSON.parse(res.payload);
+    assert.strictEqual(body.error, 'forbidden');
+  });
 });
+
 
 

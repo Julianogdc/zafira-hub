@@ -60,6 +60,19 @@ export interface AsaasSyncResult {
   timestamp: string;
 }
 
+export interface AsaasWalletSyncResult {
+  success: boolean;
+  totalCustomersAsaas: number;
+  linkedClients: number;
+  createdClients: number;
+  syncedPayments: number;
+  ignoredWithoutDoc: number;
+  ambiguousCount: number;
+  errors: string[];
+  timestamp: string;
+}
+
+
 export interface FinancialOverviewFilters {
   period?: 'current-month' | 'last-month' | 'current-year' | 'all' | 'custom' | string;
   startDate?: string;
@@ -672,6 +685,199 @@ export class AsaasService {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Sincronização completa da carteira do Asaas com criação automática de clientes no Hub.
+   * Regras:
+   * - Clientes do Asaas ausentes no Hub com CPF/CNPJ válido são criados com status ACTIVE.
+   * - Clientes existentes no Hub NÃO têm seus dados manuais sobrescritos e mantêm seu status.
+   * - Clientes sem CPF/CNPJ válido (11 ou 14 dígitos) não são criados e são contabilizados em ignoredWithoutDoc.
+   * - Cobranças são espelhadas em AsaasPayment vinculadas à organização e aos respectivos clientes.
+   * - Paginação completa de clientes e cobranças (somente GET contra o Asaas).
+   */
+  async syncAllWallet(organizationId: string): Promise<AsaasWalletSyncResult> {
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    // 1. Carrega todos os clientes da organização no Hub
+    const hubClients = await this.prismaClient.client.findMany({
+      where: { organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASAAS' },
+        },
+      },
+    });
+
+    const clientByDoc = new Map<string, typeof hubClients[0]>();
+    const clientByExternalId = new Map<string, typeof hubClients[0]>();
+
+    for (const c of hubClients) {
+      const cleanDoc = sanitizeDocument(c.document);
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        clientByDoc.set(cleanDoc, c);
+      }
+      for (const integ of c.integrations) {
+        clientByExternalId.set(integ.externalId, c);
+      }
+    }
+
+    // 2. Consulta todos os clientes do Asaas (paginação completa via getAllCustomers)
+    const asaasCustomers = await this.client.getAllCustomers();
+
+    let linkedClients = 0;
+    let createdClients = 0;
+    let ignoredWithoutDoc = 0;
+    let ambiguousCount = 0;
+    const errors: string[] = [];
+
+    const asaasCustomerToHubClientId = new Map<string, string>();
+
+    for (const ac of asaasCustomers) {
+      const cleanDoc = sanitizeDocument(ac.cpfCnpj);
+
+      // Regra de segurança: cliente sem CPF/CNPJ válido é ignorado e não é criado
+      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+        ignoredWithoutDoc += 1;
+        continue;
+      }
+
+      let matchedClient = clientByExternalId.get(ac.id) || clientByDoc.get(cleanDoc);
+
+      if (matchedClient) {
+        asaasCustomerToHubClientId.set(ac.id, matchedClient.id);
+        linkedClients += 1;
+
+        // Assegura que o vínculo em ClientIntegration existe sem sobrescrever nenhum dado do Client existente
+        await this.prismaClient.clientIntegration.upsert({
+          where: {
+            clientId_provider_externalId: {
+              clientId: matchedClient.id,
+              provider: 'ASAAS',
+              externalId: ac.id,
+            },
+          },
+          create: {
+            clientId: matchedClient.id,
+            provider: 'ASAAS',
+            externalId: ac.id,
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+          update: {
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+        });
+      } else {
+        // Criação automática no Hub para cliente novo
+        try {
+          const newClient = await this.prismaClient.client.create({
+            data: {
+              organizationId,
+              name: (ac.name || 'Cliente Asaas').trim(),
+              legalName: ac.name || null,
+              document: cleanDoc,
+              email: ac.email?.trim() || null,
+              phone: (ac.phone || ac.mobilePhone || '').trim() || null,
+              status: 'ACTIVE',
+              integrations: {
+                create: {
+                  provider: 'ASAAS',
+                  externalId: ac.id,
+                  metadata: {
+                    name: ac.name,
+                    email: ac.email,
+                    phone: ac.phone || ac.mobilePhone,
+                    cpfCnpj: ac.cpfCnpj,
+                  },
+                },
+              },
+            },
+          });
+
+          clientByDoc.set(cleanDoc, newClient as any);
+          clientByExternalId.set(ac.id, newClient as any);
+          asaasCustomerToHubClientId.set(ac.id, newClient.id);
+          createdClients += 1;
+        } catch (err: any) {
+          errors.push(`Erro ao criar cliente '${ac.name}' (${cleanDoc}): ${err?.message || 'Erro desconhecido'}`);
+        }
+      }
+    }
+
+    // 3. Consulta todas as cobranças do Asaas (paginação completa via getAllPayments)
+    const asaasPayments = await this.client.getAllPayments();
+    let syncedPayments = 0;
+
+    for (const p of asaasPayments) {
+      const matchedClientId = asaasCustomerToHubClientId.get(p.customer) || null;
+      const status = mapAsaasPaymentStatus(p.status);
+      const dueDate = new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
+      const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: p.id },
+        create: {
+          organizationId,
+          clientId: matchedClientId,
+          asaasCustomerId: p.customer,
+          externalId: p.id,
+          installmentNumber: p.installmentNumber || null,
+          description: p.description || null,
+          value: p.value,
+          netValue: p.netValue || null,
+          originalValue: p.originalValue || null,
+          interestValue: p.interestValue || null,
+          billingType: p.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: p as any,
+        },
+        update: {
+          clientId: matchedClientId,
+          value: p.value,
+          netValue: p.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: p as any,
+        },
+      });
+
+      syncedPayments += 1;
+    }
+
+    return {
+      success: true,
+      totalCustomersAsaas: asaasCustomers.length,
+      linkedClients,
+      createdClients,
+      syncedPayments,
+      ignoredWithoutDoc,
+      ambiguousCount,
+      errors,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
 
   /**
    * Processamento idempotente e seguro de notificações de Webhook do Asaas (Etapa 4B Hardening).

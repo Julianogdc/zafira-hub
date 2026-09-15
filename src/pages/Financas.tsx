@@ -18,6 +18,9 @@ import {
   TrendingUp,
   CalendarDays,
   DollarSign,
+  UserPlus,
+  Users,
+  AlertCircle,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -42,12 +45,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
   asaasService,
   FinancialOverviewResponse,
   FinancialOverviewPaymentItem,
   AsaasPaymentStatus,
+  AsaasWalletSyncResult,
 } from '@/services/asaas';
 import { clientsService, HubClient } from '@/services/clients';
 import { toast } from 'sonner';
@@ -71,21 +83,27 @@ export default function Financas() {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
+  // Estados de Sincronização da Carteira Asaas
+  const [confirmModalOpen, setConfirmModalOpen] = useState<boolean>(false);
+  const [summaryModalOpen, setSummaryModalOpen] = useState<boolean>(false);
+  const [syncingWallet, setSyncingWallet] = useState<boolean>(false);
+  const [walletResult, setWalletResult] = useState<AsaasWalletSyncResult | null>(null);
+
   // Carrega lista de clientes para o filtro
-  useEffect(() => {
+  const reloadClients = useCallback(() => {
     if (!isAuthorized) return;
-    let isMounted = true;
     clientsService.listClients()
       .then((res) => {
-        if (isMounted) setClients(res.data || []);
+        setClients(res.data || []);
       })
       .catch((err) => {
         console.error('Erro ao carregar clientes para o filtro de finanças:', err);
       });
-    return () => {
-      isMounted = false;
-    };
   }, [isAuthorized]);
+
+  useEffect(() => {
+    reloadClients();
+  }, [reloadClients]);
 
   // Consulta consolidada do Financeiro
   const fetchOverview = useCallback(async (isRefresh = false) => {
@@ -121,6 +139,27 @@ export default function Financas() {
   useEffect(() => {
     fetchOverview();
   }, [fetchOverview]);
+
+  // Executa sincronização da carteira completa
+  const handleExecuteWalletSync = async () => {
+    try {
+      setSyncingWallet(true);
+      const result = await asaasService.syncAllWallet();
+      setWalletResult(result);
+      setConfirmModalOpen(false);
+      setSummaryModalOpen(true);
+
+      // Recarrega dados atualizados
+      await fetchOverview(false);
+      reloadClients();
+    } catch (err: any) {
+      console.error('Erro ao sincronizar carteira completa do Asaas:', err);
+      toast.error(err?.data?.message || err?.message || 'Falha ao sincronizar carteira do Asaas.');
+      setConfirmModalOpen(false);
+    } finally {
+      setSyncingWallet(false);
+    }
+  };
 
   // Formatação de valores
   const formatBRL = (value?: number | null) => {
@@ -213,7 +252,7 @@ export default function Financas() {
     );
   };
 
-  // 1. Bloqueio de Acesso RBAC para MEMBER
+  // Bloqueio de Acesso RBAC para MEMBER
   if (!isAuthorized) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center space-y-4">
@@ -248,22 +287,35 @@ export default function Financas() {
 
   return (
     <div className="space-y-6">
-      {/* 1. HEADER */}
+      {/* 1. HEADER COM AÇÕES */}
       <PageHeader
         title="Finanças"
         description="Gestão e visão financeira consolidada com dados reais do Asaas."
         icon={Wallet}
       >
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => fetchOverview(true)}
-          disabled={loading || refreshing}
-          className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 text-xs gap-2"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-          <span>{refreshing ? 'Atualizando...' : 'Atualizar visão'}</span>
-        </Button>
+        <div className="flex items-center gap-2.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setConfirmModalOpen(true)}
+            disabled={loading || syncingWallet}
+            className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 text-xs gap-1.5 h-9"
+          >
+            <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Sincronizar carteira Asaas</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchOverview(true)}
+            disabled={loading || refreshing || syncingWallet}
+            className="border-white/10 bg-zinc-900/60 text-zinc-200 hover:bg-zinc-800 text-xs gap-1.5 h-9"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+            <span>{refreshing ? 'Atualizando...' : 'Atualizar visão'}</span>
+          </Button>
+        </div>
       </PageHeader>
 
       {/* 2. AVISO DISCRETO DE SINCRONIZAÇÃO */}
@@ -688,6 +740,142 @@ export default function Financas() {
           )}
         </CardContent>
       </Card>
+
+      {/* 7. MODAL DE CONFIRMAÇÃO: SINCRONIZAR CARTEIRA COMPLETA */}
+      <Dialog open={confirmModalOpen} onOpenChange={setConfirmModalOpen}>
+        <DialogContent className="bg-zinc-950 border-white/10 text-zinc-100 max-w-md">
+          <DialogHeader className="space-y-2">
+            <DialogTitle className="text-base font-semibold text-white flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-emerald-400" />
+              Sincronizar Carteira Asaas
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400 leading-relaxed">
+              A sincronização importará clientes e cobranças existentes do Asaas para o Hub. Nenhum dado será alterado no Asaas.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-3 rounded-lg bg-zinc-900/60 border border-white/5 space-y-2 text-xs text-zinc-300">
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>Clientes existentes com o mesmo CPF/CNPJ serão vinculados com segurança, sem sobrescrever dados preenchidos manualmente.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+              <span>Clientes presentes no Asaas que não existam no Hub serão criados automaticamente como ativos.</span>
+            </div>
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <span>Clientes sem CPF/CNPJ válido de 11 ou 14 dígitos serão ignorados por segurança.</span>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConfirmModalOpen(false)}
+              disabled={syncingWallet}
+              className="border-white/10 text-zinc-400 hover:text-white"
+            >
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              onClick={handleExecuteWalletSync}
+              disabled={syncingWallet}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white gap-2 font-medium"
+            >
+              {syncingWallet ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Sincronizando carteira...</span>
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Sincronizar agora</span>
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* 8. MODAL DE RESUMO DA SINCRONIZAÇÃO */}
+      <Dialog open={summaryModalOpen} onOpenChange={setSummaryModalOpen}>
+        <DialogContent className="bg-zinc-950 border-white/10 text-zinc-100 max-w-lg">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-base font-semibold text-white flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              Resultado da Sincronização
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-400">
+              Resumo da importação e espelhamento da carteira do Asaas no Hub 2.0
+            </DialogDescription>
+          </DialogHeader>
+
+          {walletResult && (
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5 space-y-1">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Clientes Criados</span>
+                  <div className="text-xl font-bold text-emerald-400">{walletResult.createdClients}</div>
+                  <p className="text-[10px] text-zinc-500">Cadastrados automaticamente no Hub</p>
+                </div>
+
+                <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5 space-y-1">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Clientes Vinculados</span>
+                  <div className="text-xl font-bold text-blue-400">{walletResult.linkedClients}</div>
+                  <p className="text-[10px] text-zinc-500">Já existiam e foram associados</p>
+                </div>
+
+                <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5 space-y-1">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Cobranças Espelhadas</span>
+                  <div className="text-xl font-bold text-white">{walletResult.syncedPayments}</div>
+                  <p className="text-[10px] text-zinc-500">Faturas registradas localmente</p>
+                </div>
+
+                <div className="p-3 rounded-lg bg-zinc-900/50 border border-white/5 space-y-1">
+                  <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-medium">Ignorados sem Doc.</span>
+                  <div className="text-xl font-bold text-amber-400">{walletResult.ignoredWithoutDoc}</div>
+                  <p className="text-[10px] text-zinc-500">Sem CPF/CNPJ de 11 ou 14 dígitos</p>
+                </div>
+              </div>
+
+              {walletResult.ambiguousCount > 0 && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{walletResult.ambiguousCount} cliente(s) com documento duplicado requerem revisão manual.</span>
+                </div>
+              )}
+
+              {walletResult.errors && walletResult.errors.length > 0 && (
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-300 space-y-1">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <AlertCircle className="w-4 h-4" />
+                    <span>Erros reportados:</span>
+                  </div>
+                  <ul className="list-disc pl-4 space-y-0.5 text-[11px] text-red-400">
+                    {walletResult.errors.map((err, idx) => (
+                      <li key={idx}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              size="sm"
+              onClick={() => setSummaryModalOpen(false)}
+              className="bg-zinc-800 hover:bg-zinc-700 text-white w-full sm:w-auto"
+            >
+              Concluir e fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
