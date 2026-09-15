@@ -193,8 +193,16 @@ export function generateWebhookDedupeKey(event: string, paymentId: string, payme
 
 /**
  * Mapeia o status de cobrança do Asaas para o enum AsaasPaymentStatus do Prisma.
+ * Cobranças removidas/excluídas no Asaas possuem deleted === true ou status === 'DELETED'.
  */
-export function mapAsaasPaymentStatus(status?: string | null): AsaasPaymentStatus {
+export function mapAsaasPaymentStatus(
+  status?: string | null,
+  deleted?: boolean | null,
+  event?: string | null
+): AsaasPaymentStatus {
+  if (deleted === true || event === 'PAYMENT_DELETED') {
+    return AsaasPaymentStatus.DELETED;
+  }
   const upper = String(status || '').toUpperCase();
   switch (upper) {
     case 'RECEIVED':
@@ -362,8 +370,11 @@ export class AsaasService {
 
     const formattedPayments: FormattedAsaasPayment[] = payments.map((p) => {
       const numValue = Number(p.value);
-      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
-      const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const effectiveStatus = isDeleted ? AsaasPaymentStatus.DELETED : p.status;
+      const isPaid = !isDeleted && (effectiveStatus === AsaasPaymentStatus.RECEIVED || effectiveStatus === AsaasPaymentStatus.CONFIRMED);
+      const isOverdue = !isDeleted && !isPaid && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
 
       if (isPaid) {
         const payDate = p.paymentDate ?? p.clientPaymentDate;
@@ -374,7 +385,7 @@ export class AsaasService {
       } else if (isOverdue) {
         overdue += numValue;
         overdueCount += 1;
-      } else if (p.status === AsaasPaymentStatus.PENDING) {
+      } else if (!isDeleted && effectiveStatus === AsaasPaymentStatus.PENDING) {
         pending += numValue;
         pendingCount += 1;
       }
@@ -386,8 +397,8 @@ export class AsaasService {
         value: numValue,
         netValue: p.netValue ? Number(p.netValue) : null,
         billingType: p.billingType,
-        status: p.status,
-        statusLabel: getAsaasStatusLabel(p.status),
+        status: effectiveStatus,
+        statusLabel: getAsaasStatusLabel(effectiveStatus),
         dueDate: p.dueDate.toISOString(),
         paymentDate: p.paymentDate ? p.paymentDate.toISOString() : null,
         invoiceUrl: p.invoiceUrl,
@@ -538,7 +549,7 @@ export class AsaasService {
     let syncedPayments = 0;
 
     for (const p of payments) {
-      const status = mapAsaasPaymentStatus(p.status);
+      const status = mapAsaasPaymentStatus(p.status, p.deleted);
       const dueDate = new Date(p.dueDate);
       const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
       const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
@@ -682,7 +693,7 @@ export class AsaasService {
 
     for (const p of asaasPayments) {
       const matchedClientId = customerToClientMap.get(p.customer) || null;
-      const status = mapAsaasPaymentStatus(p.status);
+      const status = mapAsaasPaymentStatus(p.status, p.deleted);
       const dueDate = new Date(p.dueDate);
       const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
       const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
@@ -871,7 +882,7 @@ export class AsaasService {
 
     for (const p of asaasPayments) {
       const matchedClientId = asaasCustomerToHubClientId.get(p.customer) || null;
-      const status = mapAsaasPaymentStatus(p.status);
+      const status = mapAsaasPaymentStatus(p.status, p.deleted);
       const dueDate = new Date(p.dueDate);
       const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
       const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
@@ -1013,7 +1024,7 @@ export class AsaasService {
     }
 
     if (organizationId) {
-      const status = mapAsaasPaymentStatus(payment.status);
+      const status = mapAsaasPaymentStatus(payment.status, (payment as any).deleted, event);
       const dueDate = new Date(payment.dueDate);
       const paymentDate = payment.paymentDate ? new Date(payment.paymentDate) : null;
       const clientPaymentDate = payment.clientPaymentDate ? new Date(payment.clientPaymentDate) : null;
@@ -1154,19 +1165,24 @@ export class AsaasService {
       if (!p.clientId || !p.client) continue;
 
       const numVal = Number(p.value);
-      const raw = p.rawPayload as any;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
       const rawStatus = raw?.status;
-      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
       const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
-      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
-                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
-                     (actualPaymentDate !== null &&
-                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
-                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
-                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
 
-      const isCancelled = effectiveStatus === AsaasPaymentStatus.REFUNDED ||
+      const isCancelled = isDeleted ||
+                          effectiveStatus === AsaasPaymentStatus.REFUNDED ||
                           effectiveStatus === AsaasPaymentStatus.CANCELLED ||
                           effectiveStatus === AsaasPaymentStatus.DELETED;
 
@@ -1245,17 +1261,21 @@ export class AsaasService {
 
     for (const p of allPayments) {
       if (!p.clientId || !p.client) continue;
-      const raw = p.rawPayload as any;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
       const rawStatus = raw?.status;
-      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
       const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
-      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
-                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
-                     (actualPaymentDate !== null &&
-                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
-                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
-                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
 
       if (isPaid && actualPaymentDate) {
         const key = `${actualPaymentDate.getFullYear()}-${String(actualPaymentDate.getMonth() + 1).padStart(2, '0')}`;
@@ -1285,19 +1305,23 @@ export class AsaasService {
 
     for (const p of allPayments) {
       if (!p.clientId || !p.client) continue;
-      const raw = p.rawPayload as any;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
       const rawStatus = raw?.status;
-      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
       const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
-      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
-                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
-                     (actualPaymentDate !== null &&
-                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
-                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
-                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
 
-      if (!isPaid && effectiveStatus === AsaasPaymentStatus.PENDING && p.dueDate >= now) {
+      if (!isPaid && !isDeleted && effectiveStatus === AsaasPaymentStatus.PENDING && p.dueDate >= now) {
         const key = `${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth() + 1).padStart(2, '0')}`;
         if (previstosMap.has(key)) {
           const entry = previstosMap.get(key)!;
@@ -1367,7 +1391,7 @@ export class AsaasService {
             ],
           },
           {
-            status: { notIn: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] },
+            status: { notIn: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED, AsaasPaymentStatus.DELETED, AsaasPaymentStatus.CANCELLED] },
             dueDate: {
               ...(periodStart ? { gte: periodStart } : {}),
               ...(periodEnd ? { lte: periodEnd } : {}),
@@ -1413,19 +1437,23 @@ export class AsaasService {
 
     const formattedPayments: FinancialOverviewPaymentItem[] = pagedPayments.map((p) => {
       const numValue = Number(p.value);
-      const raw = p.rawPayload as any;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
       const rawStatus = raw?.status;
-      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
       const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
-      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
-                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
-                     (actualPaymentDate !== null &&
-                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
-                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
-                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
 
-      const isOverdue = !isPaid && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const isOverdue = !isPaid && !isDeleted && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
 
       return {
         id: p.id,

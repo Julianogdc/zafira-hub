@@ -10,6 +10,7 @@ import {
   sanitizeDocument,
   safeCompareTokens,
   generateWebhookDedupeKey,
+  mapAsaasPaymentStatus,
 } from '../../modules/integrations/asaas/asaas.service.js';
 import { AsaasClient, AsaasIntegrationError } from '../../modules/integrations/asaas/asaas.client.js';
 import { createAsaasRoutes } from '../../modules/integrations/asaas/asaas.routes.js';
@@ -1244,6 +1245,112 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
       totalSeries,
       3000,
       'Apenas cobranças com data de liquidação válida devem compor as séries temporais'
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 27. Auditoria de cobrança residual cancelada/deletada (PNEUTEK R$ 1.594,00)
+  // ---------------------------------------------------------------------------
+  await t.test('27. Cobrança com deleted: true ou PAYMENT_DELETED (PNEUTEK R$ 1.594,00) é excluída de Pendentes/Em Aberto e não infla os KPIs', async () => {
+    const now = new Date();
+    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 20, 12, 0, 0);
+
+    // 1. Validação unitária de mapAsaasPaymentStatus com deleted
+    assert.strictEqual(
+      mapAsaasPaymentStatus('PENDING', true),
+      AsaasPaymentStatus.DELETED,
+      'Cobrança com deleted: true deve ser mapeada como DELETED mesmo se status vier como PENDING'
+    );
+    assert.strictEqual(
+      mapAsaasPaymentStatus('PENDING', false, 'PAYMENT_DELETED'),
+      AsaasPaymentStatus.DELETED,
+      'Webhook com evento PAYMENT_DELETED deve ser mapeado como DELETED'
+    );
+
+    // 2. Validação no getFinancialOverview com o cenário real da divergência residual:
+    // - Cobrança 1: PNEUTEK R$ 1.594,00 vencimento no mês, com rawPayload.deleted: true (cancelada/deletada)
+    // - Cobrança 2: Cliente Teste R$ 5,00 vencimento no mês, pendente ativa (deleted: false)
+    const mockPayments = [
+      {
+        id: 'db_pay_pneutek_1594',
+        externalId: 'pay_z9bl8vgevjcb5ty3',
+        value: 1594,
+        status: AsaasPaymentStatus.PENDING, // mesmo se gravado originalmente como PENDING no banco
+        dueDate: currentMonthDueDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        clientId: 'cli_pneutek',
+        rawPayload: {
+          id: 'pay_z9bl8vgevjcb5ty3',
+          status: 'PENDING',
+          value: 1594,
+          deleted: true, // Fatura cancelada / removida pelo fornecedor no Asaas
+        },
+        client: { id: 'cli_pneutek', name: 'PNEUTEK COMÉRCIO DE PNEUS LTDA' },
+      },
+      {
+        id: 'db_pay_teste_5',
+        externalId: 'pay_xtm5d9d6kci3avnc',
+        value: 5,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: currentMonthDueDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        clientId: 'cli_teste',
+        rawPayload: {
+          id: 'pay_xtm5d9d6kci3avnc',
+          status: 'PENDING',
+          value: 5,
+          deleted: false,
+        },
+        client: { id: 'cli_teste', name: 'Cliente Teste Hub 2.0' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => mockPayments.length,
+      },
+      client: { count: async () => 2 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+
+    const overview = await service.getFinancialOverview('org_pneutek_audit', { period: 'current-month' });
+
+    // O KPI 'pending' (Em Aberto / Previsto) deve refletir EXCLUSIVAMENTE a cobrança ativa de R$ 5,00,
+    // conciliando 100% com o painel Asaas ('Aguardando pagamento: R$ 5,00 em 1 cobrança').
+    assert.strictEqual(
+      overview.kpis.pending,
+      5,
+      'Em Aberto deve somar apenas cobranças ativas (R$ 5,00), excluindo a cobrança deletada de R$ 1.594,00'
+    );
+    assert.strictEqual(
+      overview.kpis.pendingCount,
+      1,
+      'Apenas 1 cobrança ativa deve constar como pendente'
+    );
+    assert.strictEqual(
+      overview.kpis.statusCounts.cancelled,
+      1,
+      'A cobrança de R$ 1.594,00 da PNEUTEK deve ser contabilizada como cancelada'
+    );
+    assert.strictEqual(
+      overview.kpis.overdue,
+      0,
+      'Vencido deve ser R$ 0,00'
+    );
+
+    // Próximo vencimento deve apontar para o Cliente Teste de R$ 5,00 e não para a cobrança cancelada
+    assert.strictEqual(
+      overview.kpis.nextDueDate?.value,
+      5,
+      'Próximo vencimento deve considerar apenas cobranças ativas'
+    );
+    assert.strictEqual(
+      overview.kpis.nextDueDate?.clientName,
+      'Cliente Teste Hub 2.0'
     );
   });
 });
