@@ -171,9 +171,20 @@ export default function Financas() {
 
   const formatDate = (isoString?: string | null) => {
     if (!isoString) return '-';
+    // 1. Prioriza extração direta de data de calendário civil (YYYY-MM-DD), imune a fusos horários
+    const match = String(isoString).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      const [, year, month, day] = match;
+      return `${day}/${month}/${year}`;
+    }
+    // 2. Fallback resiliente usando UTC para evitar recuo de 1 dia no Brasil (UTC-3)
     try {
       const d = new Date(isoString);
-      return isNaN(d.getTime()) ? '-' : d.toLocaleDateString('pt-BR');
+      if (isNaN(d.getTime())) return '-';
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const year = d.getUTCFullYear();
+      return `${day}/${month}/${year}`;
     } catch {
       return '-';
     }

@@ -11,6 +11,8 @@ import {
   safeCompareTokens,
   generateWebhookDedupeKey,
   mapAsaasPaymentStatus,
+  parseCalendarDate,
+  formatCalendarDate,
 } from '../../modules/integrations/asaas/asaas.service.js';
 import { AsaasClient, AsaasIntegrationError } from '../../modules/integrations/asaas/asaas.client.js';
 import { createAsaasRoutes } from '../../modules/integrations/asaas/asaas.routes.js';
@@ -1352,6 +1354,160 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
       overview.kpis.nextDueDate?.clientName,
       'Cliente Teste Hub 2.0'
     );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 28. Sincronização atualiza registro existente PENDING -> DELETED e expurga dos KPIs
+  // ---------------------------------------------------------------------------
+  await t.test('28. Sincronização atualiza cobrança existente no banco de PENDING para DELETED via deleted: true', async () => {
+    const now = new Date();
+    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-20`;
+    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 20, 12, 0, 0);
+
+    // 1. Registro já existente no banco de dados local com status PENDING
+    const localDatabase = new Map<string, any>();
+    localDatabase.set('pay_z9bl8vgevjcb5ty3', {
+      id: 'db_local_pneutek',
+      externalId: 'pay_z9bl8vgevjcb5ty3',
+      organizationId: 'org_sync_update_test',
+      clientId: 'cli_pneutek_test',
+      value: 1594,
+      status: AsaasPaymentStatus.PENDING, // Inicialmente PENDING no banco local
+      dueDate: currentMonthDueDate,
+      paymentDate: null,
+      clientPaymentDate: null,
+      rawPayload: { id: 'pay_z9bl8vgevjcb5ty3', status: 'PENDING', value: 1594 },
+      client: { id: 'cli_pneutek_test', name: 'PNEUTEK COMÉRCIO DE PNEUS LTDA' },
+    });
+
+    // 2. Simulação da API do Asaas retornando a cobrança com status: 'PENDING' e deleted: true
+    const mockAsaasClient: any = {
+      getCustomers: async () => ({ data: [] }),
+      getAllCustomers: async () => [
+        { id: 'cus_pneutek', name: 'PNEUTEK', cpfCnpj: '27702502000194' },
+        { id: 'cus_teste', name: 'Cliente Teste', cpfCnpj: '11122233344' },
+      ],
+      getAllPayments: async () => [
+        {
+          id: 'pay_z9bl8vgevjcb5ty3',
+          customer: 'cus_pneutek',
+          value: 1594,
+          status: 'PENDING',
+          dueDate: currentMonthDueDateStr,
+          deleted: true, // Asaas indica que foi deletada
+          billingType: 'PIX',
+        },
+        {
+          id: 'pay_xtm5d9d6kci3avnc',
+          customer: 'cus_teste',
+          value: 5,
+          status: 'PENDING',
+          dueDate: currentMonthDueDateStr,
+          deleted: false,
+          billingType: 'PIX',
+        }
+      ],
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [
+          { id: 'cli_pneutek_test', document: '27702502000194', name: 'PNEUTEK', integrations: [{ provider: 'ASAAS', externalId: 'cus_pneutek' }] },
+          { id: 'cli_teste_test', document: '11122233344', name: 'Cliente Teste', integrations: [{ provider: 'ASAAS', externalId: 'cus_teste' }] },
+        ],
+        count: async () => 2,
+      },
+      clientIntegration: {
+        upsert: async () => ({}),
+      },
+      asaasPayment: {
+        upsert: async ({ where, create, update }: any) => {
+          const externalId = where.externalId;
+          const existing = localDatabase.get(externalId);
+          if (existing) {
+            const updatedRecord = { ...existing, ...update };
+            localDatabase.set(externalId, updatedRecord);
+            return updatedRecord;
+          } else {
+            const newRecord = {
+              id: `db_${externalId}`,
+              externalId,
+              ...create,
+              client: { id: create.clientId, name: create.clientId === 'cli_pneutek_test' ? 'PNEUTEK' : 'Cliente Teste' },
+            };
+            localDatabase.set(externalId, newRecord);
+            return newRecord;
+          }
+        },
+        findMany: async () => Array.from(localDatabase.values()).map((p) => ({
+          ...p,
+          client: p.client || { id: p.clientId, name: 'Cliente Teste' },
+        })),
+        count: async () => localDatabase.size,
+        update: async ({ where, data }: any) => {
+          for (const [k, v] of localDatabase.entries()) {
+            if (v.id === where.id) {
+              const updated = { ...v, ...data };
+              localDatabase.set(k, updated);
+              return updated;
+            }
+          }
+        },
+      },
+    };
+
+    const service = new AsaasService(mockAsaasClient, mockPrisma);
+
+    // 3. Executa a sincronização da carteira
+    const syncRes = await service.syncAllWallet('org_sync_update_test');
+    assert.strictEqual(syncRes.success, true);
+    assert.strictEqual(syncRes.syncedPayments, 2);
+
+    // 4. Confirma que o registro existente da PNEUTEK foi ATUALIZADO para DELETED no banco
+    const pneutekInDb = localDatabase.get('pay_z9bl8vgevjcb5ty3');
+    assert.ok(pneutekInDb, 'Registro da PNEUTEK deve existir no banco');
+    assert.strictEqual(
+      pneutekInDb.status,
+      AsaasPaymentStatus.DELETED,
+      'O registro existente deve sofrer update para DELETED'
+    );
+
+    // 5. Confirma que nos KPIs o resultado é exatamente R$ 5,00 em 1 cobrança
+    const overview = await service.getFinancialOverview('org_sync_update_test', { period: 'current-month' });
+    assert.strictEqual(overview.kpis.pending, 5, 'Apenas a cobrança ativa de R$ 5,00 deve constar em Aberto');
+    assert.strictEqual(overview.kpis.pendingCount, 1);
+    assert.strictEqual(overview.kpis.overdue, 0);
+    assert.strictEqual(overview.kpis.statusCounts.cancelled, 1);
+    assert.strictEqual(overview.kpis.nextDueDate?.value, 5);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 29. Datas de calendário sem deslocamento de fuso (Off-by-one prevention)
+  // ---------------------------------------------------------------------------
+  await t.test('29. Datas de vencimento e pagamento tratadas como datas de calendário puras (preservam dia 20/09)', async () => {
+    // 1. Validar formatCalendarDate
+    const formattedFromDateOnly = formatCalendarDate('2026-09-20');
+    assert.strictEqual(
+      formattedFromDateOnly,
+      '20/09/2026',
+      'Data no formato YYYY-MM-DD deve ser formatada como 20/09/2026'
+    );
+
+    const formattedFromIsoUtc = formatCalendarDate('2026-09-20T00:00:00.000Z');
+    assert.strictEqual(
+      formattedFromIsoUtc,
+      '20/09/2026',
+      'Data ISO UTC deve ser formatada preservando o dia 20/09/2026 sem recuar para 19/09'
+    );
+
+    // 2. Validar parseCalendarDate
+    const parsed = parseCalendarDate('2026-09-20');
+    assert.ok(parsed);
+    assert.strictEqual(parsed.getUTCDate(), 20);
+    assert.strictEqual(parsed.getUTCMonth(), 8); // 0-indexed: Setembro
+    assert.strictEqual(parsed.getUTCFullYear(), 2026);
+    // Fixado em 12:00 UTC para imunidade completa a fusos locais
+    assert.strictEqual(parsed.getUTCHours(), 12);
   });
 });
 

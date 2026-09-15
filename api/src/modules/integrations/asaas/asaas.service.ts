@@ -244,6 +244,43 @@ export function getAsaasStatusLabel(status: AsaasPaymentStatus): string {
   }
 }
 
+/**
+ * Converte uma data de calendário (ex: '2026-09-20' ou ISO) para Date
+ * fixando meio-dia UTC (12:00:00.000Z).
+ * Isso impede que variações de fuso horário (-11h a +11h) cruzem a meia-noite
+ * e alterem o dia civil do vencimento no Brasil.
+ */
+export function parseCalendarDate(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0));
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Formata uma data preservando estritamente o dia de calendário civil (DD/MM/YYYY),
+ * sem converter para o horário local ou recuar 1 dia.
+ */
+export function formatCalendarDate(date?: Date | string | null): string {
+  if (!date) return '-';
+  const str = typeof date === 'string' ? date : date.toISOString();
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return `${day}/${month}/${year}`;
+  }
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '-';
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const year = d.getUTCFullYear();
+  return `${day}/${month}/${year}`;
+}
+
 export function getPeriodDateRange(
   period: string = 'current-month',
   startDate?: string,
@@ -399,8 +436,8 @@ export class AsaasService {
         billingType: p.billingType,
         status: effectiveStatus,
         statusLabel: getAsaasStatusLabel(effectiveStatus),
-        dueDate: p.dueDate.toISOString(),
-        paymentDate: p.paymentDate ? p.paymentDate.toISOString() : null,
+        dueDate: p.dueDate ? p.dueDate.toISOString().split('T')[0] : p.dueDate,
+        paymentDate: (p.paymentDate ?? p.clientPaymentDate) ? (p.paymentDate ?? p.clientPaymentDate)!.toISOString().split('T')[0] : null,
         invoiceUrl: p.invoiceUrl,
         bankSlipUrl: p.bankSlipUrl,
         isOverdue,
@@ -550,9 +587,9 @@ export class AsaasService {
 
     for (const p of payments) {
       const status = mapAsaasPaymentStatus(p.status, p.deleted);
-      const dueDate = new Date(p.dueDate);
-      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
-      const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
 
       await this.prismaClient.asaasPayment.upsert({
         where: { externalId: p.id },
@@ -694,9 +731,9 @@ export class AsaasService {
     for (const p of asaasPayments) {
       const matchedClientId = customerToClientMap.get(p.customer) || null;
       const status = mapAsaasPaymentStatus(p.status, p.deleted);
-      const dueDate = new Date(p.dueDate);
-      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
-      const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
 
       await this.prismaClient.asaasPayment.upsert({
         where: { externalId: p.id },
@@ -883,9 +920,9 @@ export class AsaasService {
     for (const p of asaasPayments) {
       const matchedClientId = asaasCustomerToHubClientId.get(p.customer) || null;
       const status = mapAsaasPaymentStatus(p.status, p.deleted);
-      const dueDate = new Date(p.dueDate);
-      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
-      const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
 
       await this.prismaClient.asaasPayment.upsert({
         where: { externalId: p.id },
@@ -1025,9 +1062,9 @@ export class AsaasService {
 
     if (organizationId) {
       const status = mapAsaasPaymentStatus(payment.status, (payment as any).deleted, event);
-      const dueDate = new Date(payment.dueDate);
-      const paymentDate = payment.paymentDate ? new Date(payment.paymentDate) : null;
-      const clientPaymentDate = payment.clientPaymentDate ? new Date(payment.clientPaymentDate) : null;
+      const dueDate = parseCalendarDate(payment.dueDate) || new Date(payment.dueDate);
+      const paymentDate = payment.paymentDate ? (parseCalendarDate(payment.paymentDate) || new Date(payment.paymentDate)) : null;
+      const clientPaymentDate = payment.clientPaymentDate ? (parseCalendarDate(payment.clientPaymentDate) || new Date(payment.clientPaymentDate)) : null;
 
       await this.prismaClient.asaasPayment.upsert({
         where: { externalId: payment.id },
@@ -1167,6 +1204,12 @@ export class AsaasService {
       const numVal = Number(p.value);
       const raw = (p.rawPayload || {}) as any;
       const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      if (raw?.deleted === true && p.status !== AsaasPaymentStatus.DELETED && typeof this.prismaClient?.asaasPayment?.update === 'function') {
+        this.prismaClient.asaasPayment.update({
+          where: { id: p.id },
+          data: { status: AsaasPaymentStatus.DELETED },
+        }).catch(() => {});
+      }
       const rawStatus = raw?.status;
       const effectiveStatus = isDeleted
         ? AsaasPaymentStatus.DELETED
@@ -1227,7 +1270,7 @@ export class AsaasService {
           if (!minFutureDueDate || p.dueDate < minFutureDueDate) {
             minFutureDueDate = p.dueDate;
             nextDueDateItem = {
-              date: p.dueDate.toISOString(),
+              date: p.dueDate ? p.dueDate.toISOString().split('T')[0] : null,
               value: numVal,
               clientName: p.client?.name || null,
             };
@@ -1464,8 +1507,8 @@ export class AsaasService {
         billingType: p.billingType,
         status: effectiveStatus,
         statusLabel: getAsaasStatusLabel(effectiveStatus),
-        dueDate: p.dueDate.toISOString(),
-        paymentDate: actualPaymentDate ? actualPaymentDate.toISOString() : null,
+        dueDate: p.dueDate ? p.dueDate.toISOString().split('T')[0] : p.dueDate,
+        paymentDate: actualPaymentDate ? actualPaymentDate.toISOString().split('T')[0] : null,
         invoiceUrl: p.invoiceUrl,
         bankSlipUrl: p.bankSlipUrl,
         isOverdue,
