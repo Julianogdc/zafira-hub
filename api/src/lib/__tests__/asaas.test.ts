@@ -1509,7 +1509,78 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     // Fixado em 12:00 UTC para imunidade completa a fusos locais
     assert.strictEqual(parsed.getUTCHours(), 12);
   });
+
+  // ---------------------------------------------------------------------------
+  // 30. Consulta a financial-overview e resumo de cliente não alteram o banco (GET estritamente leitura)
+  // ---------------------------------------------------------------------------
+  await t.test('30. getFinancialOverview e getClientFinancialSummary não chamam prisma.asaasPayment.update mesmo com cobrança legada rawPayload.deleted: true', async () => {
+    let updateCalled = false;
+
+    const mockPrisma: any = {
+      client: {
+        findUnique: async () => ({
+          id: 'cli_legacy_test',
+          organizationId: 'org_readonly_test',
+          document: '27702502000194',
+          name: 'Cliente Legado',
+        }),
+        count: async () => 1,
+      },
+      clientIntegration: {
+        findFirst: async () => ({
+          clientId: 'cli_legacy_test',
+          provider: 'ASAAS',
+          externalId: 'cus_legacy_001',
+        }),
+      },
+      asaasPayment: {
+        findMany: async () => [
+          {
+            id: 'db_legacy_deleted_payment',
+            externalId: 'pay_legacy_001',
+            value: 1594,
+            netValue: 1590,
+            status: AsaasPaymentStatus.PENDING, // Status ainda como PENDING no banco
+            dueDate: new Date(2026, 8, 25),
+            paymentDate: null,
+            clientPaymentDate: null,
+            updatedAt: new Date(),
+            clientId: 'cli_legacy_test',
+            rawPayload: { id: 'pay_legacy_001', status: 'PENDING', deleted: true }, // Asaas excluiu mas banco ainda não sincronizou
+            billingType: 'PIX',
+            invoiceUrl: null,
+            bankSlipUrl: null,
+            description: 'Cobrança legada',
+            client: { id: 'cli_legacy_test', name: 'Cliente Legado' },
+          },
+        ],
+        count: async () => 1,
+        update: async () => {
+          updateCalled = true;
+          throw new Error('prisma.asaasPayment.update NÃO deve ser chamado em rotas GET de leitura!');
+        },
+      },
+    };
+
+    const service = new AsaasService(undefined as any, mockPrisma);
+
+    // 1. Testa getFinancialOverview
+    const overview = await service.getFinancialOverview('org_readonly_test', { period: 'all' });
+    assert.strictEqual(updateCalled, false, 'update do prisma não pode ser invocado em getFinancialOverview');
+    assert.strictEqual(overview.kpis.pending, 0, 'Cobrança com rawPayload.deleted: true não deve ser somada em aberto');
+    assert.strictEqual(overview.kpis.pendingCount, 0);
+    assert.strictEqual(overview.kpis.statusCounts.cancelled, 1, 'Cobrança tratada em memória como cancelada/deletada');
+    assert.strictEqual(overview.payments.length, 1);
+    assert.strictEqual(overview.payments[0].status, AsaasPaymentStatus.DELETED, 'effectiveStatus deve ser DELETED');
+
+    // 2. Testa getClientFinancialSummary
+    const summary = await service.getClientFinancialSummary('cli_legacy_test', 'org_readonly_test');
+    assert.strictEqual(updateCalled, false, 'update do prisma não pode ser invocado em getClientFinancialSummary');
+    assert.strictEqual(summary.kpis.pending, 0, 'Cobrança com rawPayload.deleted: true não deve ser somada em aberto no resumo');
+    assert.strictEqual(summary.payments[0].status, AsaasPaymentStatus.DELETED);
+  });
 });
+
 
 
 

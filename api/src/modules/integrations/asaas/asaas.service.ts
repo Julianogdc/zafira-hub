@@ -1204,12 +1204,6 @@ export class AsaasService {
       const numVal = Number(p.value);
       const raw = (p.rawPayload || {}) as any;
       const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
-      if (raw?.deleted === true && p.status !== AsaasPaymentStatus.DELETED && typeof this.prismaClient?.asaasPayment?.update === 'function') {
-        this.prismaClient.asaasPayment.update({
-          where: { id: p.id },
-          data: { status: AsaasPaymentStatus.DELETED },
-        }).catch(() => {});
-      }
       const rawStatus = raw?.status;
       const effectiveStatus = isDeleted
         ? AsaasPaymentStatus.DELETED
