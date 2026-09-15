@@ -544,7 +544,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
   });
 
   // ---------------------------------------------------------------------------
-  // 12. Previsto não é contado como recebido
+  // 12. Previsto não é contado como recebido e respeita o período selecionado
   // ---------------------------------------------------------------------------
   await t.test('12. Previsto não é contado como recebido em séries temporais nem em KPIs', async () => {
     const now = new Date();
@@ -573,21 +573,25 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     };
 
     const service = new AsaasService(null as any, mockPrisma);
-    const overview = await service.getFinancialOverview('org_prev');
-
-    // Recebidos reais devem ser 0
-    assert.strictEqual(overview.kpis.receivedMonth, 0);
-    const totalRecebidosSeries = overview.recebidosTimeSeries.reduce((acc, p) => acc + p.value, 0);
+    
+    // No mês atual (default), a cobrança a 2 meses no futuro não deve contaminar o card de previsto
+    const overviewCurrent = await service.getFinancialOverview('org_prev');
+    assert.strictEqual(overviewCurrent.kpis.receivedMonth, 0);
+    assert.strictEqual(overviewCurrent.kpis.pending, 0, 'Cobrança futura não deve contaminar o mês atual');
+    const totalRecebidosSeries = overviewCurrent.recebidosTimeSeries.reduce((acc, p) => acc + p.value, 0);
     assert.strictEqual(totalRecebidosSeries, 0, 'Série de recebidos deve ter zero quando há apenas cobranças futuras');
 
-    // Previsto deve conter o valor
-    assert.strictEqual(overview.kpis.pending, 5000);
-    const totalPrevistosSeries = overview.previstosTimeSeries.reduce((acc, p) => acc + p.value, 0);
-    assert.strictEqual(totalPrevistosSeries, 5000, 'Série de previstos deve conter o valor projetado');
+    // Na série móvel dos próximos 6 meses, a projeção futura deve aparecer
+    const totalPrevistosSeries = overviewCurrent.previstosTimeSeries.reduce((acc, p) => acc + p.value, 0);
+    assert.strictEqual(totalPrevistosSeries, 5000, 'Série de previstos móvel deve conter o valor projetado nos próximos 6 meses');
+
+    // Quando o filtro for 'all' ou 'current-year', a pendência total é contabilizada
+    const overviewAll = await service.getFinancialOverview('org_prev', { period: 'all' });
+    assert.strictEqual(overviewAll.kpis.pending, 5000, 'Filtro all deve retornar a pendência global');
   });
 
   // ---------------------------------------------------------------------------
-  // 13. Vencidos são calculados corretamente
+  // 13. Vencidos são calculados corretamente respeitando o período
   // ---------------------------------------------------------------------------
   await t.test('13. Vencidos são calculados corretamente (OVERDUE explícito e PENDING expirado)', async () => {
     const now = new Date();
@@ -627,11 +631,18 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     };
 
     const service = new AsaasService(null as any, mockPrisma);
-    const overview = await service.getFinancialOverview('org_vencidos');
 
-    assert.strictEqual(overview.kpis.overdue, 2000, 'Total de vencidos deve somar 1200 + 800');
-    assert.strictEqual(overview.kpis.overdueCount, 2);
-    assert.strictEqual(overview.kpis.pending, 0, 'Cobranças vencidas não devem constar como pendência regular');
+    // No mês atual, cobranças vencidas do mês anterior não devem contaminar o card de vencidos
+    const overviewCurrent = await service.getFinancialOverview('org_vencidos');
+    assert.strictEqual(overviewCurrent.kpis.overdue, 0, 'Vencidos de meses anteriores não devem contaminar o mês atual');
+    assert.strictEqual(overviewCurrent.kpis.overdueCount, 0);
+    assert.strictEqual(overviewCurrent.kpis.pending, 0);
+
+    // No mês anterior ('last-month') ou 'all', as cobranças vencidas devem ser totalizadas
+    const overviewLastMonth = await service.getFinancialOverview('org_vencidos', { period: 'last-month' });
+    assert.strictEqual(overviewLastMonth.kpis.overdue, 2000, 'Total de vencidos no mês anterior deve somar 1200 + 800');
+    assert.strictEqual(overviewLastMonth.kpis.overdueCount, 2);
+    assert.strictEqual(overviewLastMonth.kpis.pending, 0, 'Cobranças vencidas não devem constar como pendência regular');
   });
 
   // ---------------------------------------------------------------------------
@@ -1034,6 +1045,124 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     assert.strictEqual(res.statusCode, 403, 'Acesso de MEMBER em sync-all deve retornar 403 Forbidden');
     const body = JSON.parse(res.payload);
     assert.strictEqual(body.error, 'forbidden');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 25. Conciliação de KPIs por período: isolamento de cobranças de meses diferentes
+  // ---------------------------------------------------------------------------
+  await t.test('25. Conciliação de KPIs por período: isolamento de cobranças de meses diferentes', async () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    const currentMonthDate = new Date(currentYear, currentMonth, 15);
+    const pastMonthDate = new Date(currentYear, currentMonth - 1, 10);
+    const futureMonthDate = new Date(currentYear, currentMonth + 1, 20);
+
+    const mockPayments = [
+      // 1. Recebida no mês atual (R$ 2.697,00)
+      {
+        id: 'pay_rec_mes',
+        value: 2697,
+        status: AsaasPaymentStatus.RECEIVED,
+        dueDate: currentMonthDate,
+        paymentDate: currentMonthDate,
+        clientPaymentDate: currentMonthDate,
+        updatedAt: currentMonthDate,
+        clientId: 'cli_1',
+        client: { id: 'cli_1', name: 'Cliente Mês Atual' },
+      },
+      // 2. Recebida em mês anterior (R$ 1.500,00)
+      {
+        id: 'pay_rec_ant',
+        value: 1500,
+        status: AsaasPaymentStatus.RECEIVED,
+        dueDate: pastMonthDate,
+        paymentDate: pastMonthDate,
+        clientPaymentDate: pastMonthDate,
+        updatedAt: pastMonthDate,
+        clientId: 'cli_2',
+        client: { id: 'cli_2', name: 'Cliente Mês Anterior' },
+      },
+      // 3. Pendente do mês atual (R$ 5,00)
+      {
+        id: 'pay_pend_mes',
+        value: 5,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: new Date(currentYear, currentMonth, 25), // futuro dentro do mês atual
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'cli_3',
+        client: { id: 'cli_3', name: 'Cliente Teste' },
+      },
+      // 4. Pendente futura (R$ 4.291,00)
+      {
+        id: 'pay_pend_fut',
+        value: 4291,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: futureMonthDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'cli_4',
+        client: { id: 'cli_4', name: 'Cliente Futuro' },
+      },
+      // 5. Vencida de mês anterior (R$ 3.845,00)
+      {
+        id: 'pay_venc_ant',
+        value: 3845,
+        status: AsaasPaymentStatus.OVERDUE,
+        dueDate: pastMonthDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'cli_5',
+        client: { id: 'cli_5', name: 'Cliente Inadimplente Passado' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => mockPayments.length,
+      },
+      client: { count: async () => 5 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+
+    // A) Filtro 'current-month':
+    // - Recebido: R$ 2.697,00 (1 cobrança)
+    // - Em aberto: R$ 5,00 (1 cobrança, R$ 4.291 do mês futuro é excluído)
+    // - Vencido: R$ 0,00 (0 cobranças, R$ 3.845 do mês anterior é excluído)
+    const resCurrent = await service.getFinancialOverview('org_multi_period', { period: 'current-month' });
+    assert.strictEqual(resCurrent.kpis.receivedMonth, 2697, 'Recebido no mês atual deve ser 2697');
+    assert.strictEqual(resCurrent.kpis.receivedMonthCount, 1);
+    assert.strictEqual(resCurrent.kpis.pending, 5, 'Em aberto no mês atual deve ser estritamente 5 (sem contaminação futura)');
+    assert.strictEqual(resCurrent.kpis.pendingCount, 1);
+    assert.strictEqual(resCurrent.kpis.overdue, 0, 'Vencido no mês atual deve ser 0 (sem contaminação de meses passados)');
+    assert.strictEqual(resCurrent.kpis.overdueCount, 0);
+
+    // B) Filtro 'last-month':
+    // - Recebido: R$ 1.500,00 (1 cobrança)
+    // - Em aberto: R$ 0,00
+    // - Vencido: R$ 3.845,00 (1 cobrança)
+    const resLast = await service.getFinancialOverview('org_multi_period', { period: 'last-month' });
+    assert.strictEqual(resLast.kpis.receivedMonth, 1500, 'Recebido no mês anterior deve ser 1500');
+    assert.strictEqual(resLast.kpis.receivedMonthCount, 1);
+    assert.strictEqual(resLast.kpis.pending, 0, 'Em aberto no mês anterior deve ser 0');
+    assert.strictEqual(resLast.kpis.overdue, 3845, 'Vencido no mês anterior deve ser 3845');
+    assert.strictEqual(resLast.kpis.overdueCount, 1);
+
+    // C) Filtro 'all':
+    // - Recebido global: 2697 + 1500 = 4197
+    // - Em aberto global: 5 + 4291 = 4296
+    // - Vencido global: 3845
+    const resAll = await service.getFinancialOverview('org_multi_period', { period: 'all' });
+    assert.strictEqual(resAll.kpis.receivedMonth, 4197);
+    assert.strictEqual(resAll.kpis.pending, 4296);
+    assert.strictEqual(resAll.kpis.overdue, 3845);
   });
 });
 

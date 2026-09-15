@@ -285,6 +285,22 @@ export default function Financas() {
   const recebidosData = overview?.recebidosTimeSeries || [];
   const previstosData = overview?.previstosTimeSeries || [];
 
+  const getReceivedCardTitle = () => {
+    switch (period) {
+      case 'last-month':
+        return 'Recebido (Mês Anterior)';
+      case 'current-year':
+        return 'Recebido no Ano';
+      case 'all':
+        return 'Total Recebido';
+      case 'custom':
+        return 'Recebido no Período';
+      case 'current-month':
+      default:
+        return 'Recebido no Mês';
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* 1. HEADER COM AÇÕES */}
@@ -456,7 +472,7 @@ export default function Financas() {
         {/* Recebido no Mês */}
         <Card className="bg-zinc-950/40 border-white/10">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-medium text-zinc-400">Recebido no Mês</CardTitle>
+            <CardTitle className="text-xs font-medium text-zinc-400">{getReceivedCardTitle()}</CardTitle>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </CardHeader>
           <CardContent>

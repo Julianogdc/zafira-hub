@@ -235,6 +235,55 @@ export function getAsaasStatusLabel(status: AsaasPaymentStatus): string {
   }
 }
 
+export function getPeriodDateRange(
+  period: string = 'current-month',
+  startDate?: string,
+  endDate?: string,
+  now: Date = new Date()
+): { start: Date | null; end: Date | null } {
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  if (period === 'current-month') {
+    return {
+      start: new Date(currentYear, currentMonth, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'last-month') {
+    return {
+      start: new Date(currentYear, currentMonth - 1, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, currentMonth, 0, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'current-year') {
+    return {
+      start: new Date(currentYear, 0, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, 11, 31, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'custom' && startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    return {
+      start: new Date(s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0, 0),
+      end: new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'all') {
+    return { start: null, end: null };
+  }
+
+  return {
+    start: new Date(currentYear, currentMonth, 1, 0, 0, 0, 0),
+    end: new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999),
+  };
+}
+
 export class AsaasService {
   private readonly client: AsaasClient;
   private readonly prismaClient: typeof defaultPrisma;
@@ -1018,6 +1067,7 @@ export class AsaasService {
     return { processed: true, duplicate: false };
   }
 
+
   /**
    * Consulta agregada para a página global Finanças (/financas).
    * Utiliza estritamente os dados de AsaasPayment e Client no banco local.
@@ -1046,9 +1096,12 @@ export class AsaasService {
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
-    // 1. Busca todos os pagamentos da organização (com filtro opcional de cliente) para calcular KPIs e Séries Temporais
+    const { start: periodStart, end: periodEnd } = getPeriodDateRange(period, startDate, endDate, now);
+
+    // 1. Busca pagamentos da organização (com cliente válido) para calcular KPIs e Séries Temporais
     const baseWhere: any = {
       organizationId,
+      clientId: { not: null },
       ...(clientId ? { clientId } : {}),
     };
 
@@ -1056,6 +1109,7 @@ export class AsaasService {
       where: baseWhere,
       select: {
         id: true,
+        externalId: true,
         value: true,
         netValue: true,
         status: true,
@@ -1064,6 +1118,11 @@ export class AsaasService {
         clientPaymentDate: true,
         updatedAt: true,
         clientId: true,
+        rawPayload: true,
+        billingType: true,
+        invoiceUrl: true,
+        bankSlipUrl: true,
+        description: true,
         client: {
           select: { id: true, name: true },
         },
@@ -1090,26 +1149,58 @@ export class AsaasService {
     };
 
     for (const p of allPayments) {
+      if (!p.clientId || !p.client) continue;
+
       const numVal = Number(p.value);
-      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
-      const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
-      const isPending = !isPaid && !isOverdue && p.status === AsaasPaymentStatus.PENDING;
+      const raw = p.rawPayload as any;
+      const rawStatus = raw?.status;
+      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
+      const rawClientPaymentDate = raw?.clientPaymentDate ? new Date(raw.clientPaymentDate) : null;
+      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate || rawClientPaymentDate;
+
+      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                     (actualPaymentDate !== null &&
+                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+
+      const isCancelled = effectiveStatus === AsaasPaymentStatus.REFUNDED ||
+                          effectiveStatus === AsaasPaymentStatus.CANCELLED ||
+                          effectiveStatus === AsaasPaymentStatus.DELETED;
+
+      const isOverdue = !isPaid && !isCancelled && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const isPending = !isPaid && !isCancelled && !isOverdue && effectiveStatus === AsaasPaymentStatus.PENDING;
 
       if (isPaid) {
-        statusCounts.received += 1;
-        const pDate = p.paymentDate || p.clientPaymentDate || p.updatedAt;
-        if (pDate && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
+        const liquidationDate = actualPaymentDate || p.updatedAt;
+        const inPeriod = (!periodStart || liquidationDate >= periodStart) &&
+                         (!periodEnd || liquidationDate <= periodEnd);
+
+        if (inPeriod) {
           receivedMonth += numVal;
           receivedMonthCount += 1;
+          statusCounts.received += 1;
         }
       } else if (isOverdue) {
-        statusCounts.overdue += 1;
-        overdue += numVal;
-        overdueCount += 1;
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          overdue += numVal;
+          overdueCount += 1;
+          statusCounts.overdue += 1;
+        }
       } else if (isPending) {
-        statusCounts.pending += 1;
-        pending += numVal;
-        pendingCount += 1;
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          pending += numVal;
+          pendingCount += 1;
+          statusCounts.pending += 1;
+        }
 
         if (p.dueDate >= now) {
           if (!minFutureDueDate || p.dueDate < minFutureDueDate) {
@@ -1121,14 +1212,21 @@ export class AsaasService {
             };
           }
         }
-      } else if (p.status === AsaasPaymentStatus.REFUNDED) {
-        statusCounts.refunded += 1;
-      } else if (p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED) {
-        statusCounts.cancelled += 1;
+      } else if (isCancelled) {
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          if (effectiveStatus === AsaasPaymentStatus.REFUNDED) {
+            statusCounts.refunded += 1;
+          } else {
+            statusCounts.cancelled += 1;
+          }
+        }
       }
     }
 
-    // 2. Séries Temporais
+    // 2. Séries Temporais (Gráficos Móveis de 6 Meses)
     // A) Recebidos reais nos últimos 6 meses (baseado estritamente na data de pagamento liquidada)
     const monthsNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     const recebidosMap = new Map<string, { label: string; value: number; count: number }>();
@@ -1141,9 +1239,22 @@ export class AsaasService {
     }
 
     for (const p of allPayments) {
-      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
+      if (!p.clientId || !p.client) continue;
+      const raw = p.rawPayload as any;
+      const rawStatus = raw?.status;
+      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
+      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+
+      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                     (actualPaymentDate !== null &&
+                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+
       if (isPaid) {
-        const pDate = p.paymentDate || p.clientPaymentDate || p.updatedAt;
+        const pDate = actualPaymentDate || p.updatedAt;
         if (pDate) {
           const key = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
           if (recebidosMap.has(key)) {
@@ -1172,8 +1283,21 @@ export class AsaasService {
     }
 
     for (const p of allPayments) {
-      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
-      if (!isPaid && p.status === AsaasPaymentStatus.PENDING) {
+      if (!p.clientId || !p.client) continue;
+      const raw = p.rawPayload as any;
+      const rawStatus = raw?.status;
+      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
+      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+
+      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                     (actualPaymentDate !== null &&
+                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+
+      if (!isPaid && effectiveStatus === AsaasPaymentStatus.PENDING && p.dueDate >= now) {
         const key = `${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth() + 1).padStart(2, '0')}`;
         if (previstosMap.has(key)) {
           const entry = previstosMap.get(key)!;
@@ -1193,48 +1317,74 @@ export class AsaasService {
     // 3. Montagem do filtro para a lista paginada de cobranças
     const listWhere: any = {
       organizationId,
-      ...(clientId ? { clientId } : {}),
+      clientId: clientId || { not: null },
     };
 
-    // Filtro por status
-    if (status && status !== 'ALL') {
-      const upperStatus = status.toUpperCase();
-      if (upperStatus === 'OVERDUE') {
+    const upperStatus = status && status !== 'ALL' ? status.toUpperCase() : 'ALL';
+
+    if (upperStatus === 'RECEIVED' || upperStatus === 'CONFIRMED') {
+      listWhere.status = { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] };
+      if (periodStart || periodEnd) {
         listWhere.OR = [
-          { status: AsaasPaymentStatus.OVERDUE },
+          { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+          { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
           {
-            status: AsaasPaymentStatus.PENDING,
-            dueDate: { lt: now },
+            paymentDate: null,
+            clientPaymentDate: null,
+            updatedAt: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) },
           },
         ];
-      } else if (upperStatus === 'PENDING') {
-        listWhere.status = AsaasPaymentStatus.PENDING;
-        listWhere.dueDate = { gte: now };
-      } else if (upperStatus === 'RECEIVED' || upperStatus === 'CONFIRMED') {
-        listWhere.status = { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] };
-      } else {
-        listWhere.status = mapAsaasPaymentStatus(upperStatus);
       }
-    }
-
-    // Filtro por período de data
-    if (period === 'current-month') {
-      const start = new Date(currentYear, currentMonth, 1);
-      const end = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999);
-      listWhere.dueDate = { gte: start, lte: end };
-    } else if (period === 'last-month') {
-      const start = new Date(currentYear, currentMonth - 1, 1);
-      const end = new Date(currentYear, currentMonth, 0, 23, 59, 59, 999);
-      listWhere.dueDate = { gte: start, lte: end };
-    } else if (period === 'current-year') {
-      const start = new Date(currentYear, 0, 1);
-      const end = new Date(currentYear, 11, 31, 23, 59, 59, 999);
-      listWhere.dueDate = { gte: start, lte: end };
-    } else if (period === 'custom' && startDate && endDate) {
+    } else if (upperStatus === 'OVERDUE') {
+      listWhere.OR = [
+        { status: AsaasPaymentStatus.OVERDUE },
+        { status: AsaasPaymentStatus.PENDING, dueDate: { lt: now } },
+      ];
+      if (periodStart || periodEnd) {
+        listWhere.dueDate = {
+          ...(periodStart ? { gte: periodStart } : {}),
+          ...(periodEnd ? { lte: periodEnd } : {}),
+        };
+      }
+    } else if (upperStatus === 'PENDING') {
+      listWhere.status = AsaasPaymentStatus.PENDING;
       listWhere.dueDate = {
-        gte: new Date(startDate),
-        lte: new Date(endDate),
+        gte: periodStart && periodStart >= now ? periodStart : now,
+        ...(periodEnd ? { lte: periodEnd } : {}),
       };
+    } else if (upperStatus !== 'ALL') {
+      listWhere.status = mapAsaasPaymentStatus(upperStatus);
+      if (periodStart || periodEnd) {
+        listWhere.dueDate = {
+          ...(periodStart ? { gte: periodStart } : {}),
+          ...(periodEnd ? { lte: periodEnd } : {}),
+        };
+      }
+    } else {
+      // upperStatus === 'ALL': aplica período para recebidos (liquidação) e pendentes/vencidos (vencimento)
+      if (periodStart || periodEnd) {
+        listWhere.OR = [
+          {
+            status: { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] },
+            OR: [
+              { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+              { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+              {
+                paymentDate: null,
+                clientPaymentDate: null,
+                updatedAt: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) },
+              },
+            ],
+          },
+          {
+            status: { notIn: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] },
+            dueDate: {
+              ...(periodStart ? { gte: periodStart } : {}),
+              ...(periodEnd ? { lte: periodEnd } : {}),
+            },
+          },
+        ];
+      }
     }
 
     // Busca textual por descrição ou nome do cliente
@@ -1273,8 +1423,20 @@ export class AsaasService {
 
     const formattedPayments: FinancialOverviewPaymentItem[] = pagedPayments.map((p) => {
       const numValue = Number(p.value);
-      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
-      const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const raw = p.rawPayload as any;
+      const rawStatus = raw?.status;
+      const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
+      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
+      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+
+      const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                     effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                     (actualPaymentDate !== null &&
+                      effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                      effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                      effectiveStatus !== AsaasPaymentStatus.DELETED);
+
+      const isOverdue = !isPaid && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
 
       return {
         id: p.id,
@@ -1283,10 +1445,10 @@ export class AsaasService {
         value: numValue,
         netValue: p.netValue ? Number(p.netValue) : null,
         billingType: p.billingType,
-        status: p.status,
-        statusLabel: getAsaasStatusLabel(p.status),
+        status: effectiveStatus,
+        statusLabel: getAsaasStatusLabel(effectiveStatus),
         dueDate: p.dueDate.toISOString(),
-        paymentDate: p.paymentDate ? p.paymentDate.toISOString() : null,
+        paymentDate: actualPaymentDate ? actualPaymentDate.toISOString() : null,
         invoiceUrl: p.invoiceUrl,
         bankSlipUrl: p.bankSlipUrl,
         isOverdue,
