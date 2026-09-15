@@ -1164,6 +1164,88 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     assert.strictEqual(resAll.kpis.pending, 4296);
     assert.strictEqual(resAll.kpis.overdue, 3845);
   });
+
+  // ---------------------------------------------------------------------------
+  // 26. Data de recebimento estrita (paymentDate ?? clientPaymentDate) sem fallback para updatedAt
+  // ---------------------------------------------------------------------------
+  await t.test('26. Data de recebimento estrita (paymentDate ?? clientPaymentDate) sem fallback para updatedAt', async () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+    const pastMonthDate = new Date(currentYear, currentMonth - 1, 15);
+
+    const mockPayments = [
+      // Cobrança 1: Paga no mês anterior, mas sincronizada/atualizada no mês atual (updatedAt = now)
+      {
+        id: 'pay_past_updated_now',
+        value: 3000,
+        status: AsaasPaymentStatus.RECEIVED,
+        dueDate: pastMonthDate,
+        paymentDate: pastMonthDate, // liquidação real no mês passado
+        clientPaymentDate: null,
+        updatedAt: now, // sincronização no mês atual não deve contaminar o mês atual!
+        clientId: 'cli_audit_1',
+        client: { id: 'cli_audit_1', name: 'Cliente Audit 1' },
+      },
+      // Cobrança 2: Status RECEIVED mas sem paymentDate nem clientPaymentDate (dado incompleto)
+      {
+        id: 'pay_received_no_date',
+        value: 1200,
+        status: AsaasPaymentStatus.RECEIVED,
+        dueDate: pastMonthDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'cli_audit_2',
+        client: { id: 'cli_audit_2', name: 'Cliente Incompleto' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => mockPayments.length,
+      },
+      client: { count: async () => 2 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+
+    // No mês atual ('current-month'):
+    // - Cobrança 1 NÃO pode entrar (foi liquidada no mês passado, apesar de updatedAt ser hoje)
+    // - Cobrança 2 NÃO pode entrar (não possui paymentDate nem clientPaymentDate)
+    const overviewCurrent = await service.getFinancialOverview('org_strict_date', { period: 'current-month' });
+    assert.strictEqual(
+      overviewCurrent.kpis.receivedMonth,
+      0,
+      'Pagamento recebido no mês passado com updatedAt no mês atual NÃO pode aparecer como recebido no mês atual'
+    );
+    assert.strictEqual(overviewCurrent.kpis.receivedMonthCount, 0);
+    assert.strictEqual(
+      overviewCurrent.kpis.incompletePaymentsCount,
+      1,
+      'Cobrança com status RECEIVED sem data de liquidação deve ser contabilizada como dado incompleto para auditoria'
+    );
+
+    // No mês anterior ('last-month'):
+    // - Cobrança 1 entra normalmente pelo paymentDate real
+    const overviewPast = await service.getFinancialOverview('org_strict_date', { period: 'last-month' });
+    assert.strictEqual(
+      overviewPast.kpis.receivedMonth,
+      3000,
+      'Pagamento recebido no mês anterior deve constar exclusivamente no mês anterior'
+    );
+    assert.strictEqual(overviewPast.kpis.receivedMonthCount, 1);
+
+    // Série temporal de recebimentos:
+    // Apenas a cobrança 1 deve constar no ponto do mês anterior; a cobrança sem data é excluída dos gráficos
+    const totalSeries = overviewCurrent.recebidosTimeSeries.reduce((acc, p) => acc + p.value, 0);
+    assert.strictEqual(
+      totalSeries,
+      3000,
+      'Apenas cobranças com data de liquidação válida devem compor as séries temporais'
+    );
+  });
 });
 
 

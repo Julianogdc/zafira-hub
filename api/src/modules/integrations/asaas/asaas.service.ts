@@ -103,6 +103,7 @@ export interface FinancialOverviewKPIs {
     refunded: number;
     cancelled: number;
   };
+  incompletePaymentsCount?: number;
 }
 
 export interface TimeSeriesPoint {
@@ -365,7 +366,7 @@ export class AsaasService {
       const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
 
       if (isPaid) {
-        const payDate = p.paymentDate || p.clientPaymentDate || p.updatedAt;
+        const payDate = p.paymentDate ?? p.clientPaymentDate;
         if (payDate && payDate.getMonth() === currentMonth && payDate.getFullYear() === currentYear) {
           receivedMonth += numValue;
           receivedMonthCount += 1;
@@ -1136,6 +1137,7 @@ export class AsaasService {
     let pendingCount = 0;
     let overdue = 0;
     let overdueCount = 0;
+    let incompletePaymentsCount = 0;
 
     let nextDueDateItem: { date: string | null; value: number | null; clientName: string | null } | null = null;
     let minFutureDueDate: Date | null = null;
@@ -1155,9 +1157,7 @@ export class AsaasService {
       const raw = p.rawPayload as any;
       const rawStatus = raw?.status;
       const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
-      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
-      const rawClientPaymentDate = raw?.clientPaymentDate ? new Date(raw.clientPaymentDate) : null;
-      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate || rawClientPaymentDate;
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
       const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
@@ -1174,14 +1174,19 @@ export class AsaasService {
       const isPending = !isPaid && !isCancelled && !isOverdue && effectiveStatus === AsaasPaymentStatus.PENDING;
 
       if (isPaid) {
-        const liquidationDate = actualPaymentDate || p.updatedAt;
-        const inPeriod = (!periodStart || liquidationDate >= periodStart) &&
-                         (!periodEnd || liquidationDate <= periodEnd);
+        if (actualPaymentDate) {
+          const inPeriod = (!periodStart || actualPaymentDate >= periodStart) &&
+                           (!periodEnd || actualPaymentDate <= periodEnd);
 
-        if (inPeriod) {
-          receivedMonth += numVal;
-          receivedMonthCount += 1;
-          statusCounts.received += 1;
+          if (inPeriod) {
+            receivedMonth += numVal;
+            receivedMonthCount += 1;
+            statusCounts.received += 1;
+          }
+        } else {
+          // Dado incompleto para auditoria: possui status de recebido mas sem data de liquidação
+          incompletePaymentsCount += 1;
+          console.warn(`[Asaas Audit] Cobrança ${p.externalId || p.id} possui status ${effectiveStatus}, mas não possui paymentDate nem clientPaymentDate.`);
         }
       } else if (isOverdue) {
         const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
@@ -1227,7 +1232,7 @@ export class AsaasService {
     }
 
     // 2. Séries Temporais (Gráficos Móveis de 6 Meses)
-    // A) Recebidos reais nos últimos 6 meses (baseado estritamente na data de pagamento liquidada)
+    // A) Recebidos reais nos últimos 6 meses (baseado estritamente na data de pagamento liquidada: paymentDate ?? clientPaymentDate)
     const monthsNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     const recebidosMap = new Map<string, { label: string; value: number; count: number }>();
 
@@ -1243,8 +1248,7 @@ export class AsaasService {
       const raw = p.rawPayload as any;
       const rawStatus = raw?.status;
       const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
-      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
-      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
       const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
@@ -1253,15 +1257,12 @@ export class AsaasService {
                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
                       effectiveStatus !== AsaasPaymentStatus.DELETED);
 
-      if (isPaid) {
-        const pDate = actualPaymentDate || p.updatedAt;
-        if (pDate) {
-          const key = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
-          if (recebidosMap.has(key)) {
-            const entry = recebidosMap.get(key)!;
-            entry.value += Number(p.value);
-            entry.count += 1;
-          }
+      if (isPaid && actualPaymentDate) {
+        const key = `${actualPaymentDate.getFullYear()}-${String(actualPaymentDate.getMonth() + 1).padStart(2, '0')}`;
+        if (recebidosMap.has(key)) {
+          const entry = recebidosMap.get(key)!;
+          entry.value += Number(p.value);
+          entry.count += 1;
         }
       }
     }
@@ -1287,8 +1288,7 @@ export class AsaasService {
       const raw = p.rawPayload as any;
       const rawStatus = raw?.status;
       const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
-      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
-      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
       const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
@@ -1328,11 +1328,6 @@ export class AsaasService {
         listWhere.OR = [
           { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
           { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
-          {
-            paymentDate: null,
-            clientPaymentDate: null,
-            updatedAt: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) },
-          },
         ];
       }
     } else if (upperStatus === 'OVERDUE') {
@@ -1361,7 +1356,7 @@ export class AsaasService {
         };
       }
     } else {
-      // upperStatus === 'ALL': aplica período para recebidos (liquidação) e pendentes/vencidos (vencimento)
+      // upperStatus === 'ALL': aplica período para recebidos (liquidação estrita) e pendentes/vencidos (vencimento)
       if (periodStart || periodEnd) {
         listWhere.OR = [
           {
@@ -1369,11 +1364,6 @@ export class AsaasService {
             OR: [
               { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
               { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
-              {
-                paymentDate: null,
-                clientPaymentDate: null,
-                updatedAt: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) },
-              },
             ],
           },
           {
@@ -1426,8 +1416,7 @@ export class AsaasService {
       const raw = p.rawPayload as any;
       const rawStatus = raw?.status;
       const effectiveStatus = rawStatus ? mapAsaasPaymentStatus(rawStatus) : p.status;
-      const rawPaymentDate = raw?.paymentDate ? new Date(raw.paymentDate) : null;
-      const actualPaymentDate = p.paymentDate || p.clientPaymentDate || rawPaymentDate;
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
 
       const isPaid = effectiveStatus === AsaasPaymentStatus.RECEIVED ||
                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
@@ -1472,6 +1461,7 @@ export class AsaasService {
         overdueCount,
         nextDueDate: nextDueDateItem,
         statusCounts,
+        incompletePaymentsCount,
       },
       recebidosTimeSeries,
       previstosTimeSeries,

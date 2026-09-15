@@ -96,6 +96,7 @@ export interface FinancialOverviewKPIs {
     refunded: number;
     cancelled: number;
   };
+  incompletePaymentsCount?: number;
 }
 
 export interface TimeSeriesPoint {
