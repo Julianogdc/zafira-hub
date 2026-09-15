@@ -103,6 +103,42 @@ export function createAsaasRoutes(customService?: AsaasService) {
     );
 
     // =========================================================================
+    // 3. POST /clients/:clientId/integrations/asaas/sync (Sincronização restrita a 1 cliente)
+    // =========================================================================
+    const syncClientHandler = async (
+      request: FastifyRequest<{ Params: ClientParams }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const clientId = extractClientId(request.params);
+        const organizationId = getOrganizationId(request);
+        if (!organizationId) {
+          return reply.status(400).send({
+            status: 'error',
+            message: 'Organização do usuário não identificada para sincronização.',
+          });
+        }
+
+        const result = await service.syncClientAsaasData(clientId, organizationId);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.post(
+      '/clients/:clientId/integrations/asaas/sync',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      syncClientHandler
+    );
+    app.post(
+      '/api/clients/:clientId/integrations/asaas/sync',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      syncClientHandler
+    );
+
+
+    // =========================================================================
     // 3. POST /api/webhooks/asaas (Endpoint seguro de Webhook do Asaas)
     // =========================================================================
     const asaasWebhookHandler = async (request: FastifyRequest, reply: FastifyReply) => {

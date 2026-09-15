@@ -54,16 +54,29 @@ export function Cliente360Financeiro({ clientId, canManage }: Cliente360Financei
   }, [loadFinancialData]);
 
   const handleManualSync = async () => {
+    if (!clientId) return;
     try {
       setIsSyncing(true);
-      const result = await asaasService.triggerSync();
-      toast.success(
-        `Sincronização concluída: ${result.syncedPayments} cobranças e ${result.linkedClients} clientes vinculados.`
-      );
+      const result = await asaasService.triggerClientSync(clientId);
+      if (result.success) {
+        toast.success(
+          `Sincronização concluída: ${result.syncedPayments} cobrança(s) atualizada(s). Vínculo: ${result.linkStatusLabel}`
+        );
+      } else {
+        if (result.linkStatus === 'AMBIGUOUS') {
+          toast.warning(
+            `Atenção: ${result.linkStatusLabel}. Mais de um cadastro encontrado no Asaas com o mesmo documento.`
+          );
+        } else if (result.linkStatus === 'NO_DOCUMENT') {
+          toast.error(`Não foi possível sincronizar: ${result.linkStatusLabel}`);
+        } else {
+          toast.info(result.linkStatusLabel || 'Cliente não encontrado no Asaas.');
+        }
+      }
       await loadFinancialData();
     } catch (err: any) {
-      console.error('Erro ao sincronizar com Asaas:', err);
-      toast.error(err?.data?.message || err?.message || 'Falha ao sincronizar dados do Asaas.');
+      console.error('Erro ao sincronizar cliente com Asaas:', err);
+      toast.error(err?.data?.message || err?.message || 'Falha ao sincronizar dados do cliente no Asaas.');
     } finally {
       setIsSyncing(false);
     }
@@ -251,6 +264,29 @@ export function Cliente360Financeiro({ clientId, canManage }: Cliente360Financei
           </div>
 
           <div className="flex items-center gap-2">
+            {data?.linkStatus === 'LINKED' && (
+              <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[11px] gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                Vinculado
+              </Badge>
+            )}
+            {data?.linkStatus === 'AMBIGUOUS' && (
+              <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[11px] gap-1">
+                <AlertTriangle className="w-3 h-3" />
+                Vínculo ambíguo
+              </Badge>
+            )}
+            {data?.linkStatus === 'NO_DOCUMENT' && (
+              <Badge variant="outline" className="bg-zinc-800 text-zinc-400 border-zinc-700 text-[11px]">
+                Sem CPF/CNPJ
+              </Badge>
+            )}
+            {data?.linkStatus === 'NOT_FOUND' && (
+              <Badge variant="outline" className="bg-zinc-800 text-zinc-400 border-zinc-700 text-[11px]">
+                Não localizado no Asaas
+              </Badge>
+            )}
+
             {canManage && (
               <Button
                 variant="outline"

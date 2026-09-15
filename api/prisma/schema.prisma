@@ -233,12 +233,15 @@ model AsaasPayment {
 
 model AsaasWebhookEvent {
   id                 String   @id @default(uuid())
-  eventId            String   @unique
+  dedupeKey          String   @unique
+  eventId            String?
   event              String
   paymentExternalId  String?
   processedAt        DateTime @default(now())
   payload            Json?
 
   @@index([paymentExternalId])
+  @@index([dedupeKey])
   @@map("asaas_webhook_events")
 }
+

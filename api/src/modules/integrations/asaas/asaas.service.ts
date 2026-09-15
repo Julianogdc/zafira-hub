@@ -3,6 +3,8 @@ import { prisma as defaultPrisma } from '../../../lib/prisma.js';
 import { AsaasClient, AsaasIntegrationError, AsaasPaymentRaw } from './asaas.client.js';
 import { AsaasPaymentStatus } from '@prisma/client';
 
+export type AsaasLinkStatus = 'LINKED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_DOCUMENT';
+
 export interface ClientFinancialKPIs {
   pending: number;
   pendingCount: number;
@@ -15,6 +17,8 @@ export interface ClientFinancialKPIs {
 export interface ClientFinancialSummaryResponse {
   clientId: string;
   isLinked: boolean;
+  linkStatus: AsaasLinkStatus;
+  linkStatusLabel: string;
   asaasCustomerId: string | null;
   kpis: ClientFinancialKPIs;
   payments: FormattedAsaasPayment[];
@@ -35,6 +39,16 @@ export interface FormattedAsaasPayment {
   invoiceUrl: string | null;
   bankSlipUrl: string | null;
   isOverdue: boolean;
+}
+
+export interface ClientSyncResult {
+  success: boolean;
+  clientId: string;
+  linkStatus: AsaasLinkStatus;
+  linkStatusLabel: string;
+  asaasCustomerId: string | null;
+  syncedPayments: number;
+  timestamp: string;
 }
 
 export interface AsaasSyncResult {
@@ -63,6 +77,42 @@ export function safeCompareTokens(a?: string | null, b?: string | null): boolean
   const bufB = Buffer.from(b);
   if (bufA.length !== bufB.length) return false;
   return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Gera chave determinística SHA-256 para controle rigoroso de idempotência de webhooks.
+ * Baseia-se no evento + externalId do pagamento + payload normalizado.
+ */
+export function generateWebhookDedupeKey(event: string, paymentId: string, paymentPayload: any): string {
+  const cleanEvent = String(event || '').trim().toUpperCase();
+  const cleanPaymentId = String(paymentId || '').trim();
+
+  if (!cleanEvent || !cleanPaymentId) {
+    throw new AsaasIntegrationError(
+      'Evento e ID de pagamento são obrigatórios para cálculo de dedupeKey',
+      400,
+      'INVALID_WEBHOOK_DATA'
+    );
+  }
+
+  const normalize = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(normalize);
+    return Object.keys(obj)
+      .sort()
+      .reduce((acc: any, key: string) => {
+        acc[key] = normalize(obj[key]);
+        return acc;
+      }, {});
+  };
+
+  const payloadToHash = normalize({
+    event: cleanEvent,
+    paymentId: cleanPaymentId,
+    payment: paymentPayload || {},
+  });
+
+  return crypto.createHash('sha256').update(JSON.stringify(payloadToHash)).digest('hex');
 }
 
 /**
@@ -151,6 +201,18 @@ export class AsaasService {
     const asaasCustomerId = integration?.externalId || null;
     const isLinked = Boolean(asaasCustomerId);
 
+    let linkStatus: AsaasLinkStatus = 'NOT_FOUND';
+    let linkStatusLabel = 'Cliente não encontrado no Asaas';
+
+    const cleanDoc = sanitizeDocument(client.document);
+    if (isLinked) {
+      linkStatus = 'LINKED';
+      linkStatusLabel = 'Vinculado';
+    } else if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+      linkStatus = 'NO_DOCUMENT';
+      linkStatusLabel = 'Cliente sem CPF/CNPJ cadastrado';
+    }
+
     // 3. Busca cobranças registradas no banco para este cliente
     const payments = await this.prismaClient.asaasPayment.findMany({
       where: {
@@ -212,6 +274,8 @@ export class AsaasService {
     return {
       clientId,
       isLinked,
+      linkStatus,
+      linkStatusLabel,
       asaasCustomerId,
       kpis: {
         pending,
@@ -227,22 +291,196 @@ export class AsaasService {
   }
 
   /**
-   * Sincronização manual segura (Modo Somente Leitura).
-   * Consulta clientes e cobranças no Asaas e atualiza a base local.
-   * Não dispara requisições de escrita ao Asaas.
+   * Sincronização granular restrita a um único cliente (Etapa 4B Hardening).
+   * Consulta e sincroniza SOMENTE os dados deste cliente Hub no Asaas.
+   * Não afeta outros clientes nem faz varredura ampla.
+   */
+  async syncClientAsaasData(clientId: string, organizationId: string): Promise<ClientSyncResult> {
+    if (!clientId || !clientId.trim()) {
+      throw new AsaasIntegrationError('ID do cliente é obrigatório', 400, 'INVALID_CLIENT_ID');
+    }
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    // 1. Valida se o cliente existe e pertence à organização
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, organizationId: true, document: true, name: true },
+    });
+
+    if (!client || client.organizationId !== organizationId) {
+      throw new AsaasIntegrationError('Cliente não encontrado na organização', 404, 'CLIENT_NOT_FOUND');
+    }
+
+    // 2. Verifica se já há integração registrada
+    let existingIntegration = await this.prismaClient.clientIntegration.findFirst({
+      where: {
+        clientId,
+        provider: 'ASAAS',
+      },
+    });
+
+    let asaasCustomerId = existingIntegration?.externalId || null;
+
+    // Se ainda não estiver vinculado, busca no Asaas por CPF/CNPJ higienizado
+    if (!asaasCustomerId) {
+      const cleanDoc = sanitizeDocument(client.document);
+
+      // Regra de segurança: se não houver documento válido, não vincular
+      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'NO_DOCUMENT',
+          linkStatusLabel: 'Cliente não possui CPF/CNPJ válido cadastrado',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Consulta no Asaas estritamente pelo CPF/CNPJ do cliente
+      const asaasRes = await this.client.getCustomers({ cpfCnpj: cleanDoc });
+      const matches = asaasRes.data || [];
+
+      if (matches.length === 0) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'NOT_FOUND',
+          linkStatusLabel: 'Cliente não encontrado no Asaas',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Regra de segurança: se houver mais de um registro, ambiguidade impede vínculo automático
+      if (matches.length > 1) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'AMBIGUOUS',
+          linkStatusLabel: 'Vínculo ambíguo — requer revisão',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Exatamente 1 cliente encontrado: vínculo seguro garantido
+      const matchedCustomer = matches[0];
+      asaasCustomerId = matchedCustomer.id;
+
+      await this.prismaClient.clientIntegration.upsert({
+        where: {
+          clientId_provider_externalId: {
+            clientId,
+            provider: 'ASAAS',
+            externalId: asaasCustomerId,
+          },
+        },
+        create: {
+          clientId,
+          provider: 'ASAAS',
+          externalId: asaasCustomerId,
+          metadata: {
+            name: matchedCustomer.name,
+            email: matchedCustomer.email,
+            cpfCnpj: matchedCustomer.cpfCnpj,
+            phone: matchedCustomer.phone || matchedCustomer.mobilePhone,
+          },
+        },
+        update: {
+          metadata: {
+            name: matchedCustomer.name,
+            email: matchedCustomer.email,
+            cpfCnpj: matchedCustomer.cpfCnpj,
+            phone: matchedCustomer.phone || matchedCustomer.mobilePhone,
+          },
+        },
+      });
+    }
+
+    // 3. Consulta cobranças SOMENTE para este customer do Asaas
+    const paymentsRes = await this.client.getPayments({
+      customer: asaasCustomerId,
+      limit: 100,
+    });
+    const payments = paymentsRes.data || [];
+
+    let syncedPayments = 0;
+
+    for (const p of payments) {
+      const status = mapAsaasPaymentStatus(p.status);
+      const dueDate = new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? new Date(p.paymentDate) : null;
+      const clientPaymentDate = p.clientPaymentDate ? new Date(p.clientPaymentDate) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: p.id },
+        create: {
+          organizationId,
+          clientId,
+          asaasCustomerId: p.customer,
+          externalId: p.id,
+          installmentNumber: p.installmentNumber || null,
+          description: p.description || null,
+          value: p.value,
+          netValue: p.netValue || null,
+          originalValue: p.originalValue || null,
+          interestValue: p.interestValue || null,
+          billingType: p.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: p as any,
+        },
+        update: {
+          clientId, // Assegura o vínculo deste cliente
+          value: p.value,
+          netValue: p.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: p as any,
+        },
+      });
+
+      syncedPayments += 1;
+    }
+
+    return {
+      success: true,
+      clientId,
+      linkStatus: 'LINKED',
+      linkStatusLabel: 'Vinculado',
+      asaasCustomerId,
+      syncedPayments,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Sincronização manual segura global (Modo Somente Leitura).
    */
   async syncAsaasData(organizationId: string): Promise<AsaasSyncResult> {
     if (!organizationId) {
       throw new AsaasIntegrationError('Organização é obrigatória para sincronização', 400, 'ORG_REQUIRED');
     }
 
-    // 1. Busca todos os clientes da organização no Hub para cruzamento por CPF/CNPJ
     const hubClients = await this.prismaClient.client.findMany({
       where: { organizationId },
       select: { id: true, document: true, name: true },
     });
 
-    // Mapeia clientes por documento higienizado
     const clientsByDoc = new Map<string, string>();
     for (const c of hubClients) {
       const cleanDoc = sanitizeDocument(c.document);
@@ -251,7 +489,6 @@ export class AsaasService {
       }
     }
 
-    // 2. Consulta clientes no Asaas (paginação inicial)
     const asaasCustomersRes = await this.client.getCustomers({ limit: 100 });
     const asaasCustomers = asaasCustomersRes.data || [];
 
@@ -259,7 +496,6 @@ export class AsaasService {
     let unlinkedCustomers = 0;
     const customerToClientMap = new Map<string, string>();
 
-    // Vínculos existentes prévios
     const existingIntegrations = await this.prismaClient.clientIntegration.findMany({
       where: {
         provider: 'ASAAS',
@@ -272,14 +508,12 @@ export class AsaasService {
       customerToClientMap.set(integ.externalId, integ.clientId);
     }
 
-    // Tenta vincular clientes do Asaas aos clientes do Hub pelo CPF/CNPJ
     for (const ac of asaasCustomers) {
       const cleanDoc = sanitizeDocument(ac.cpfCnpj);
       let matchedClientId = cleanDoc ? clientsByDoc.get(cleanDoc) : undefined;
 
       if (matchedClientId) {
         customerToClientMap.set(ac.id, matchedClientId);
-        // Garante o vínculo em clientIntegration
         await this.prismaClient.clientIntegration.upsert({
           where: {
             clientId_provider_externalId: {
@@ -316,7 +550,6 @@ export class AsaasService {
       }
     }
 
-    // 3. Consulta cobranças no Asaas
     const asaasPaymentsRes = await this.client.getPayments({ limit: 100 });
     const asaasPayments = asaasPaymentsRes.data || [];
 
@@ -379,7 +612,8 @@ export class AsaasService {
   }
 
   /**
-   * Processamento idempotente de notificações de Webhook do Asaas.
+   * Processamento idempotente e seguro de notificações de Webhook do Asaas (Etapa 4B Hardening).
+   * Utiliza dedupeKey SHA-256 determinística baseada em evento + paymentId + payload normalizado.
    */
   async processWebhookEvent(payload: any, tokenHeader?: string): Promise<{ processed: boolean; duplicate?: boolean }> {
     const configuredToken = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -409,20 +643,19 @@ export class AsaasService {
     ];
 
     if (!supportedEvents.includes(event)) {
-      // Evento não relevante para cobranças nesta etapa, responde 200 para liberar o Asaas
       return { processed: false };
     }
 
     const payment: AsaasPaymentRaw = payload.payment;
-    if (!payment || !payment.id) {
+    if (!payment || !payment.id || !payment.id.trim()) {
       return { processed: false };
     }
 
-    // 2. Garantia de Idempotência: verifica se o evento já foi processado
-    const eventId = String(payload.id || `${event}_${payment.id}_${payment.dateCreated || Date.now()}`);
+    // 2. Idempotência real: gera dedupeKey SHA-256 determinística
+    const dedupeKey = generateWebhookDedupeKey(event, payment.id, payment);
 
     const existingEvent = await this.prismaClient.asaasWebhookEvent.findUnique({
-      where: { eventId },
+      where: { dedupeKey },
     });
 
     if (existingEvent) {
@@ -442,7 +675,6 @@ export class AsaasService {
       },
     });
 
-    // Se já tiver uma organização identificada pelo vínculo ou cobrança prévia
     let organizationId = integration?.client?.organizationId;
     let clientId = integration?.client?.id || null;
 
@@ -455,7 +687,6 @@ export class AsaasService {
       clientId = clientId || existingPayment?.clientId || null;
     }
 
-    // Se ainda não houver organização (ex: primeira organização ativa do sistema como fallback)
     if (!organizationId) {
       const firstOrg = await this.prismaClient.organization.findFirst({
         select: { id: true },
@@ -505,16 +736,17 @@ export class AsaasService {
       });
     }
 
-    // Registra o evento de webhook para garantir idempotência em retransmissões futuras
+    // 4. Registra evento com dedupeKey e eventId opcional (sem segredos)
     await this.prismaClient.asaasWebhookEvent.create({
       data: {
-        eventId,
+        dedupeKey,
+        eventId: payload.id ? String(payload.id).trim() : null,
         event,
         paymentExternalId: payment.id,
         payload: payload,
       },
     });
 
-    return { processed: true };
+    return { processed: true, duplicate: false };
   }
 }
