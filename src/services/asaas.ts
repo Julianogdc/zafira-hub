@@ -66,6 +66,67 @@ export interface AsaasSyncResult {
   timestamp: string;
 }
 
+export interface FinancialOverviewFilters {
+  period?: 'current-month' | 'last-month' | 'current-year' | 'all' | 'custom' | string;
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface FinancialOverviewKPIs {
+  receivedMonth: number;
+  receivedMonthCount: number;
+  pending: number;
+  pendingCount: number;
+  overdue: number;
+  overdueCount: number;
+  nextDueDate: {
+    date: string | null;
+    value: number | null;
+    clientName: string | null;
+  } | null;
+  statusCounts: {
+    pending: number;
+    received: number;
+    overdue: number;
+    refunded: number;
+    cancelled: number;
+  };
+}
+
+export interface TimeSeriesPoint {
+  month: string;
+  label: string;
+  value: number;
+  count: number;
+}
+
+export interface FinancialOverviewPaymentItem extends AsaasPaymentItem {
+  client: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+export interface FinancialOverviewResponse {
+  kpis: FinancialOverviewKPIs;
+  recebidosTimeSeries: TimeSeriesPoint[];
+  previstosTimeSeries: TimeSeriesPoint[];
+  payments: FinancialOverviewPaymentItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  hasUnsyncedData: boolean;
+  disclaimer: string;
+}
+
 export const asaasService = {
   /**
    * Obtém o resumo financeiro consolidado e as cobranças do Asaas para o cliente.
@@ -88,9 +149,28 @@ export const asaasService = {
 
   /**
    * Dispara a sincronização manual de cobranças e clientes do Asaas global (Modo somente leitura).
-   * Ação restrita a usuários ADMIN e MANAGER para a página Financeiro global futura.
    */
   async triggerSync(): Promise<AsaasSyncResult> {
     return api.post<AsaasSyncResult>('/integrations/asaas/sync');
+  },
+
+  /**
+   * Obtém a visão financeira consolidada global da organização no Hub (Etapa 4C).
+   * Consulta puramente os dados locais do Hub sem chamar a API externa do Asaas.
+   */
+  async getFinancialOverview(filters: FinancialOverviewFilters = {}): Promise<FinancialOverviewResponse> {
+    const searchParams = new URLSearchParams();
+    if (filters.period) searchParams.set('period', filters.period);
+    if (filters.startDate) searchParams.set('startDate', filters.startDate);
+    if (filters.endDate) searchParams.set('endDate', filters.endDate);
+    if (filters.clientId) searchParams.set('clientId', filters.clientId);
+    if (filters.status) searchParams.set('status', filters.status);
+    if (filters.search) searchParams.set('search', filters.search);
+    if (filters.page) searchParams.set('page', String(filters.page));
+    if (filters.limit) searchParams.set('limit', String(filters.limit));
+
+    const qs = searchParams.toString();
+    const endpoint = `/integrations/asaas/financial-overview${qs ? `?${qs}` : ''}`;
+    return api.get<FinancialOverviewResponse>(endpoint);
   },
 };

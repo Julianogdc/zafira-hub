@@ -60,6 +60,68 @@ export interface AsaasSyncResult {
   timestamp: string;
 }
 
+export interface FinancialOverviewFilters {
+  period?: 'current-month' | 'last-month' | 'current-year' | 'all' | 'custom' | string;
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface FinancialOverviewKPIs {
+  receivedMonth: number;
+  receivedMonthCount: number;
+  pending: number;
+  pendingCount: number;
+  overdue: number;
+  overdueCount: number;
+  nextDueDate: {
+    date: string | null;
+    value: number | null;
+    clientName: string | null;
+  } | null;
+  statusCounts: {
+    pending: number;
+    received: number;
+    overdue: number;
+    refunded: number;
+    cancelled: number;
+  };
+}
+
+export interface TimeSeriesPoint {
+  month: string;
+  label: string;
+  value: number;
+  count: number;
+}
+
+export interface FinancialOverviewPaymentItem extends FormattedAsaasPayment {
+  client: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+export interface FinancialOverviewResponse {
+  kpis: FinancialOverviewKPIs;
+  recebidosTimeSeries: TimeSeriesPoint[];
+  previstosTimeSeries: TimeSeriesPoint[];
+  payments: FinancialOverviewPaymentItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  hasUnsyncedData: boolean;
+  disclaimer: string;
+}
+
+
 /**
  * Higieniza strings de documento removendo pontuação e espaços.
  */
@@ -749,4 +811,312 @@ export class AsaasService {
 
     return { processed: true, duplicate: false };
   }
+
+  /**
+   * Consulta agregada para a página global Finanças (/financas).
+   * Utiliza estritamente os dados de AsaasPayment e Client no banco local.
+   * Não realiza nenhuma chamada à API externa do Asaas.
+   */
+  async getFinancialOverview(
+    organizationId: string,
+    filters: FinancialOverviewFilters = {}
+  ): Promise<FinancialOverviewResponse> {
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    const {
+      period = 'current-month',
+      startDate,
+      endDate,
+      clientId,
+      status,
+      search,
+      page = 1,
+      limit = 20,
+    } = filters;
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // 1. Busca todos os pagamentos da organização (com filtro opcional de cliente) para calcular KPIs e Séries Temporais
+    const baseWhere: any = {
+      organizationId,
+      ...(clientId ? { clientId } : {}),
+    };
+
+    const allPayments = await this.prismaClient.asaasPayment.findMany({
+      where: baseWhere,
+      select: {
+        id: true,
+        value: true,
+        netValue: true,
+        status: true,
+        dueDate: true,
+        paymentDate: true,
+        clientPaymentDate: true,
+        updatedAt: true,
+        clientId: true,
+        client: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    let receivedMonth = 0;
+    let receivedMonthCount = 0;
+    let pending = 0;
+    let pendingCount = 0;
+    let overdue = 0;
+    let overdueCount = 0;
+
+    let nextDueDateItem: { date: string | null; value: number | null; clientName: string | null } | null = null;
+    let minFutureDueDate: Date | null = null;
+
+    const statusCounts = {
+      pending: 0,
+      received: 0,
+      overdue: 0,
+      refunded: 0,
+      cancelled: 0,
+    };
+
+    for (const p of allPayments) {
+      const numVal = Number(p.value);
+      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
+      const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const isPending = !isPaid && !isOverdue && p.status === AsaasPaymentStatus.PENDING;
+
+      if (isPaid) {
+        statusCounts.received += 1;
+        const pDate = p.paymentDate || p.clientPaymentDate || p.updatedAt;
+        if (pDate && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear) {
+          receivedMonth += numVal;
+          receivedMonthCount += 1;
+        }
+      } else if (isOverdue) {
+        statusCounts.overdue += 1;
+        overdue += numVal;
+        overdueCount += 1;
+      } else if (isPending) {
+        statusCounts.pending += 1;
+        pending += numVal;
+        pendingCount += 1;
+
+        if (p.dueDate >= now) {
+          if (!minFutureDueDate || p.dueDate < minFutureDueDate) {
+            minFutureDueDate = p.dueDate;
+            nextDueDateItem = {
+              date: p.dueDate.toISOString(),
+              value: numVal,
+              clientName: p.client?.name || null,
+            };
+          }
+        }
+      } else if (p.status === AsaasPaymentStatus.REFUNDED) {
+        statusCounts.refunded += 1;
+      } else if (p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED) {
+        statusCounts.cancelled += 1;
+      }
+    }
+
+    // 2. Séries Temporais
+    // A) Recebidos reais nos últimos 6 meses (baseado estritamente na data de pagamento liquidada)
+    const monthsNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const recebidosMap = new Map<string, { label: string; value: number; count: number }>();
+
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(currentYear, currentMonth - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthsNames[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}`;
+      recebidosMap.set(key, { label, value: 0, count: 0 });
+    }
+
+    for (const p of allPayments) {
+      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
+      if (isPaid) {
+        const pDate = p.paymentDate || p.clientPaymentDate || p.updatedAt;
+        if (pDate) {
+          const key = `${pDate.getFullYear()}-${String(pDate.getMonth() + 1).padStart(2, '0')}`;
+          if (recebidosMap.has(key)) {
+            const entry = recebidosMap.get(key)!;
+            entry.value += Number(p.value);
+            entry.count += 1;
+          }
+        }
+      }
+    }
+
+    const recebidosTimeSeries: TimeSeriesPoint[] = Array.from(recebidosMap.entries()).map(([month, data]) => ({
+      month,
+      label: data.label,
+      value: data.value,
+      count: data.count,
+    }));
+
+    // B) Previstos por vencimento para os próximos 6 meses (baseado estritamente em cobranças pendentes)
+    const previstosMap = new Map<string, { label: string; value: number; count: number }>();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(currentYear, currentMonth + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthsNames[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}`;
+      previstosMap.set(key, { label, value: 0, count: 0 });
+    }
+
+    for (const p of allPayments) {
+      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
+      if (!isPaid && p.status === AsaasPaymentStatus.PENDING) {
+        const key = `${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth() + 1).padStart(2, '0')}`;
+        if (previstosMap.has(key)) {
+          const entry = previstosMap.get(key)!;
+          entry.value += Number(p.value);
+          entry.count += 1;
+        }
+      }
+    }
+
+    const previstosTimeSeries: TimeSeriesPoint[] = Array.from(previstosMap.entries()).map(([month, data]) => ({
+      month,
+      label: data.label,
+      value: data.value,
+      count: data.count,
+    }));
+
+    // 3. Montagem do filtro para a lista paginada de cobranças
+    const listWhere: any = {
+      organizationId,
+      ...(clientId ? { clientId } : {}),
+    };
+
+    // Filtro por status
+    if (status && status !== 'ALL') {
+      const upperStatus = status.toUpperCase();
+      if (upperStatus === 'OVERDUE') {
+        listWhere.OR = [
+          { status: AsaasPaymentStatus.OVERDUE },
+          {
+            status: AsaasPaymentStatus.PENDING,
+            dueDate: { lt: now },
+          },
+        ];
+      } else if (upperStatus === 'PENDING') {
+        listWhere.status = AsaasPaymentStatus.PENDING;
+        listWhere.dueDate = { gte: now };
+      } else if (upperStatus === 'RECEIVED' || upperStatus === 'CONFIRMED') {
+        listWhere.status = { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] };
+      } else {
+        listWhere.status = mapAsaasPaymentStatus(upperStatus);
+      }
+    }
+
+    // Filtro por período de data
+    if (period === 'current-month') {
+      const start = new Date(currentYear, currentMonth, 1);
+      const end = new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999);
+      listWhere.dueDate = { gte: start, lte: end };
+    } else if (period === 'last-month') {
+      const start = new Date(currentYear, currentMonth - 1, 1);
+      const end = new Date(currentYear, currentMonth, 0, 23, 59, 59, 999);
+      listWhere.dueDate = { gte: start, lte: end };
+    } else if (period === 'current-year') {
+      const start = new Date(currentYear, 0, 1);
+      const end = new Date(currentYear, 11, 31, 23, 59, 59, 999);
+      listWhere.dueDate = { gte: start, lte: end };
+    } else if (period === 'custom' && startDate && endDate) {
+      listWhere.dueDate = {
+        gte: new Date(startDate),
+        lte: new Date(endDate),
+      };
+    }
+
+    // Busca textual por descrição ou nome do cliente
+    if (search && search.trim()) {
+      const searchTerms = search.trim();
+      const searchCondition = [
+        { description: { contains: searchTerms, mode: 'insensitive' } },
+        { client: { name: { contains: searchTerms, mode: 'insensitive' } } },
+      ];
+      if (listWhere.OR) {
+        listWhere.AND = [{ OR: listWhere.OR }, { OR: searchCondition }];
+        delete listWhere.OR;
+      } else {
+        listWhere.OR = searchCondition;
+      }
+    }
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [totalCount, pagedPayments] = await Promise.all([
+      this.prismaClient.asaasPayment.count({ where: listWhere }),
+      this.prismaClient.asaasPayment.findMany({
+        where: listWhere,
+        include: {
+          client: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: { dueDate: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+    ]);
+
+    const formattedPayments: FinancialOverviewPaymentItem[] = pagedPayments.map((p) => {
+      const numValue = Number(p.value);
+      const isPaid = p.status === AsaasPaymentStatus.RECEIVED || p.status === AsaasPaymentStatus.CONFIRMED;
+      const isOverdue = !isPaid && (p.status === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+
+      return {
+        id: p.id,
+        externalId: p.externalId,
+        description: p.description || 'Cobrança Asaas',
+        value: numValue,
+        netValue: p.netValue ? Number(p.netValue) : null,
+        billingType: p.billingType,
+        status: p.status,
+        statusLabel: getAsaasStatusLabel(p.status),
+        dueDate: p.dueDate.toISOString(),
+        paymentDate: p.paymentDate ? p.paymentDate.toISOString() : null,
+        invoiceUrl: p.invoiceUrl,
+        bankSlipUrl: p.bankSlipUrl,
+        isOverdue,
+        client: p.client ? { id: p.client.id, name: p.client.name } : null,
+      };
+    });
+
+    const totalClientsCount = await this.prismaClient.client.count({
+      where: { organizationId },
+    });
+    const clientsWithPaymentsCount = new Set(allPayments.map((p) => p.clientId).filter(Boolean)).size;
+    const hasUnsyncedData = totalClientsCount > clientsWithPaymentsCount;
+
+    return {
+      kpis: {
+        receivedMonth,
+        receivedMonthCount,
+        pending,
+        pendingCount,
+        overdue,
+        overdueCount,
+        nextDueDate: nextDueDateItem,
+        statusCounts,
+      },
+      recebidosTimeSeries,
+      previstosTimeSeries,
+      payments: formattedPayments,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limitNum),
+      },
+      hasUnsyncedData,
+      disclaimer: 'Os dados são atualizados pela sincronização por cliente e pelos eventos do Asaas.',
+    };
+  }
 }
+

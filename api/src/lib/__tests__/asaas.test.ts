@@ -435,4 +435,284 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
       }
     );
   });
+
+  // ===========================================================================
+  // ETAPA 4C: SUÍTE DE TESTES DA VISÃO FINANCEIRA GLOBAL (/financas)
+  // ===========================================================================
+
+  // ---------------------------------------------------------------------------
+  // 9. Organização não vê cobranças de outra organização
+  // ---------------------------------------------------------------------------
+  await t.test('9. Organização não vê cobranças de outra organização no overview financeiro', async () => {
+    let capturedWhere: any = null;
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async ({ where }: any) => {
+          capturedWhere = where;
+          return [];
+        },
+        count: async () => 0,
+      },
+      client: {
+        count: async () => 0,
+      },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+    await service.getFinancialOverview('org_zafira_secure');
+
+    assert.strictEqual(capturedWhere.organizationId, 'org_zafira_secure', 'Filtro deve restringir estritamente à organização');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 10. Filtro por cliente retorna apenas cobranças daquele cliente
+  // ---------------------------------------------------------------------------
+  await t.test('10. Filtro por cliente retorna apenas cobranças daquele cliente', async () => {
+    let capturedBaseWhere: any = null;
+    let capturedListWhere: any = null;
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async ({ where }: any) => {
+          if (!capturedBaseWhere) capturedBaseWhere = where;
+          else capturedListWhere = where;
+          return [];
+        },
+        count: async ({ where }: any) => {
+          capturedListWhere = where;
+          return 0;
+        },
+      },
+      client: {
+        count: async () => 0,
+      },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+    await service.getFinancialOverview('org_zafira', { clientId: 'cli_especifico_1' });
+
+    assert.strictEqual(capturedBaseWhere.clientId, 'cli_especifico_1');
+    assert.strictEqual(capturedListWhere.clientId, 'cli_especifico_1');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 11. KPIs de recebido não incluem cobranças pendentes
+  // ---------------------------------------------------------------------------
+  await t.test('11. KPIs de recebido não incluem cobranças pendentes', async () => {
+    const now = new Date();
+    const mockPayments = [
+      {
+        id: 'pay_pendente',
+        value: 10000,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: new Date(now.getFullYear(), now.getMonth(), 28),
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'c1',
+        client: { id: 'c1', name: 'Cliente 1' },
+      },
+      {
+        id: 'pay_recebido',
+        value: 3500,
+        status: AsaasPaymentStatus.RECEIVED,
+        dueDate: new Date(now.getFullYear(), now.getMonth(), 10),
+        paymentDate: new Date(now.getFullYear(), now.getMonth(), 9),
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'c1',
+        client: { id: 'c1', name: 'Cliente 1' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => 2,
+      },
+      client: { count: async () => 1 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+    const overview = await service.getFinancialOverview('org_kpi');
+
+    assert.strictEqual(overview.kpis.receivedMonth, 3500, 'Recebido no mês deve incluir apenas cobranças liquidadas');
+    assert.strictEqual(overview.kpis.receivedMonthCount, 1);
+    assert.strictEqual(overview.kpis.pending, 10000, 'Pendente deve somar a cobrança pendente');
+    assert.strictEqual(overview.kpis.pendingCount, 1);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 12. Previsto não é contado como recebido
+  // ---------------------------------------------------------------------------
+  await t.test('12. Previsto não é contado como recebido em séries temporais nem em KPIs', async () => {
+    const now = new Date();
+    const futureDate = new Date(now.getFullYear(), now.getMonth() + 2, 15);
+
+    const mockPayments = [
+      {
+        id: 'pay_futuro',
+        value: 5000,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: futureDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'c2',
+        client: { id: 'c2', name: 'Cliente Futuro' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => 1,
+      },
+      client: { count: async () => 1 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+    const overview = await service.getFinancialOverview('org_prev');
+
+    // Recebidos reais devem ser 0
+    assert.strictEqual(overview.kpis.receivedMonth, 0);
+    const totalRecebidosSeries = overview.recebidosTimeSeries.reduce((acc, p) => acc + p.value, 0);
+    assert.strictEqual(totalRecebidosSeries, 0, 'Série de recebidos deve ter zero quando há apenas cobranças futuras');
+
+    // Previsto deve conter o valor
+    assert.strictEqual(overview.kpis.pending, 5000);
+    const totalPrevistosSeries = overview.previstosTimeSeries.reduce((acc, p) => acc + p.value, 0);
+    assert.strictEqual(totalPrevistosSeries, 5000, 'Série de previstos deve conter o valor projetado');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 13. Vencidos são calculados corretamente
+  // ---------------------------------------------------------------------------
+  await t.test('13. Vencidos são calculados corretamente (OVERDUE explícito e PENDING expirado)', async () => {
+    const now = new Date();
+    const pastDate = new Date(now.getFullYear(), now.getMonth() - 1, 5);
+
+    const mockPayments = [
+      {
+        id: 'pay_overdue_1',
+        value: 1200,
+        status: AsaasPaymentStatus.OVERDUE,
+        dueDate: pastDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'c1',
+        client: { id: 'c1', name: 'Cliente 1' },
+      },
+      {
+        id: 'pay_pending_expired',
+        value: 800,
+        status: AsaasPaymentStatus.PENDING,
+        dueDate: pastDate,
+        paymentDate: null,
+        clientPaymentDate: null,
+        updatedAt: now,
+        clientId: 'c2',
+        client: { id: 'c2', name: 'Cliente 2' },
+      },
+    ];
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => mockPayments,
+        count: async () => 2,
+      },
+      client: { count: async () => 2 },
+    };
+
+    const service = new AsaasService(null as any, mockPrisma);
+    const overview = await service.getFinancialOverview('org_vencidos');
+
+    assert.strictEqual(overview.kpis.overdue, 2000, 'Total de vencidos deve somar 1200 + 800');
+    assert.strictEqual(overview.kpis.overdueCount, 2);
+    assert.strictEqual(overview.kpis.pending, 0, 'Cobranças vencidas não devem constar como pendência regular');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 14. Endpoint não chama a API externa do Asaas
+  // ---------------------------------------------------------------------------
+  await t.test('14. Endpoint não chama a API externa do Asaas', async () => {
+    let externalCallCount = 0;
+
+    const mockClient: any = {
+      getCustomers: async () => { externalCallCount++; return { data: [] }; },
+      getPayments: async () => { externalCallCount++; return { data: [] }; },
+      getPaymentById: async () => { externalCallCount++; return null; },
+    };
+
+    const mockPrisma: any = {
+      asaasPayment: {
+        findMany: async () => [],
+        count: async () => 0,
+      },
+      client: { count: async () => 0 },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    await service.getFinancialOverview('org_sem_chamada_externa');
+
+    assert.strictEqual(externalCallCount, 0, 'Zero chamadas externas devem ser realizadas durante o overview financeiro');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 15. Página não usa Supabase nem useFinanceStore
+  // ---------------------------------------------------------------------------
+  await t.test('15. Página /financas não usa Supabase nem useFinanceStore', () => {
+    const financasPagePath = path.resolve(
+      process.cwd(),
+      '../src/pages/Financas.tsx'
+    );
+
+    assert.ok(fs.existsSync(financasPagePath), 'Arquivo Financas.tsx deve existir');
+    const content = fs.readFileSync(financasPagePath, 'utf-8');
+
+    assert.ok(!content.includes('useFinanceStore'), 'Financas.tsx não deve importar useFinanceStore');
+    assert.ok(!content.includes('supabase'), 'Financas.tsx não deve importar supabase');
+    assert.ok(!content.includes('useFinanceMetrics'), 'Financas.tsx não deve importar useFinanceMetrics');
+    assert.ok(!content.includes('TransactionDialog'), 'Financas.tsx não deve importar TransactionDialog');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 16. MEMBER recebe bloqueio de acesso (403)
+  // ---------------------------------------------------------------------------
+  await t.test('16. Usuário com papel MEMBER recebe bloqueio de acesso 403 Forbidden', async () => {
+    const { requireRole } = await import('../../middleware/auth.js');
+    const app = fastify();
+
+    app.get(
+      '/api/integrations/asaas/financial-overview-test',
+      {
+        preHandler: [
+          async (req) => {
+            req.authContext = {
+              type: 'user',
+              userId: 'usr_member_1',
+              email: 'member@zafira.com.br',
+              memberships: [{ organizationId: 'org_1', organizationSlug: 'zafira', role: 'MEMBER' }],
+            };
+          },
+          requireRole(['ADMIN', 'MANAGER']),
+        ],
+      },
+      async () => ({ ok: true })
+    );
+    await app.ready();
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/integrations/asaas/financial-overview-test',
+    });
+
+    assert.strictEqual(res.statusCode, 403, 'Acesso de MEMBER deve retornar 403 Forbidden');
+    const body = JSON.parse(res.payload);
+    assert.strictEqual(body.error, 'forbidden');
+  });
 });
+
+

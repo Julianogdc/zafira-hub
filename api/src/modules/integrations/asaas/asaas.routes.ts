@@ -137,6 +137,63 @@ export function createAsaasRoutes(customService?: AsaasService) {
       syncClientHandler
     );
 
+    // =========================================================================
+    // 4. GET /integrations/asaas/financial-overview (Visão financeira global do Hub)
+    // =========================================================================
+    const getFinancialOverviewHandler = async (
+      request: FastifyRequest<{
+        Querystring: {
+          period?: string;
+          startDate?: string;
+          endDate?: string;
+          clientId?: string;
+          status?: string;
+          search?: string;
+          page?: string;
+          limit?: string;
+        };
+      }>,
+      reply: FastifyReply
+    ) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        if (!organizationId) {
+          return reply.status(400).send({
+            status: 'error',
+            message: 'Organização do usuário não identificada.',
+          });
+        }
+
+        const filters = {
+          period: request.query.period,
+          startDate: request.query.startDate,
+          endDate: request.query.endDate,
+          clientId: request.query.clientId,
+          status: request.query.status,
+          search: request.query.search,
+          page: request.query.page ? parseInt(request.query.page, 10) : undefined,
+          limit: request.query.limit ? parseInt(request.query.limit, 10) : undefined,
+        };
+
+        const result = await service.getFinancialOverview(organizationId, filters);
+        return reply.status(200).send(result);
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    };
+
+    app.get(
+      '/integrations/asaas/financial-overview',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getFinancialOverviewHandler
+    );
+    app.get(
+      '/api/integrations/asaas/financial-overview',
+      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      getFinancialOverviewHandler
+    );
+
+
 
     // =========================================================================
     // 3. POST /api/webhooks/asaas (Endpoint seguro de Webhook do Asaas)
