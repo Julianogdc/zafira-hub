@@ -33,6 +33,8 @@ import {
   CartesianGrid,
   Tooltip,
 } from 'recharts';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { CaixaMovimentacoes } from '@/components/financial/CaixaMovimentacoes';
 import { PageHeader } from '@/components/ui/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -345,14 +347,32 @@ export default function Financas() {
         </div>
       </PageHeader>
 
-      {/* 2. AVISO DISCRETO DE SINCRONIZAÇÃO */}
-      <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-zinc-900/60 border border-white/5 text-xs text-zinc-400">
-        <Info className="w-4 h-4 text-emerald-400 shrink-0" />
-        <span>
-          {overview?.disclaimer ||
-            'Os dados são atualizados pela sincronização por cliente e pelos eventos do Asaas.'}
-        </span>
-      </div>
+      {/* SELEÇÃO DE ABAS: COBRANÇAS VS CAIXA E MOVIMENTAÇÕES */}
+      <Tabs defaultValue="cobrancas" className="w-full space-y-6">
+        <TabsList className="bg-zinc-950/80 border border-white/10 p-1 h-10 w-full sm:w-auto justify-start">
+          <TabsTrigger
+            value="cobrancas"
+            className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white data-[state=active]:shadow-sm px-4"
+          >
+            Cobranças (Asaas)
+          </TabsTrigger>
+          <TabsTrigger
+            value="caixa"
+            className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white data-[state=active]:shadow-sm px-4"
+          >
+            Caixa e Movimentações (Asaas + Inter PJ)
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="cobrancas" className="space-y-6 mt-0">
+          {/* 2. AVISO DISCRETO DE SINCRONIZAÇÃO */}
+          <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-zinc-900/60 border border-white/5 text-xs text-zinc-400">
+            <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>
+              {overview?.disclaimer ||
+                'Os dados são atualizados pela sincronização por cliente e pelos eventos do Asaas.'}
+            </span>
+          </div>
 
       {/* 3. BARRA DE FILTROS */}
       <Card className="bg-zinc-950/40 border-white/10 p-4">
@@ -767,6 +787,12 @@ export default function Financas() {
           )}
         </CardContent>
       </Card>
+      </TabsContent>
+
+      <TabsContent value="caixa" className="space-y-6 mt-0">
+        <CaixaMovimentacoes />
+      </TabsContent>
+      </Tabs>
 
       {/* 7. MODAL DE CONFIRMAÇÃO: SINCRONIZAR CARTEIRA COMPLETA */}
       <Dialog open={confirmModalOpen} onOpenChange={setConfirmModalOpen}>

@@ -56,8 +56,13 @@ model Organization {
   clients            Client[]
   integrations       OrganizationIntegration[]
   oauthStates        OAuthState[]
-  asanaSubscriptions AsanaWebhookSubscription[]
-  asaasPayments      AsaasPayment[]
+  asanaSubscriptions     AsanaWebhookSubscription[]
+  asaasPayments          AsaasPayment[]
+  financialAccounts      FinancialAccount[]
+  financialCategories    FinancialCategory[]
+  financialCategoryRules FinancialCategoryRule[]
+  financialTransactions  FinancialTransaction[]
+  financialTransfers     FinancialTransfer[]
 
   @@map("organizations")
 }
@@ -243,5 +248,192 @@ model AsaasWebhookEvent {
   @@index([paymentExternalId])
   @@index([dedupeKey])
   @@map("asaas_webhook_events")
+}
+
+enum FinancialAccountProvider {
+  ASAAS
+  INTER
+}
+
+enum FinancialTransactionDirection {
+  CREDIT
+  DEBIT
+}
+
+enum FinancialTransactionKind {
+  CUSTOMER_PAYMENT
+  TRANSFER_INTERNAL
+  FEE
+  EXPENSE
+  TAX
+  ADJUSTMENT
+  OTHER
+}
+
+enum FinancialCategorizationSource {
+  PROVIDER
+  AUTO_RULE
+  MANUAL
+  PENDING
+}
+
+enum FinancialTransferStatus {
+  UNMATCHED
+  REVIEW
+  AUTO_MATCHED
+  CONFIRMED
+}
+
+enum FinancialCategoryType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  FEE
+  TAX
+  OTHER
+}
+
+enum FinancialMatchField {
+  DESCRIPTION
+  COUNTERPARTY_NAME
+  COUNTERPARTY_DOCUMENT
+}
+
+enum FinancialMatchType {
+  CONTAINS
+  EXACT
+}
+
+model FinancialAccount {
+  id             String                   @id @default(uuid())
+  organizationId String
+  provider       FinancialAccountProvider
+  name           String
+  currency       String                   @default("BRL")
+  currentBalance Decimal                  @default(0) @db.Decimal(14, 2)
+  balanceAsOf    DateTime?
+  lastSyncedAt   DateTime?
+  isActive       Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions    FinancialTransaction[]
+  sourceTransfers FinancialTransfer[]     @relation("SourceAccountTransfers")
+  destTransfers   FinancialTransfer[]     @relation("DestAccountTransfers")
+
+  @@unique([organizationId, provider, name])
+  @@index([organizationId])
+  @@index([provider])
+  @@map("financial_accounts")
+}
+
+model FinancialCategory {
+  id             String                @id @default(uuid())
+  organizationId String
+  name           String
+  type           FinancialCategoryType
+  color          String?
+  isSystem       Boolean               @default(false)
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rules        FinancialCategoryRule[]
+  transactions FinancialTransaction[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([type])
+  @@map("financial_categories")
+}
+
+model FinancialCategoryRule {
+  id                   String              @id @default(uuid())
+  organizationId       String
+  categoryId           String
+  matchField           FinancialMatchField
+  matchType            FinancialMatchType
+  matchValueNormalized String
+  priority             Int                 @default(0)
+  isActive             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     FinancialCategory       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([priority])
+  @@map("financial_category_rules")
+}
+
+model FinancialTransaction {
+  id                       String                        @id @default(uuid())
+  organizationId           String
+  accountId                String
+  externalId               String
+  occurredAt               DateTime
+  direction                FinancialTransactionDirection
+  kind                     FinancialTransactionKind
+  amount                   Decimal                       @db.Decimal(14, 2)
+  description              String
+  counterpartyName         String?
+  counterpartyDocument     String?
+  externalReference        String?
+  categoryId               String?
+  categorizationSource     FinancialCategorizationSource @default(PENDING)
+  categorizationConfidence Decimal?                      @db.Decimal(5, 2)
+  rawPayload               Json?
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+
+  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account        FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category       FinancialCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  sourceTransfer FinancialTransfer?  @relation("SourceTransactionTransfer")
+  destTransfer   FinancialTransfer?  @relation("DestTransactionTransfer")
+
+  @@unique([accountId, externalId])
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([occurredAt])
+  @@index([direction])
+  @@index([kind])
+  @@index([categoryId])
+  @@index([categorizationSource])
+  @@map("financial_transactions")
+}
+
+model FinancialTransfer {
+  id                       String                  @id @default(uuid())
+  organizationId           String
+  sourceAccountId          String
+  destinationAccountId     String
+  sourceTransactionId      String                  @unique
+  destinationTransactionId String?                 @unique
+  amount                   Decimal                 @db.Decimal(14, 2)
+  transferredAt            DateTime
+  status                   FinancialTransferStatus @default(UNMATCHED)
+  confidence               Decimal                 @default(0) @db.Decimal(5, 2)
+  matchReason              String?
+  confirmedAt              DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceAccount          FinancialAccount      @relation("SourceAccountTransfers", fields: [sourceAccountId], references: [id], onDelete: Cascade)
+  destinationAccount     FinancialAccount      @relation("DestAccountTransfers", fields: [destinationAccountId], references: [id], onDelete: Cascade)
+  sourceTransaction      FinancialTransaction  @relation("SourceTransactionTransfer", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
+  destinationTransaction FinancialTransaction? @relation("DestTransactionTransfer", fields: [destinationTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([sourceAccountId])
+  @@index([destinationAccountId])
+  @@index([status])
+  @@index([transferredAt])
+  @@map("financial_transfers")
 }
 

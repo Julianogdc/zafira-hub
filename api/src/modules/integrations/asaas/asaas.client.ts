@@ -257,5 +257,43 @@ export class AsaasClient {
 
     return allPayments;
   }
+
+  /**
+   * Consulta o saldo atual da conta Asaas (GET /finance/balance).
+   */
+  async getAccountBalance(): Promise<AsaasBalanceResponse> {
+    return this.get<AsaasBalanceResponse>('/finance/balance');
+  }
+
+  /**
+   * Consulta extrato/transações financeiras no Asaas (GET /financialTransactions).
+   */
+  async getFinancialTransactions(params?: {
+    startDate?: string;
+    finishDate?: string;
+    offset?: number;
+    limit?: number;
+    type?: string;
+  }): Promise<AsaasListResponse<AsaasFinancialTransactionRaw>> {
+    return this.get<AsaasListResponse<AsaasFinancialTransactionRaw>>('/financialTransactions', params);
+  }
+}
+
+export interface AsaasBalanceResponse {
+  totalBalance: number;
+  availableBalance?: number;
+  reservedBalance?: number;
+}
+
+export interface AsaasFinancialTransactionRaw {
+  id: string;
+  value: number;
+  balance?: number;
+  type: string;
+  date: string;
+  description?: string | null;
+  paymentId?: string | null;
+  transferId?: string | null;
+  reversed?: boolean;
 }
 

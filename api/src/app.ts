@@ -11,6 +11,7 @@ import { clientRoutes } from './modules/clients/clients.routes.js';
 import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
 import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
 import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
+import { financialRoutes } from './modules/financial/financial.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -97,6 +98,9 @@ export function buildApp(): FastifyInstance {
 
   // 10. Rotas de Integração Asaas
   app.register(asaasRoutes);
+
+  // 11. Rotas do Módulo Financeiro Unificado (Asaas + Inter PJ + Extrato Unificado)
+  app.register(financialRoutes);
 
   return app;
 }
