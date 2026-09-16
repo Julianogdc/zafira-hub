@@ -324,7 +324,7 @@ export function CaixaMovimentacoes() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-emerald-400">
-              {formatBRL(overview?.periodSummary.operationalIncome)}
+              {isInterConnected ? formatBRL(overview?.periodSummary.operationalIncome) : '—'}
             </div>
             <p className="text-[11px] text-zinc-500 mt-1">Créditos recebidos na conta corrente PJ</p>
           </CardContent>
@@ -338,7 +338,7 @@ export function CaixaMovimentacoes() {
           </CardHeader>
           <CardContent>
             <div className="text-xl font-bold text-red-400">
-              {formatBRL(overview?.periodSummary.operationalExpense)}
+              {isInterConnected ? formatBRL(overview?.periodSummary.operationalExpense) : '—'}
             </div>
             <p className="text-[11px] text-zinc-500 mt-1">Débitos e despesas pagas pela conta PJ</p>
           </CardContent>

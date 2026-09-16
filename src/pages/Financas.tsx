@@ -85,6 +85,9 @@ export default function Financas() {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
+  // Aba Ativa (cobrancas vs caixa)
+  const [activeTab, setActiveTab] = useState<string>('cobrancas');
+
   // Estados de Sincronização da Carteira Asaas
   const [confirmModalOpen, setConfirmModalOpen] = useState<boolean>(false);
   const [summaryModalOpen, setSummaryModalOpen] = useState<boolean>(false);
@@ -319,36 +322,40 @@ export default function Financas() {
       {/* 1. HEADER COM AÇÕES */}
       <PageHeader
         title="Finanças"
-        description="Gestão e visão financeira consolidada com dados reais do Asaas."
+        description="Cobranças pelo Asaas e caixa real pelo Banco Inter PJ."
         icon={Wallet}
       >
         <div className="flex items-center gap-2.5">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setConfirmModalOpen(true)}
-            disabled={loading || syncingWallet}
-            className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 text-xs gap-1.5 h-9"
-          >
-            <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Sincronizar carteira Asaas</span>
-          </Button>
+          {activeTab === 'cobrancas' && (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmModalOpen(true)}
+                disabled={loading || syncingWallet}
+                className="border-emerald-500/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 text-xs gap-1.5 h-9"
+              >
+                <UserPlus className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Sincronizar carteira Asaas</span>
+              </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => fetchOverview(true)}
-            disabled={loading || refreshing || syncingWallet}
-            className="border-white/10 bg-zinc-900/60 text-zinc-200 hover:bg-zinc-800 text-xs gap-1.5 h-9"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
-            <span>{refreshing ? 'Atualizando...' : 'Atualizar visão'}</span>
-          </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchOverview(true)}
+                disabled={loading || refreshing || syncingWallet}
+                className="border-white/10 bg-zinc-900/60 text-zinc-200 hover:bg-zinc-800 text-xs gap-1.5 h-9"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                <span>{refreshing ? 'Atualizando...' : 'Atualizar visão'}</span>
+              </Button>
+            </>
+          )}
         </div>
       </PageHeader>
 
       {/* SELEÇÃO DE ABAS: COBRANÇAS VS CAIXA E MOVIMENTAÇÕES */}
-      <Tabs defaultValue="cobrancas" className="w-full space-y-6">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full space-y-6">
         <TabsList className="bg-zinc-950/80 border border-white/10 p-1 h-10 w-full sm:w-auto justify-start">
           <TabsTrigger
             value="cobrancas"
