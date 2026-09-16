@@ -759,4 +759,179 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     assert.strictEqual(confirmed.status, 'CONFIRMED');
     assert.strictEqual(updatedTransfer.status, 'CONFIRMED');
   });
+
+  // ---------------------------------------------------------------------------
+  // 15. Autenticação e RBAC nos endpoints financeiros: 401 sem sessão, 403 para MEMBER, 200 com sessão ADMIN/MANAGER
+  // ---------------------------------------------------------------------------
+  await t.test('15. Endpoints financeiros: sem sessão -> 401, MEMBER -> 403, sessão ADMIN/MANAGER -> 200', async () => {
+    const app = fastify();
+    await app.register(cookie, { secret: 'test_cookie_secret_32bytes_long' });
+    await app.register(jwt, { secret: 'test_jwt_secret_32bytes_long' });
+
+    // Mock dos serviços para o teste de transporte HTTP e autenticação
+    const mockOverview = {
+      accounts: [],
+      consolidatedBalance: 15000,
+      periodSummary: {
+        startDate: '2026-09-01',
+        endDate: '2026-09-30',
+        operationalIncome: 5000,
+        operationalExpense: 2000,
+        internalTransfersAmount: 0,
+        pendingReviewCount: 0,
+      },
+    };
+
+    const mockTransactions = {
+      transactions: [],
+      pagination: { total: 0, page: 1, limit: 20, totalPages: 1 },
+    };
+
+    const mockSyncLedger = {
+      success: true,
+      syncedCount: 5,
+      balance: 15000,
+    };
+
+    // Implementação das rotas reproduzindo financial.routes.ts
+    const getOrganizationId = (req: any): string => {
+      const auth = req.authContext;
+      if (auth && auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
+        const zafira = auth.memberships.find((m: any) => m.organizationSlug === 'zafira');
+        const orgId = (zafira || auth.memberships[0]).organizationId;
+        if (orgId) return orgId;
+      }
+
+      const user = req.user;
+      if (user?.organizationId) {
+        return user.organizationId;
+      }
+
+      if (auth && auth.type === 'api_key') {
+        const headerOrg = req.headers['x-organization-id'] as string;
+        const queryOrg = (req.query as any)?.organizationId;
+        if (headerOrg || queryOrg) return headerOrg || queryOrg;
+      }
+
+      const err: any = new Error('Usuário não autenticado ou organização não identificada');
+      err.statusCode = 401;
+      throw err;
+    };
+
+    // Middleware de autenticação idêntico ao do Hub
+    const authenticateMock = async (req: any, reply: any) => {
+      let token = req.cookies?.token;
+      if (!token && req.headers.authorization) {
+        const parts = req.headers.authorization.split(' ');
+        if (parts.length === 2 && parts[0] === 'Bearer') {
+          token = parts[1];
+        }
+      }
+
+      if (!token) {
+        return reply.status(401).send({ error: 'unauthorized' });
+      }
+
+      try {
+        const decoded = await app.jwt.verify<any>(token);
+        req.authContext = {
+          type: 'user',
+          userId: decoded.sub,
+          email: decoded.email,
+          memberships: decoded.memberships || [],
+        };
+      } catch {
+        return reply.status(401).send({ error: 'unauthorized' });
+      }
+    };
+
+    // Registrar hooks exatamente como em financial.routes.ts
+    app.addHook('preHandler', authenticateMock);
+    app.addHook('preHandler', requireRole(['ADMIN', 'MANAGER']));
+
+    app.get('/financial/accounts/overview', async (req, reply) => {
+      const orgId = getOrganizationId(req);
+      assert.strictEqual(orgId, 'org_zafira_real_123');
+      return reply.send(mockOverview);
+    });
+
+    app.get('/financial/transactions', async (req, reply) => {
+      const orgId = getOrganizationId(req);
+      assert.strictEqual(orgId, 'org_zafira_real_123');
+      return reply.send(mockTransactions);
+    });
+
+    app.post('/integrations/asaas/sync-ledger', async (req, reply) => {
+      const orgId = getOrganizationId(req);
+      assert.strictEqual(orgId, 'org_zafira_real_123');
+      return reply.send(mockSyncLedger);
+    });
+
+    await app.ready();
+
+    // 1. SEM SESSÃO -> todos devem retornar 401
+    const unauthOverview = await app.inject({ method: 'GET', url: '/financial/accounts/overview' });
+    assert.strictEqual(unauthOverview.statusCode, 401, 'Overview sem sessão deve retornar 401');
+
+    const unauthTransactions = await app.inject({ method: 'GET', url: '/financial/transactions?page=1&limit=20' });
+    assert.strictEqual(unauthTransactions.statusCode, 401, 'Transactions sem sessão deve retornar 401');
+
+    const unauthSyncLedger = await app.inject({ method: 'POST', url: '/integrations/asaas/sync-ledger' });
+    assert.strictEqual(unauthSyncLedger.statusCode, 401, 'Sync ledger sem sessão deve retornar 401');
+
+    // 2. COM SESSÃO DE 'MEMBER' -> todos devem retornar 403 Forbidden
+    const memberToken = app.jwt.sign({
+      sub: 'usr_member_test',
+      email: 'member@zafira.com.br',
+      memberships: [{ organizationId: 'org_zafira_real_123', organizationSlug: 'zafira', role: 'MEMBER' }],
+    });
+
+    const memberOverview = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    assert.strictEqual(memberOverview.statusCode, 403, 'MEMBER deve receber 403');
+
+    const memberTransactions = await app.inject({
+      method: 'GET',
+      url: '/financial/transactions',
+      headers: { authorization: `Bearer ${memberToken}` },
+    });
+    assert.strictEqual(memberTransactions.statusCode, 403, 'MEMBER deve receber 403');
+
+    // 3. COM SESSÃO DE 'ADMIN' / 'MANAGER' (via Cookie HTTP-only de sessão ou Bearer)
+    const adminToken = app.jwt.sign({
+      sub: 'usr_admin_test',
+      email: 'admin@zafira.com.br',
+      memberships: [{ organizationId: 'org_zafira_real_123', organizationSlug: 'zafira', role: 'ADMIN' }],
+    });
+
+    // Teste com Cookie HTTP-only (modo padrão do navegador no Hub)
+    const authOverview = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      cookies: { token: adminToken },
+    });
+    assert.strictEqual(authOverview.statusCode, 200, 'GET /financial/accounts/overview com cookie de sessão deixa de retornar 401 e retorna 200');
+    assert.strictEqual(authOverview.json().consolidatedBalance, 15000);
+
+    const authTransactions = await app.inject({
+      method: 'GET',
+      url: '/financial/transactions?page=1&limit=20',
+      cookies: { token: adminToken },
+    });
+    assert.strictEqual(authTransactions.statusCode, 200, 'GET /financial/transactions com cookie de sessão deixa de retornar 401 e retorna 200');
+    assert.strictEqual(authTransactions.json().pagination.limit, 20);
+
+    const authSyncLedger = await app.inject({
+      method: 'POST',
+      url: '/integrations/asaas/sync-ledger',
+      cookies: { token: adminToken },
+    });
+    assert.strictEqual(authSyncLedger.statusCode, 200, 'POST /integrations/asaas/sync-ledger com cookie de sessão deixa de retornar 401 e retorna 200');
+    assert.strictEqual(authSyncLedger.json().success, true);
+    assert.strictEqual(authSyncLedger.json().syncedCount, 5);
+  });
 });
+

@@ -123,8 +123,8 @@ export const financialApi = {
     const params = new URLSearchParams();
     if (startDate) params.append('startDate', startDate);
     if (endDate) params.append('endDate', endDate);
-    const { data } = await api.get<FinancialAccountsOverviewResponse>(`/financial/accounts/overview?${params.toString()}`);
-    return data;
+    const qs = params.toString();
+    return api.get<FinancialAccountsOverviewResponse>(`/financial/accounts/overview${qs ? `?${qs}` : ''}`);
   },
 
   getTransactions: async (params: FinancialTransactionsParams = {}): Promise<FinancialTransactionsResponse> => {
@@ -140,32 +140,27 @@ export const financialApi = {
     if (params.page) searchParams.append('page', params.page.toString());
     if (params.limit) searchParams.append('limit', params.limit.toString());
 
-    const { data } = await api.get<FinancialTransactionsResponse>(`/financial/transactions?${searchParams.toString()}`);
-    return data;
+    const qs = searchParams.toString();
+    return api.get<FinancialTransactionsResponse>(`/financial/transactions${qs ? `?${qs}` : ''}`);
   },
 
   getCategories: async (): Promise<{ categories: FinancialCategoryItem[] }> => {
-    const { data } = await api.get<{ categories: FinancialCategoryItem[] }>('/financial/categories');
-    return data;
+    return api.get<{ categories: FinancialCategoryItem[] }>('/financial/categories');
   },
 
   updateTransactionCategory: async (id: string, payload: UpdateCategoryPayload): Promise<any> => {
-    const { data } = await api.patch(`/financial/transactions/${id}/category`, payload);
-    return data;
+    return api.patch(`/financial/transactions/${id}/category`, payload);
   },
 
   confirmTransfer: async (transferId: string): Promise<any> => {
-    const { data } = await api.patch(`/financial/transfers/${transferId}/confirm`);
-    return data;
+    return api.patch(`/financial/transfers/${transferId}/confirm`);
   },
 
   syncAsaasLedger: async (): Promise<SyncLedgerResult> => {
-    const { data } = await api.post<SyncLedgerResult>('/integrations/asaas/sync-ledger');
-    return data;
+    return api.post<SyncLedgerResult>('/integrations/asaas/sync-ledger');
   },
 
   syncInter: async (payload?: { startDate?: string; endDate?: string }): Promise<SyncInterResult> => {
-    const { data } = await api.post<SyncInterResult>('/integrations/inter/sync', payload || {});
-    return data;
+    return api.post<SyncInterResult>('/integrations/inter/sync', payload || {});
   },
 };

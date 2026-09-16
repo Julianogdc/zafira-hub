@@ -19,13 +19,29 @@ export async function financialRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate);
   app.addHook('preHandler', requireRole(['ADMIN', 'MANAGER']));
 
-  // Helper para obter organizationId de forma segura
+  // Helper para obter organizationId de forma segura a partir de authContext ou sessão
   const getOrganizationId = (req: FastifyRequest): string => {
-    const user = (req as any).user;
-    if (!user || !user.organizationId) {
-      throw { statusCode: 401, message: 'Usuário não autenticado ou organização não identificada' };
+    const auth = req.authContext;
+    if (auth && auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
+      const zafira = auth.memberships.find((m) => m.organizationSlug === 'zafira');
+      const orgId = (zafira || auth.memberships[0]).organizationId;
+      if (orgId) return orgId;
     }
-    return user.organizationId;
+
+    const user = (req as any).user;
+    if (user?.organizationId) {
+      return user.organizationId;
+    }
+
+    if (auth && auth.type === 'api_key') {
+      const headerOrg = req.headers['x-organization-id'] as string;
+      const queryOrg = (req.query as any)?.organizationId;
+      if (headerOrg || queryOrg) return headerOrg || queryOrg;
+    }
+
+    const err: any = new Error('Usuário não autenticado ou organização não identificada');
+    err.statusCode = 401;
+    throw err;
   };
 
   /**
