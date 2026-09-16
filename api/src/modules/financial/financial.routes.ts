@@ -270,12 +270,14 @@ export async function financialRoutes(app: FastifyInstance) {
 
   /**
    * POST /integrations/asaas/sync-ledger
-   * Sincroniza saldo e extrato financeiro do Asaas para a tabela de transações
+   * Desativado na Etapa 5B: Asaas é exclusivo para contas a receber; o caixa é alimentado exclusivamente pelo Banco Inter PJ.
    */
   const handleSyncAsaasLedger = async (req: FastifyRequest, reply: FastifyReply) => {
-    const organizationId = getOrganizationId(req);
-    const result = await asaasService.syncLedger(organizationId);
-    return reply.send(result);
+    return reply.send({
+      success: false,
+      code: 'ASAAS_LEDGER_DISABLED',
+      message: 'O Asaas é utilizado apenas para contas a receber. O caixa é alimentado exclusivamente pelo Banco Inter PJ.',
+    });
   };
   app.post('/integrations/asaas/sync-ledger', handleSyncAsaasLedger);
   app.post('/api/integrations/asaas/sync-ledger', handleSyncAsaasLedger);

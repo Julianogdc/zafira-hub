@@ -543,73 +543,179 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   });
 
   // ---------------------------------------------------------------------------
-  // 10. Idempotência do Ledger Asaas
+  // 10. Desativação segura do syncLedger Asaas (Etapa 5B: Asaas é visor, Inter é caixa)
   // ---------------------------------------------------------------------------
-  await t.test('10. syncLedger Asaas é idempotente por accountId + externalId', async () => {
-    const upsertedTransactions: any[] = [];
+  await t.test('10. syncLedger Asaas desativado retorna ASAAS_LEDGER_DISABLED sem chamadas de rede nem mutações', async () => {
+    let touchedDatabase = false;
+    let externalClientCalled = false;
+
     const mockPrisma: any = {
       financialAccount: {
-        findFirst: async () => ({ id: 'acc-asaas-1', provider: 'ASAAS', isActive: true, name: 'Conta Asaas' }),
-        findMany: async () => [
-          { id: 'acc-asaas-1', provider: 'ASAAS', isActive: true, name: 'Conta Asaas' },
-          { id: 'acc-inter-1', provider: 'INTER', isActive: true, name: 'Banco Inter' },
-        ],
-        update: async () => ({}),
-      },
-      financialCategory: {
-        findMany: async () => [],
-        create: async (args: any) => ({ id: 'cat-1', ...args.data }),
-      },
-      financialCategoryRule: {
-        findMany: async () => [],
+        update: () => { touchedDatabase = true; },
+        create: () => { touchedDatabase = true; },
       },
       financialTransaction: {
-        upsert: async (args: any) => {
-          upsertedTransactions.push(args);
-          return { id: 'tx-db-1', ...args.create };
-        },
-        findMany: async () => [],
-        update: async () => ({}),
-      },
-      financialTransfer: {
-        create: async () => ({ id: 'tr-1' }),
+        upsert: () => { touchedDatabase = true; },
+        create: () => { touchedDatabase = true; },
+        update: () => { touchedDatabase = true; },
+        delete: () => { touchedDatabase = true; },
       },
     };
 
     const service = new AsaasService(mockPrisma);
     (service as any).client = {
-      getAccountBalance: async () => ({ balance: 3500.0 }),
-      getFinancialTransactions: async () => ({
-        data: [
-          {
-            id: 'raw-tx-1',
-            value: 200,
-            balance: 3500,
-            type: 'PAYMENT_RECEIVED',
-            date: '2026-09-15',
-            description: 'Recebimento de mensalidade',
-          },
-          {
-            id: 'raw-tx-2',
-            value: -50,
-            balance: 3450,
-            type: 'TRANSFER',
-            date: '2026-09-15',
-            description: 'Tarifa bancária',
-          },
-        ],
-        hasMore: false,
-        totalCount: 2,
-      }),
+      getAccountBalance: async () => {
+        externalClientCalled = true;
+        return { totalBalance: 5000 };
+      },
+      getFinancialTransactions: async () => {
+        externalClientCalled = true;
+        return { data: [] };
+      },
     };
 
     const result = await service.syncLedger('org-test');
-    assert.strictEqual(result.success, true);
-    assert.strictEqual(result.syncedCount, 2);
-    assert.strictEqual(upsertedTransactions.length, 2);
+    assert.strictEqual(result.success, false);
+    assert.strictEqual(result.code, 'ASAAS_LEDGER_DISABLED');
+    assert.ok(result.message.includes('O Asaas é utilizado apenas para contas a receber'));
+    assert.strictEqual(touchedDatabase, false, 'Nenhuma mutação no banco ocorreu');
+    assert.strictEqual(externalClientCalled, false, 'Nenhuma chamada de rede ao cliente Asaas ocorreu');
+  });
 
-    assert.strictEqual(upsertedTransactions[0].where.accountId_externalId.externalId, 'raw-tx-1');
-    assert.strictEqual(upsertedTransactions[1].where.accountId_externalId.externalId, 'raw-tx-2');
+  // ---------------------------------------------------------------------------
+  // 10.1 getAccountsOverview considera exclusivamente contas e transações com provider INTER
+  // ---------------------------------------------------------------------------
+  await t.test('10.1 getAccountsOverview calcula saldos e indicadores exclusivamente sobre o Banco Inter PJ', async () => {
+    let capturedAccountWhere: any = null;
+    let capturedTxWhere: any = null;
+
+    const mockPrisma: any = {
+      financialAccount: {
+        findMany: async (args: any) => {
+          capturedAccountWhere = args.where;
+          // Retorna apenas a conta Inter; conta Asaas está excluída da consulta
+          return [
+            {
+              id: 'acc-inter-1',
+              provider: 'INTER',
+              name: 'Banco Inter PJ',
+              currency: 'BRL',
+              currentBalance: 12500.50,
+              balanceAsOf: new Date('2026-09-16T12:00:00Z'),
+              lastSyncedAt: new Date('2026-09-16T12:00:00Z'),
+              isActive: true,
+            },
+          ];
+        },
+      },
+      financialTransaction: {
+        findMany: async (args: any) => {
+          capturedTxWhere = args.where;
+          // Retorna apenas transações do Inter PJ
+          return [
+            { amount: 5000, direction: 'CREDIT', kind: 'OPERATIONAL', categorizationSource: 'RULE' },
+            { amount: 1200, direction: 'DEBIT', kind: 'OPERATIONAL', categorizationSource: 'RULE' },
+            { amount: 300, direction: 'DEBIT', kind: 'OPERATIONAL', categorizationSource: 'PENDING' },
+          ];
+        },
+      },
+    };
+
+    const financialService = new FinancialService(mockPrisma);
+    const overview = await financialService.getAccountsOverview('org-inter-only');
+
+    // 1. Verificação dos filtros Prisma
+    assert.strictEqual(capturedAccountWhere.organizationId, 'org-inter-only');
+    assert.strictEqual(capturedAccountWhere.provider, 'INTER', 'Deve consultar exclusivamente contas com provider INTER');
+    assert.strictEqual(capturedTxWhere.account.provider, 'INTER', 'Deve consultar exclusivamente transações com provider INTER');
+
+    // 2. Verificação de saldos
+    assert.strictEqual(overview.interBalance, 12500.50);
+    assert.strictEqual(overview.consolidatedBalance, 12500.50, 'Saldo consolidado deve ser idêntico ao saldo Inter PJ');
+    assert.strictEqual(overview.asaasBalance, 0, 'Saldo Asaas não alimenta o caixa');
+
+    // 3. Verificação de fluxos operacionais
+    assert.strictEqual(overview.operationalIncome, 5000);
+    assert.strictEqual(overview.operationalExpense, 1500);
+    assert.strictEqual(overview.toReviewCount, 1);
+    assert.strictEqual(overview.accounts.length, 1);
+    assert.strictEqual(overview.accounts[0].provider, 'INTER');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 10.2 getTransactions filtra estritamente account.provider = INTER, excluindo Asaas
+  // ---------------------------------------------------------------------------
+  await t.test('10.2 getTransactions aplica filtro estrito account.provider = INTER', async () => {
+    let capturedWhere: any = null;
+
+    const mockPrisma: any = {
+      financialTransaction: {
+        count: async (args: any) => {
+          capturedWhere = args.where;
+          return 10;
+        },
+        findMany: async (args: any) => {
+          return [
+            {
+              id: 'tx-inter-1',
+              accountId: 'acc-inter-1',
+              account: { id: 'acc-inter-1', name: 'Banco Inter PJ', provider: 'INTER' },
+              occurredAt: new Date('2026-09-16T10:00:00Z'),
+              direction: 'CREDIT',
+              kind: 'OPERATIONAL',
+              amount: 1500,
+              description: 'PIX RECEBIDO INTER',
+              counterpartyName: 'Cliente A',
+              counterpartyDocument: '11122233344',
+              externalId: 'ext-inter-1',
+              externalReference: null,
+              categoryId: null,
+              category: null,
+              categorizationSource: 'PENDING',
+              categorizationConfidence: null,
+              sourceTransfer: null,
+              destTransfer: null,
+            },
+          ];
+        },
+      },
+    };
+
+    const financialService = new FinancialService(mockPrisma);
+    // Mesmo que alguém tente solicitar provider: 'ASAAS', a consulta deve fixar provider: 'INTER'
+    const result = await financialService.getTransactions('org-123', { provider: 'ASAAS' as any });
+
+    assert.strictEqual(capturedWhere.organizationId, 'org-123');
+    assert.strictEqual(capturedWhere.account.provider, 'INTER', 'Filtro deve restringir estritamente a INTER');
+    assert.strictEqual(result.transactions.length, 1);
+    assert.strictEqual(result.transactions[0].provider, 'INTER');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 10.3 100 registros históricos Asaas permanecem no banco de dados para auditoria sem exclusão
+  // ---------------------------------------------------------------------------
+  await t.test('10.3 Registros históricos do Asaas são preservados no banco sem exclusão para auditoria', async () => {
+    let deleteCalled = false;
+    let deleteManyCalled = false;
+
+    const mockPrisma: any = {
+      financialTransaction: {
+        delete: () => { deleteCalled = true; },
+        deleteMany: () => { deleteManyCalled = true; },
+        count: async () => 100, // 100 registros históricos Asaas permanecem intactos
+        findMany: async () => [],
+      },
+      financialAccount: {
+        findMany: async () => [],
+      },
+    };
+
+    const financialService = new FinancialService(mockPrisma);
+    await financialService.getAccountsOverview('org-audit');
+    await financialService.getTransactions('org-audit', {});
+
+    assert.strictEqual(deleteCalled, false, 'delete não deve ser chamado');
+    assert.strictEqual(deleteManyCalled, false, 'deleteMany não deve ser chamado');
   });
 
   // ---------------------------------------------------------------------------
@@ -621,25 +727,19 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       financialAccount: {
         findFirst: async () => ({ id: 'acc-asaas-1', provider: 'ASAAS', isActive: true, name: 'Conta Asaas' }),
         findMany: async () => [
-          { id: 'acc-asaas-1', provider: 'ASAAS', isActive: true, name: 'Conta Asaas' },
           { id: 'acc-inter-1', provider: 'INTER', isActive: true, name: 'Banco Inter' },
         ],
         update: async () => ({}),
       },
       financialCategory: {
         findMany: async () => [],
-        create: async (args: any) => ({ id: 'cat-1', ...args.data }),
       },
       financialCategoryRule: {
         findMany: async () => [],
       },
       financialTransaction: {
-        upsert: async () => ({ id: 'tx-1' }),
         findMany: async () => [],
-        update: async () => ({}),
-      },
-      financialTransfer: {
-        create: async () => ({ id: 'tr-1' }),
+        count: async () => 0,
       },
       asaasPayment: {
         update: () => {
@@ -654,11 +754,6 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     };
 
     const service = new AsaasService(mockPrisma);
-    (service as any).client = {
-      getAccountBalance: async () => ({ balance: 100 }),
-      getFinancialTransactions: async () => ({ data: [], hasMore: false, totalCount: 0 }),
-    };
-
     await service.syncLedger('org-test');
     assert.strictEqual(paymentTouched, false, 'AsaasPayment permaneceu intacto');
   });

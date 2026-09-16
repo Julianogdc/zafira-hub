@@ -12,9 +12,12 @@ export interface FinancialAccountSummary {
   name: string;
   accountNumber?: string | null;
   agency?: string | null;
-  balance: number;
-  lastSyncAt: string | null;
-  status: string;
+  balance?: number;
+  currentBalance?: number;
+  lastSyncAt?: string | null;
+  lastSyncedAt?: string | null;
+  isActive?: boolean;
+  status?: string;
   metadata?: any;
 }
 

@@ -1232,159 +1232,22 @@ export class AsaasService {
   }
 
   /**
-   * Sincroniza saldo e extrato financeiro do Asaas para o livro-razão unificado (FinancialAccount e FinancialTransaction).
-   * Não afeta as cobranças AsaasPayment existentes.
+   * Desativado na Etapa 5B: O Asaas é utilizado apenas para contas a receber e visor de cobranças.
+   * O caixa e o extrato são alimentados exclusivamente pelo Banco Inter PJ.
+   * Não executa chamadas de rede nem mutações no banco de dados.
    */
   async syncLedger(organizationId: string): Promise<{
     success: boolean;
-    account: {
-      id: string;
-      name: string;
-      balance: number;
-      balanceAsOf: string | null;
-    };
-    syncedTransactions: number;
-    autoMatchedTransfers?: number;
-    reviewTransfers?: number;
+    code: string;
+    message: string;
+    syncedCount?: number;
     timestamp: string;
   }> {
-    if (!organizationId) {
-      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
-    }
-
-    const account = await this.getOrCreateAccount(organizationId);
-
-    // 1. Consulta saldo atual no Asaas
-    let balanceValue = 0;
-    const now = new Date();
-    try {
-      if (typeof this.client?.getAccountBalance === 'function') {
-        const balanceRes = await this.client.getAccountBalance();
-        balanceValue = typeof balanceRes?.totalBalance === 'number' ? balanceRes.totalBalance : 0;
-      }
-    } catch (err: any) {
-      console.warn('[Asaas Ledger] Falha ao consultar saldo da conta Asaas:', err.message);
-    }
-
-    await this.prismaClient.financialAccount.update({
-      where: { id: account.id },
-      data: {
-        currentBalance: balanceValue,
-        balanceAsOf: now,
-        lastSyncedAt: now,
-      },
-    });
-
-    // 2. Consulta extrato de transações financeiras no Asaas
-    let transactions: any[] = [];
-    try {
-      if (typeof this.client?.getFinancialTransactions === 'function') {
-        const txRes = await this.client.getFinancialTransactions({ limit: 100 });
-        transactions = txRes?.data || [];
-      }
-    } catch (err: any) {
-      console.warn('[Asaas Ledger] Falha ao consultar extrato da conta Asaas:', err.message);
-    }
-
-    let syncedTransactions = 0;
-
-    for (const tx of transactions) {
-      const val = Number(tx.value || 0);
-      const direction = val >= 0 ? 'CREDIT' : 'DEBIT';
-      const amount = Math.abs(val);
-      const occurredAt = parseCalendarDate(tx.date) || new Date(tx.date);
-      const externalId = String(tx.id);
-      const description = (tx.description || (direction === 'CREDIT' ? 'Entrada Asaas' : 'Saída Asaas')).trim();
-
-      let kind: any = 'OTHER';
-      const upperType = String(tx.type || '').toUpperCase();
-      if (upperType === 'TRANSFER' || upperType === 'INTERNAL_TRANSFER') {
-        kind = 'TRANSFER_INTERNAL';
-      } else if (upperType.includes('PAYMENT') || upperType.includes('RECEIVED')) {
-        kind = 'CUSTOMER_PAYMENT';
-      } else if (upperType.includes('FEE') || upperType.includes('TAX')) {
-        kind = 'FEE';
-      } else if (direction === 'DEBIT') {
-        kind = 'EXPENSE';
-      }
-
-      // Se houver vínculo com paymentId, busca dados do cliente correspondente
-      let counterpartyName: string | null = null;
-      let counterpartyDocument: string | null = null;
-      if (tx.paymentId) {
-        const localPayment = await this.prismaClient.asaasPayment.findUnique({
-          where: { externalId: tx.paymentId },
-          include: { client: true },
-        });
-        if (localPayment?.client) {
-          counterpartyName = localPayment.client.name;
-          counterpartyDocument = localPayment.client.document;
-        }
-      }
-
-      // Categorização automática
-      const catService = new FinancialCategoryService(this.prismaClient);
-      const cat = await catService.categorizeTransaction(organizationId, {
-        description,
-        counterpartyName,
-        counterpartyDocument,
-      });
-
-      await this.prismaClient.financialTransaction.upsert({
-        where: {
-          accountId_externalId: {
-            accountId: account.id,
-            externalId,
-          },
-        },
-        create: {
-          organizationId,
-          accountId: account.id,
-          externalId,
-          occurredAt,
-          direction,
-          kind,
-          amount,
-          description,
-          counterpartyName,
-          counterpartyDocument,
-          externalReference: tx.paymentId || tx.transferId || null,
-          categoryId: cat.categoryId,
-          categorizationSource: cat.categorizationSource,
-          categorizationConfidence: cat.categorizationConfidence,
-          rawPayload: tx as any,
-        },
-        update: {
-          amount,
-          occurredAt,
-          direction,
-          description,
-          counterpartyName,
-          counterpartyDocument,
-          externalReference: tx.paymentId || tx.transferId || null,
-          rawPayload: tx as any,
-        },
-      });
-
-      syncedTransactions += 1;
-    }
-
-    // 3. Executa conciliação de transferências com o Inter
-    const recService = new FinancialReconciliationService(this.prismaClient);
-    const reconcileRes = await recService.reconcileTransfers(organizationId);
-
     return {
-      success: true,
-      account: {
-        id: account.id,
-        name: account.name,
-        balance: balanceValue,
-        balanceAsOf: now.toISOString(),
-      },
-      syncedTransactions,
-      syncedCount: syncedTransactions,
-      autoMatchedTransfers: reconcileRes.autoMatched,
-      reviewTransfers: reconcileRes.reviewCount,
+      success: false,
+      code: 'ASAAS_LEDGER_DISABLED',
+      message: 'O Asaas é utilizado apenas para contas a receber. O caixa é alimentado exclusivamente pelo Banco Inter PJ.',
+      syncedCount: 0,
       timestamp: new Date().toISOString(),
     };
   }

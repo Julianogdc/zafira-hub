@@ -243,21 +243,23 @@ export function CaixaMovimentacoes() {
     }
   };
 
-  const asaasAccount = overview?.accounts.find((a) => a.provider === 'ASAAS');
-  const interAccount = overview?.accounts.find((a) => a.provider === 'INTER');
+  const interAccount = overview?.accounts.find((a) => a.provider === 'INTER') || overview?.accounts[0];
+  const isInterConnected = Boolean(interAccount && (interAccount.lastSyncedAt || interAccount.lastSyncAt));
+
+  const netResult = (overview?.periodSummary.operationalIncome || 0) - (overview?.periodSummary.operationalExpense || 0);
 
   return (
     <div className="space-y-6">
-      {/* 1. BARRA DE SINCRONIZAÇÃO E CONTAS */}
+      {/* 1. BARRA DE SINCRONIZAÇÃO BANCO INTER PJ */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-zinc-950/60 border border-white/10">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-            <Building2 className="w-5 h-5 text-emerald-400" />
+          <div className="w-10 h-10 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center">
+            <Building2 className="w-5 h-5 text-orange-400" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-white">Saldos e Contas Integradas</h3>
+            <h3 className="text-sm font-semibold text-white">Caixa e Movimentações (Banco Inter PJ)</h3>
             <p className="text-xs text-zinc-400">
-              Extrato bancário unificado e conciliação de transferências manuais Asaas → Banco Inter PJ
+              Extrato bancário oficial, movimentações de conta corrente PJ e conciliação de receitas e despesas.
             </p>
           </div>
         </div>
@@ -266,19 +268,8 @@ export function CaixaMovimentacoes() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleSyncAsaas}
-            disabled={syncingAsaas || syncingInter}
-            className="border-white/10 bg-zinc-900/80 text-zinc-200 hover:bg-zinc-800 text-xs gap-1.5 h-8"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncingAsaas ? 'animate-spin text-emerald-400' : 'text-zinc-400'}`} />
-            <span>{syncingAsaas ? 'Sincronizando Asaas...' : 'Sincronizar Asaas'}</span>
-          </Button>
-
-          <Button
-            variant="outline"
-            size="sm"
             onClick={handleSyncInter}
-            disabled={syncingAsaas || syncingInter}
+            disabled={syncingInter}
             className="border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20 text-xs gap-1.5 h-8"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncingInter ? 'animate-spin text-orange-400' : 'text-orange-400'}`} />
@@ -287,70 +278,76 @@ export function CaixaMovimentacoes() {
         </div>
       </div>
 
-      {/* 2. CARDS DE SALDOS E TOTAIS OPERACIONAIS */}
+      {/* ESTADO VAZIO SE BANCO INTER NÃO ESTIVER CONECTADO */}
+      {!loadingOverview && !isInterConnected && (
+        <Card className="bg-zinc-950/40 border-dashed border-orange-500/30 p-8 text-center">
+          <div className="max-w-md mx-auto space-y-3">
+            <div className="w-12 h-12 rounded-full bg-orange-500/10 text-orange-400 mx-auto flex items-center justify-center">
+              <Building2 className="w-6 h-6" />
+            </div>
+            <h4 className="text-base font-semibold text-white">Banco Inter PJ não conectado</h4>
+            <p className="text-xs text-zinc-400 leading-relaxed">
+              Conecte o Banco Inter PJ para visualizar o caixa e as movimentações financeiras reais.
+            </p>
+            <p className="text-[11px] text-zinc-500">
+              O Asaas atua exclusivamente como visor de cobranças e contas a receber. O saldo de caixa e as movimentações operacionais dependem da integração com a conta corrente PJ do Inter.
+            </p>
+          </div>
+        </Card>
+      )}
+
+      {/* 2. CARDS DE SALDOS E TOTAIS OPERACIONAIS DO INTER PJ */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Saldo Consolidado */}
-        <Card className="bg-gradient-to-br from-zinc-900/90 to-zinc-950/80 border-emerald-500/30">
+        {/* Saldo Banco Inter PJ */}
+        <Card className="bg-gradient-to-br from-zinc-900/90 to-zinc-950/80 border-orange-500/30">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-medium text-emerald-400">Saldo Consolidado em Caixa</CardTitle>
-            <Wallet className="w-4 h-4 text-emerald-400" />
+            <CardTitle className="text-xs font-medium text-orange-400">Saldo em Caixa (Inter PJ)</CardTitle>
+            <Wallet className="w-4 h-4 text-orange-400" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-white">
-              {formatBRL(overview?.consolidatedBalance)}
+              {isInterConnected ? formatBRL(interAccount?.currentBalance ?? interAccount?.balance) : 'Não conectado'}
             </div>
             <p className="text-[11px] text-zinc-500 mt-1">
-              Disponível em contas ativas (Asaas + Inter)
+              {interAccount?.lastSyncedAt || interAccount?.lastSyncAt
+                ? `Atualizado em ${formatDate((interAccount.lastSyncedAt || interAccount.lastSyncAt)!)}`
+                : 'Aguardando sincronização inicial'}
             </p>
           </CardContent>
         </Card>
 
-        {/* Saldo Asaas */}
+        {/* Entradas Operacionais Inter */}
         <Card className="bg-zinc-950/40 border-white/10">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-medium text-zinc-400">Conta Asaas</CardTitle>
-            <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[10px]">
-              Ativa
-            </Badge>
+            <CardTitle className="text-xs font-medium text-zinc-400">Entradas Operacionais (Inter PJ)</CardTitle>
+            <ArrowUpRight className="w-4 h-4 text-emerald-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold text-white">
-              {formatBRL(asaasAccount?.balance)}
+            <div className="text-xl font-bold text-emerald-400">
+              {formatBRL(overview?.periodSummary.operationalIncome)}
             </div>
-            <p className="text-[11px] text-zinc-500 mt-1">
-              {asaasAccount?.lastSyncAt ? `Atualizado ${formatDate(asaasAccount.lastSyncAt)}` : 'Sincronizado'}
-            </p>
+            <p className="text-[11px] text-zinc-500 mt-1">Créditos recebidos na conta corrente PJ</p>
           </CardContent>
         </Card>
 
-        {/* Saldo Banco Inter PJ */}
+        {/* Saídas Operacionais Inter */}
         <Card className="bg-zinc-950/40 border-white/10">
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-medium text-zinc-400">Banco Inter PJ</CardTitle>
-            {interAccount && interAccount.lastSyncAt ? (
-              <Badge variant="outline" className="bg-orange-500/10 text-orange-400 border-orange-500/20 text-[10px]">
-                Conectado
-              </Badge>
-            ) : (
-              <Badge variant="outline" className="bg-zinc-800 text-zinc-400 border-white/10 text-[10px]">
-                Não configurado
-              </Badge>
-            )}
+            <CardTitle className="text-xs font-medium text-zinc-400">Saídas Operacionais (Inter PJ)</CardTitle>
+            <ArrowDownLeft className="w-4 h-4 text-red-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-xl font-bold text-white">
-              {interAccount ? formatBRL(interAccount.balance) : 'R$ 0,00'}
+            <div className="text-xl font-bold text-red-400">
+              {formatBRL(overview?.periodSummary.operationalExpense)}
             </div>
-            <p className="text-[11px] text-zinc-500 mt-1">
-              {interAccount?.lastSyncAt ? `Atualizado ${formatDate(interAccount.lastSyncAt)}` : 'Aguardando credenciais PJ'}
-            </p>
+            <p className="text-[11px] text-zinc-500 mt-1">Débitos e despesas pagas pela conta PJ</p>
           </CardContent>
         </Card>
 
-        {/* Itens para Revisar */}
+        {/* Classificação Pendente */}
         <Card className={`bg-zinc-950/40 ${(overview?.periodSummary.pendingReviewCount || 0) > 0 ? 'border-amber-500/40' : 'border-white/10'}`}>
           <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-            <CardTitle className="text-xs font-medium text-zinc-400">Classificação Pendente</CardTitle>
+            <CardTitle className="text-xs font-medium text-zinc-400">Para Revisar</CardTitle>
             <AlertTriangle className={`w-4 h-4 ${(overview?.periodSummary.pendingReviewCount || 0) > 0 ? 'text-amber-400' : 'text-zinc-500'}`} />
           </CardHeader>
           <CardContent>
@@ -358,84 +355,15 @@ export function CaixaMovimentacoes() {
               {overview?.periodSummary.pendingReviewCount || 0}
             </div>
             <p className="text-[11px] text-zinc-500 mt-1">
-              Transações aguardando categoria ou revisão
+              Transações sem categoria ou aguardando confirmação
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* 3. RESUMO OPERACIONAL DO PERÍODO */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-emerald-500/10 flex items-center justify-center">
-              <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-            </div>
-            <div>
-              <span className="text-[11px] text-zinc-400">Entradas Operacionais (Mês)</span>
-              <div className="text-sm font-semibold text-emerald-400">
-                {formatBRL(overview?.periodSummary.operationalIncome)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-red-500/10 flex items-center justify-center">
-              <ArrowDownLeft className="w-4 h-4 text-red-400" />
-            </div>
-            <div>
-              <span className="text-[11px] text-zinc-400">Saídas Operacionais (Mês)</span>
-              <div className="text-sm font-semibold text-red-400">
-                {formatBRL(overview?.periodSummary.operationalExpense)}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-md bg-cyan-500/10 flex items-center justify-center">
-              <ArrowLeftRight className="w-4 h-4 text-cyan-400" />
-            </div>
-            <div>
-              <span className="text-[11px] text-zinc-400">Transferências Asaas → Inter</span>
-              <div className="text-sm font-semibold text-cyan-400">
-                {formatBRL(overview?.periodSummary.internalTransfersAmount)}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4. FILTROS DO EXTRATO UNIFICADO */}
+      {/* 3. FILTROS DO EXTRATO DO BANCO INTER PJ */}
       <Card className="bg-zinc-950/40 border-white/10 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          {/* Filtro de Conta */}
-          <div className="space-y-1">
-            <label className="text-[11px] font-medium text-zinc-400">Conta</label>
-            <Select
-              value={selectedAccountId}
-              onValueChange={(val) => {
-                setSelectedAccountId(val);
-                setCurrentPage(1);
-              }}
-            >
-              <SelectTrigger className="h-9 bg-zinc-900/50 border-white/10 text-xs text-zinc-200">
-                <SelectValue placeholder="Todas as contas" />
-              </SelectTrigger>
-              <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
-                <SelectItem value="ALL">Todas as contas</SelectItem>
-                {overview?.accounts.map((a) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.name} ({a.provider})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Filtro de Direção */}
           <div className="space-y-1">
             <label className="text-[11px] font-medium text-zinc-400">Fluxo</label>
@@ -451,8 +379,8 @@ export function CaixaMovimentacoes() {
               </SelectTrigger>
               <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
                 <SelectItem value="ALL">Todos os fluxos</SelectItem>
-                <SelectItem value="INCOME">Entradas (Créditos)</SelectItem>
-                <SelectItem value="EXPENSE">Saídas (Débitos)</SelectItem>
+                <SelectItem value="CREDIT">Entradas (Créditos)</SelectItem>
+                <SelectItem value="DEBIT">Saídas (Débitos)</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -522,6 +450,7 @@ export function CaixaMovimentacoes() {
         </div>
       </Card>
 
+
       {/* 5. TABELA DE EXTRATO UNIFICADO */}
       <Card className="bg-zinc-950/40 border-white/10 overflow-hidden">
         <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -550,8 +479,8 @@ export function CaixaMovimentacoes() {
               {loadingTransactions ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">
-                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-zinc-400" />
-                    Carregando extrato unificado...
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-orange-400" />
+                    Carregando extrato do Banco Inter PJ...
                   </td>
                 </tr>
               ) : transactions.length === 0 ? (
@@ -576,13 +505,9 @@ export function CaixaMovimentacoes() {
                       <td className="px-4 py-3 whitespace-nowrap">
                         <Badge
                           variant="outline"
-                          className={
-                            tx.provider === 'ASAAS'
-                              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/20 text-[10px]'
-                              : 'bg-orange-500/10 text-orange-300 border-orange-500/20 text-[10px]'
-                          }
+                          className="bg-orange-500/10 text-orange-300 border-orange-500/20 text-[10px]"
                         >
-                          {tx.accountName || tx.provider}
+                          Banco Inter PJ
                         </Badge>
                       </td>
 

@@ -360,7 +360,7 @@ export default function Financas() {
             value="caixa"
             className="text-xs data-[state=active]:bg-zinc-800 data-[state=active]:text-white data-[state=active]:shadow-sm px-4"
           >
-            Caixa e Movimentações (Asaas + Inter PJ)
+            Caixa e Movimentações (Banco Inter PJ)
           </TabsTrigger>
         </TabsList>
 

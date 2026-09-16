@@ -53,24 +53,17 @@ export class FinancialService {
     organizationId: string,
     period?: { startDate?: string; endDate?: string }
   ): Promise<FinancialAccountsOverviewResponse> {
-    // 1. Busca todas as contas ativas da organização
+    // 1. Busca todas as contas ativas do Banco Inter PJ da organização
     const accounts = await this.prisma.financialAccount.findMany({
-      where: { organizationId, isActive: true },
-      orderBy: { provider: 'asc' },
+      where: { organizationId, isActive: true, provider: 'INTER' },
+      orderBy: { name: 'asc' },
     });
 
-    let asaasBalance = 0;
     let interBalance = 0;
-    let consolidatedBalance = 0;
 
     const formattedAccounts = accounts.map((acc) => {
       const bal = Number(acc.currentBalance);
-      consolidatedBalance += bal;
-      if (acc.provider === 'ASAAS') {
-        asaasBalance += bal;
-      } else if (acc.provider === 'INTER') {
-        interBalance += bal;
-      }
+      interBalance += bal;
       return {
         id: acc.id,
         provider: acc.provider,
@@ -83,6 +76,11 @@ export class FinancialService {
       };
     });
 
+    // O Asaas é estritamente visor de cobranças e contas a receber.
+    // O caixa e os saldos operacionais são alimentados exclusivamente pelo Banco Inter PJ.
+    const consolidatedBalance = interBalance;
+    const asaasBalance = 0;
+
     // 2. Filtro de período para fluxos operacionais
     const dateWhere: any = {};
     if (period?.startDate) {
@@ -92,9 +90,10 @@ export class FinancialService {
       dateWhere.lte = new Date(period.endDate);
     }
 
-    // 3. Busca transações para cálculo de entradas, saídas e transferências internas
+    // 3. Busca transações para cálculo de entradas, saídas e movimentações exclusivamente do Banco Inter PJ
     const txWhere: any = {
       organizationId,
+      account: { provider: 'INTER' },
       ...(Object.keys(dateWhere).length > 0 ? { occurredAt: dateWhere } : {}),
     };
 
@@ -174,12 +173,16 @@ export class FinancialService {
       limit = 30,
     } = filters;
 
-    const where: any = { organizationId };
+    // A aba de Caixa e Movimentações é estritamente Banco Inter PJ.
+    // Registros históricos do Asaas são preservados no banco para auditoria,
+    // mas excluídos rigorosamente das consultas e extrato do caixa.
+    const where: any = {
+      organizationId,
+      account: { provider: 'INTER' },
+    };
 
     if (accountId) {
       where.accountId = accountId;
-    } else if (provider) {
-      where.account = { provider };
     }
 
     if (startDate || endDate) {
