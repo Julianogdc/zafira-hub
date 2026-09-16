@@ -92,10 +92,18 @@ export class InterService {
     }
 
     try {
-      // 2. Consulta saldo atual
-      const balances = await this.client.getBalances();
-      const disponivel = typeof balances.disponivel === 'number' ? balances.disponivel : 0;
+      // 2. Consulta saldo atual (se autorizado pelo escopo contratado)
       const now = new Date();
+      let disponivel = Number(account.currentBalance);
+      try {
+        const balances = await this.client.getBalances();
+        if (typeof balances.disponivel === 'number') {
+          disponivel = balances.disponivel;
+        }
+      } catch (balErr: any) {
+        // Escopo padrão mínimo 'extrato.read' não inclui 'saldo.read' sem autorização específica no Internet Banking
+        console.warn('[InterService] Consulta de saldo ignorada ou não autorizada no escopo atual:', balErr?.message || balErr);
+      }
 
       await this.prisma.financialAccount.update({
         where: { id: account.id },

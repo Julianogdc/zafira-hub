@@ -39,9 +39,12 @@ export interface InterStatementItem {
 }
 
 /**
- * Cliente HTTP estritamente somente leitura para a API do Banco Inter PJ.
- * Suporta autenticação OAuth2 com mTLS via certificado PFX em memória.
- * Nenhuma operação de escrita, Pix ou transferência é implementada.
+ * Cliente HTTP para a API do Banco Inter PJ.
+ * Política de segurança de rede e métodos:
+ * - Autenticação OAuth2 client_credentials via POST exclusivamente em /oauth/v2/token com mTLS.
+ * - Recursos bancários e financeiros operam ESTRITAMENTE em modo de leitura (GET).
+ * - Zero operações POST, PUT, PATCH ou DELETE em recursos bancários/financeiros.
+ * - Nenhum método de pagamento, Pix, transferência, cobrança, alteração ou exclusão bancária.
  */
 export class InterClient {
   private readonly clientId: string;
@@ -49,6 +52,7 @@ export class InterClient {
   private readonly pfxBase64: string;
   private readonly passphrase?: string;
   private readonly baseUrl: string;
+  private readonly oauthScope: string;
   private readonly timeoutMs: number;
 
   private cachedToken: string | null = null;
@@ -60,6 +64,7 @@ export class InterClient {
     pfxBase64?: string,
     passphrase?: string,
     baseUrl?: string,
+    oauthScope?: string,
     timeoutMs = 15000
   ) {
     this.clientId = (clientId || process.env.INTER_CLIENT_ID || '').trim();
@@ -67,7 +72,17 @@ export class InterClient {
     this.pfxBase64 = (pfxBase64 || process.env.INTER_CERTIFICATE_PFX_BASE64 || '').trim();
     this.passphrase = passphrase || process.env.INTER_CERTIFICATE_PASSPHRASE;
     this.baseUrl = (baseUrl || process.env.INTER_BASE_URL || 'https://cdpj.partners.bancointer.com.br').replace(/\/+$/, '');
+    // Centralizado em INTER_OAUTH_SCOPE com padrão mínimo documentado extrato.read (sem suposição de saldo.read)
+    this.oauthScope = (oauthScope || process.env.INTER_OAUTH_SCOPE || 'extrato.read').trim();
     this.timeoutMs = timeoutMs;
+  }
+
+  /**
+   * Retorna o escopo OAuth configurado (padrão 'extrato.read').
+   * Não expõe credenciais, senhas ou certificado.
+   */
+  getOAuthScope(): string {
+    return this.oauthScope;
   }
 
   /**
@@ -102,9 +117,10 @@ export class InterClient {
   }
 
   /**
-   * Obtém token OAuth2 (Client Credentials) com escopo de leitura de extrato.
+   * Obtém token OAuth2 (Client Credentials).
+   * ÚNICO endpoint que realiza requisição POST externa.
    */
-  private async getAccessToken(): Promise<string> {
+  async getAccessToken(): Promise<string> {
     this.assertConfigured();
 
     const now = Date.now();
@@ -119,7 +135,7 @@ export class InterClient {
       client_id: this.clientId,
       client_secret: this.clientSecret,
       grant_type: 'client_credentials',
-      scope: 'extrato.read',
+      scope: this.oauthScope,
     });
 
     const controller = new AbortController();
@@ -242,17 +258,43 @@ export class InterClient {
   }
 
   /**
+   * Executa requisição para recurso da API do Banco Inter PJ com guarda de segurança estrita.
+   * Política de segurança:
+   * - Recursos bancários e financeiros aceitam EXCLUSIVAMENTE o método GET.
+   * - Qualquer tentativa de POST, PUT, PATCH ou DELETE em recursos bancários é imediatamente rejeitada.
+   * - O método POST é permitido unicamente no endpoint OAuth /oauth/v2/token para autenticação.
+   */
+  async requestBankingResource<T = any>(
+    method: string,
+    endpoint: string,
+    queryParams?: Record<string, string | number | undefined>
+  ): Promise<T> {
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+    const upperMethod = method.toUpperCase();
+
+    if (upperMethod !== 'GET') {
+      throw new InterIntegrationError(
+        `Operação ${upperMethod} não permitida para o recurso bancário ${cleanEndpoint}. Recursos bancários operam estritamente via GET.`,
+        405,
+        'BANK_WRITE_FORBIDDEN'
+      );
+    }
+
+    return this.get<T>(cleanEndpoint, queryParams);
+  }
+
+  /**
    * Consulta saldo atual da conta corrente PJ (GET /banking/v2/saldo).
    */
   async getBalances(): Promise<InterBalancesResponse> {
-    return this.get<InterBalancesResponse>('/banking/v2/saldo');
+    return this.requestBankingResource<InterBalancesResponse>('GET', '/banking/v2/saldo');
   }
 
   /**
    * Consulta extrato por período (GET /banking/v2/extrato).
    */
   async getStatement(dataInicio: string, dataFim: string): Promise<InterStatementItem[]> {
-    const res = await this.get<any>('/banking/v2/extrato', { dataInicio, dataFim });
+    const res = await this.requestBankingResource<any>('GET', '/banking/v2/extrato', { dataInicio, dataFim });
     return Array.isArray(res) ? res : res?.transacoes || [];
   }
 }

@@ -20,17 +20,14 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   });
 
   // ---------------------------------------------------------------------------
-  // 1. Clientes HTTP de Asaas e Inter contêm estritamente operações GET (Leitura)
+  // 1. Semântica correta: OAuth POST somente para token; recursos bancários somente GET
   // ---------------------------------------------------------------------------
-  await t.test('1. Clientes HTTP Asaas e Inter possuem estritamente operações GET e nenhuma de escrita', () => {
+  await t.test('1. Política de segurança do Inter: OAuth POST exclusivo para token; recursos bancários somente GET', async () => {
     const asaasProto = AsaasClient.prototype as any;
     const interProto = InterClient.prototype as any;
 
+    // Zero métodos de escrita bancária, Pix, transferência ou cobrança no cliente
     const forbiddenWriteMethods = [
-      'post',
-      'put',
-      'patch',
-      'delete',
       'pixSend',
       'sendPix',
       'transfer',
@@ -39,6 +36,9 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       'createPayment',
       'charge',
       'pay',
+      'patch',
+      'delete',
+      'put',
     ];
 
     for (const method of forbiddenWriteMethods) {
@@ -54,10 +54,61 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       );
     }
 
+    // Recursos bancários expõem exclusivamente métodos de consulta (leitura)
     assert.strictEqual(typeof asaasProto.getAccountBalance, 'function');
     assert.strictEqual(typeof asaasProto.getFinancialTransactions, 'function');
     assert.strictEqual(typeof interProto.getBalances, 'function');
     assert.strictEqual(typeof interProto.getStatement, 'function');
+    assert.strictEqual(typeof interProto.getAccessToken, 'function'); // OAuth token endpoint
+  });
+
+  // ---------------------------------------------------------------------------
+  // 1.1 Bloqueio explícito de qualquer POST externo fora do endpoint OAuth
+  // ---------------------------------------------------------------------------
+  await t.test('1.1 Bloqueio explícito: qualquer POST em recursos bancários falha com BANK_WRITE_FORBIDDEN', async () => {
+    const client = new InterClient('fake-client-id', 'fake-secret', Buffer.from('fake-pfx').toString('base64'));
+
+    const forbiddenCalls = [
+      { method: 'POST', endpoint: '/banking/v2/pix' },
+      { method: 'POST', endpoint: '/banking/v2/transferencia' },
+      { method: 'PUT', endpoint: '/banking/v2/saldo' },
+      { method: 'PATCH', endpoint: '/banking/v2/extrato' },
+      { method: 'DELETE', endpoint: '/banking/v2/cobrancas/123' },
+    ];
+
+    for (const { method, endpoint } of forbiddenCalls) {
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource(method, endpoint);
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          assert.ok(err.message.includes('não permitida para o recurso bancário'));
+          return true;
+        },
+        `Tentativa de ${method} em ${endpoint} deveria ter sido rejeitada com BANK_WRITE_FORBIDDEN`
+      );
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 1.2 Escopos OAuth sem suposição: padrão mínimo 'extrato.read' sem 'saldo.read' automático
+  // ---------------------------------------------------------------------------
+  await t.test('1.2 Escopos OAuth: padrão mínimo extrato.read sem inclusão automática de saldo.read', () => {
+    delete process.env.INTER_OAUTH_SCOPE;
+
+    const defaultClient = new InterClient('client-1', 'secret-1', 'pfx-base64');
+    // Sem configuração no ambiente, o escopo DEVE ser estritamente 'extrato.read'
+    assert.strictEqual(defaultClient.getOAuthScope(), 'extrato.read');
+    assert.ok(!defaultClient.getOAuthScope().includes('saldo.read'), 'Não deve incluir saldo.read automaticamente');
+
+    // Com escopo centralizado via INTER_OAUTH_SCOPE, utiliza exclusivamente o valor configurado
+    process.env.INTER_OAUTH_SCOPE = 'extrato.read custom.scope';
+    const customClient = new InterClient('client-1', 'secret-1', 'pfx-base64');
+    assert.strictEqual(customClient.getOAuthScope(), 'extrato.read custom.scope');
+
+    delete process.env.INTER_OAUTH_SCOPE;
   });
 
   // ---------------------------------------------------------------------------
