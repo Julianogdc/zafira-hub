@@ -15,6 +15,7 @@ export interface AuthUserContext {
 export interface AuthApiKeyContext {
   type: 'api_key';
   role: 'ADMIN';
+  allowedOrganizationIds?: string[];
 }
 
 export type AuthContext = AuthUserContext | AuthApiKeyContext;
@@ -35,9 +36,14 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   // 1. Verificação de API Key interna (Server-to-server)
   if (configuredApiKey && typeof incomingApiKey === 'string' && incomingApiKey === configuredApiKey) {
+    const allowedOrgs = process.env.HUB_INTERNAL_API_KEY_ORGS
+      ? process.env.HUB_INTERNAL_API_KEY_ORGS.split(',').map((id) => id.trim()).filter(Boolean)
+      : (process.env.HUB_INTERNAL_API_KEY_ORGANIZATION_ID ? [process.env.HUB_INTERNAL_API_KEY_ORGANIZATION_ID.trim()] : undefined);
+
     request.authContext = {
       type: 'api_key',
       role: 'ADMIN',
+      allowedOrganizationIds: allowedOrgs,
     };
     return;
   }
@@ -102,8 +108,16 @@ export function requireRole(allowedRoles: ('ADMIN' | 'MANAGER' | 'MEMBER')[]) {
       return reply.status(401).send({ error: 'unauthorized' });
     }
 
-    // Integração via API Key possui privilégios de sistema
+    // Integração via API Key possui privilégios para organizações que estejam no seu escopo
     if (auth.type === 'api_key') {
+      const headerOrg = request.headers['x-organization-id'] as string | undefined;
+      if (headerOrg && auth.allowedOrganizationIds && !auth.allowedOrganizationIds.includes(headerOrg)) {
+        return reply.status(403).send({
+          status: 'error',
+          error: 'forbidden',
+          message: 'Chave de integração não autorizada para a organização informada',
+        });
+      }
       return;
     }
 
@@ -115,11 +129,26 @@ export function requireRole(allowedRoles: ('ADMIN' | 'MANAGER' | 'MEMBER')[]) {
       ? auth.memberships.find((m) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)
       : undefined;
 
+    // Se o usuário especificou organização que não pertence a ele: 403 Forbidden
+    if (explicitOrgId && !targetMembership) {
+      return reply.status(403).send({
+        status: 'error',
+        error: 'forbidden',
+        message: 'Usuário não possui acesso à organização informada',
+      });
+    }
+
+    // Se não especificou:
     if (!targetMembership) {
       if (auth.memberships.length === 1) {
         targetMembership = auth.memberships[0];
       } else {
-        targetMembership = auth.memberships.find((m) => m.organizationSlug === 'zafira') || auth.memberships[0];
+        // Múltiplas memberships sem contexto explícito: NUNCA escolher a primeira nem nenhuma fixa!
+        return reply.status(400).send({
+          status: 'error',
+          error: 'ORGANIZATION_CONTEXT_REQUIRED',
+          message: 'Múltiplas organizações disponíveis. Contexto de organização ativo é obrigatório.',
+        });
       }
     }
 

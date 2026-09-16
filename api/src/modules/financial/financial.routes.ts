@@ -33,11 +33,36 @@ export async function financialRoutes(app: FastifyInstance) {
       const headerOrg = req.headers['x-organization-id'] as string | undefined;
       if (!headerOrg || typeof headerOrg !== 'string' || headerOrg.trim().length === 0) {
         return reply.status(400).send({
+          status: 'error',
           error: 'ORGANIZATION_CONTEXT_REQUIRED',
           message: 'Cabeçalho x-organization-id é obrigatório para chave de integração',
         });
       }
-      (req as any).resolvedOrganizationId = headerOrg.trim();
+
+      const orgId = headerOrg.trim();
+      const allowed = auth.allowedOrganizationIds;
+
+      // Se a chave não possui organizações autorizadas vinculadas: acesso financeiro proibido
+      if (!allowed || allowed.length === 0) {
+        return reply.status(403).send({
+          status: 'error',
+          error: 'forbidden',
+          code: 'API_KEY_ORGANIZATION_UNAUTHORIZED',
+          message: 'Chave de integração não possui organizações vinculadas no seu escopo',
+        });
+      }
+
+      // Se a organização solicitada não está no escopo da chave: 403 Forbidden
+      if (!allowed.includes(orgId)) {
+        return reply.status(403).send({
+          status: 'error',
+          error: 'forbidden',
+          code: 'API_KEY_ORGANIZATION_UNAUTHORIZED',
+          message: 'Chave de integração não autorizada para a organização informada',
+        });
+      }
+
+      (req as any).resolvedOrganizationId = orgId;
       return;
     }
 

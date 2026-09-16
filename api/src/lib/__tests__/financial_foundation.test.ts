@@ -1133,19 +1133,146 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     assert.strictEqual(resForeignOrg.statusCode, 403, 'Deve retornar 403 Forbidden para organização externa');
     assert.strictEqual(resForeignOrg.json().error, 'forbidden');
 
-    // Caso E: Validação de ausência total de "zafira" no módulo de rotas financeiras
+    // Caso E: Validação de ausência total de "zafira" no módulo financeiro e no middleware de autenticação
     const fs = await import('node:fs/promises');
     const path = await import('node:path');
     const routesFilePath = path.resolve('src/modules/financial/financial.routes.ts');
     const routesContent = await fs.readFile(routesFilePath, 'utf-8');
+    const authFilePath = path.resolve('src/middleware/auth.ts');
+    const authContent = await fs.readFile(authFilePath, 'utf-8');
 
-    const hasZafiraRef = /zafira/i.test(routesContent);
     assert.strictEqual(
-      hasZafiraRef,
+      /zafira/i.test(routesContent),
       false,
       'Não pode haver nenhuma menção à palavra "zafira" em financial.routes.ts'
     );
+    assert.strictEqual(
+      authContent.includes("organizationSlug === 'zafira'"),
+      false,
+      'Não pode haver organizationSlug === "zafira" em auth.ts'
+    );
+    assert.strictEqual(
+      /zafira/i.test(authContent),
+      false,
+      'Não pode haver referência a zafira em auth.ts'
+    );
+
+    // Caso F: Validação de api_key e escopo estrito de organizações
+    const appApiKey = fastify();
+    appApiKey.addHook('preHandler', async (req: any, reply: any) => {
+      const apiKeyHeader = req.headers['x-api-key'];
+      if (apiKeyHeader === 'valid-api-key') {
+        req.authContext = {
+          type: 'api_key',
+          role: 'ADMIN',
+          allowedOrganizationIds: ['org-scoped-1'], // Escopo restrito apenas à org-scoped-1
+        };
+        return;
+      }
+      if (apiKeyHeader === 'unscoped-api-key') {
+        req.authContext = {
+          type: 'api_key',
+          role: 'ADMIN',
+          allowedOrganizationIds: [], // Chave sem organizações autorizadas vinculadas
+        };
+        return;
+      }
+      return reply.status(401).send({ error: 'unauthorized' });
+    });
+
+    // Hook resolveFinancialContext idêntico ao de financial.routes.ts
+    appApiKey.addHook('preHandler', async (req: any, reply: any) => {
+      const auth = req.authContext;
+      if (!auth) return reply.status(401).send({ error: 'unauthorized' });
+
+      if (auth.type === 'api_key') {
+        const headerOrg = req.headers['x-organization-id'] as string | undefined;
+        if (!headerOrg || typeof headerOrg !== 'string' || headerOrg.trim().length === 0) {
+          return reply.status(400).send({
+            status: 'error',
+            error: 'ORGANIZATION_CONTEXT_REQUIRED',
+            message: 'Cabeçalho x-organization-id é obrigatório para chave de integração',
+          });
+        }
+
+        const orgId = headerOrg.trim();
+        const allowed = auth.allowedOrganizationIds;
+
+        if (!allowed || allowed.length === 0) {
+          return reply.status(403).send({
+            status: 'error',
+            error: 'forbidden',
+            code: 'API_KEY_ORGANIZATION_UNAUTHORIZED',
+            message: 'Chave de integração não possui organizações vinculadas no seu escopo',
+          });
+        }
+
+        if (!allowed.includes(orgId)) {
+          return reply.status(403).send({
+            status: 'error',
+            error: 'forbidden',
+            code: 'API_KEY_ORGANIZATION_UNAUTHORIZED',
+            message: 'Chave de integração não autorizada para a organização informada',
+          });
+        }
+
+        req.resolvedOrganizationId = orgId;
+        return;
+      }
+    });
+
+    appApiKey.get('/financial/accounts/overview', async (req: any, reply) => {
+      return reply.send({ success: true, organizationId: req.resolvedOrganizationId });
+    });
+
+    await appApiKey.ready();
+
+    // 1. API key sem cabeçalho x-organization-id -> 400 ORGANIZATION_CONTEXT_REQUIRED
+    const resNoOrgHeader = await appApiKey.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: { 'x-api-key': 'valid-api-key' },
+    });
+    assert.strictEqual(resNoOrgHeader.statusCode, 400);
+    assert.strictEqual(resNoOrgHeader.json().error, 'ORGANIZATION_CONTEXT_REQUIRED');
+
+    // 2. API key com cabeçalho de organização não autorizada -> 403 API_KEY_ORGANIZATION_UNAUTHORIZED
+    const resUnauthorizedOrg = await appApiKey.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        'x-api-key': 'valid-api-key',
+        'x-organization-id': 'org-invasora-999',
+      },
+    });
+    assert.strictEqual(resUnauthorizedOrg.statusCode, 403);
+    assert.strictEqual(resUnauthorizedOrg.json().code, 'API_KEY_ORGANIZATION_UNAUTHORIZED');
+
+    // 3. API key sem organizações vinculadas no seu escopo -> 403 API_KEY_ORGANIZATION_UNAUTHORIZED
+    const resUnscoped = await appApiKey.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        'x-api-key': 'unscoped-api-key',
+        'x-organization-id': 'org-scoped-1',
+      },
+    });
+    assert.strictEqual(resUnscoped.statusCode, 403);
+    assert.strictEqual(resUnscoped.json().code, 'API_KEY_ORGANIZATION_UNAUTHORIZED');
+
+    // 4. API key com organização autorizada no seu escopo -> 200 OK
+    const resAuthorized = await appApiKey.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        'x-api-key': 'valid-api-key',
+        'x-organization-id': 'org-scoped-1',
+      },
+    });
+    assert.strictEqual(resAuthorized.statusCode, 200);
+    assert.strictEqual(resAuthorized.json().organizationId, 'org-scoped-1');
   });
 });
+
 
 
