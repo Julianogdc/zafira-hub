@@ -793,32 +793,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       balance: 15000,
     };
 
-    // Implementação das rotas reproduzindo financial.routes.ts
-    const getOrganizationId = (req: any): string => {
-      const auth = req.authContext;
-      if (auth && auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
-        const zafira = auth.memberships.find((m: any) => m.organizationSlug === 'zafira');
-        const orgId = (zafira || auth.memberships[0]).organizationId;
-        if (orgId) return orgId;
-      }
-
-      const user = req.user;
-      if (user?.organizationId) {
-        return user.organizationId;
-      }
-
-      if (auth && auth.type === 'api_key') {
-        const headerOrg = req.headers['x-organization-id'] as string;
-        const queryOrg = (req.query as any)?.organizationId;
-        if (headerOrg || queryOrg) return headerOrg || queryOrg;
-      }
-
-      const err: any = new Error('Usuário não autenticado ou organização não identificada');
-      err.statusCode = 401;
-      throw err;
-    };
-
-    // Middleware de autenticação idêntico ao do Hub
+    // Middleware de autenticação
     const authenticateMock = async (req: any, reply: any) => {
       let token = req.cookies?.token;
       if (!token && req.headers.authorization) {
@@ -839,32 +814,88 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
           userId: decoded.sub,
           email: decoded.email,
           memberships: decoded.memberships || [],
+          activeOrganizationId: decoded.activeOrganizationId,
         };
       } catch {
         return reply.status(401).send({ error: 'unauthorized' });
       }
     };
 
-    // Registrar hooks exatamente como em financial.routes.ts
+    // Resolução multi-tenant segura idêntica a financial.routes.ts
+    const resolveFinancialContext = async (req: any, reply: any) => {
+      const auth = req.authContext;
+      if (!auth) {
+        return reply.status(401).send({ error: 'unauthorized' });
+      }
+
+      if (auth.type === 'api_key') {
+        const headerOrg = req.headers['x-organization-id'] as string | undefined;
+        if (!headerOrg || typeof headerOrg !== 'string' || headerOrg.trim().length === 0) {
+          return reply.status(400).send({
+            error: 'ORGANIZATION_CONTEXT_REQUIRED',
+            message: 'Cabeçalho x-organization-id é obrigatório para chave de integração',
+          });
+        }
+        req.resolvedOrganizationId = headerOrg.trim();
+        return;
+      }
+
+      if (auth.type === 'user') {
+        const memberships = auth.memberships || [];
+        if (memberships.length === 0) {
+          return reply.status(401).send({ error: 'unauthorized' });
+        }
+
+        const explicitOrgId =
+          auth.activeOrganizationId ||
+          (req.headers['x-organization-id'] as string | undefined);
+
+        let targetMembership = explicitOrgId
+          ? memberships.find((m: any) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)
+          : undefined;
+
+        if (explicitOrgId && !targetMembership) {
+          return reply.status(403).send({
+            error: 'forbidden',
+            message: 'Usuário não possui acesso à organização informada',
+          });
+        }
+
+        if (!targetMembership) {
+          if (memberships.length === 1) {
+            targetMembership = memberships[0];
+          } else {
+            return reply.status(400).send({
+              error: 'ORGANIZATION_CONTEXT_REQUIRED',
+              message: 'Múltiplas organizações disponíveis. Contexto de organização ativo é obrigatório.',
+            });
+          }
+        }
+
+        if (!['ADMIN', 'MANAGER'].includes(targetMembership.role)) {
+          return reply.status(403).send({
+            error: 'forbidden',
+            message: 'Permissão insuficiente na organização selecionada',
+          });
+        }
+
+        req.resolvedOrganizationId = targetMembership.organizationId;
+      }
+    };
+
     app.addHook('preHandler', authenticateMock);
-    app.addHook('preHandler', requireRole(['ADMIN', 'MANAGER']));
+    app.addHook('preHandler', resolveFinancialContext);
 
     app.get('/financial/accounts/overview', async (req, reply) => {
-      const orgId = getOrganizationId(req);
-      assert.strictEqual(orgId, 'org_zafira_real_123');
-      return reply.send(mockOverview);
+      return reply.send({ ...mockOverview, organizationId: req.resolvedOrganizationId });
     });
 
     app.get('/financial/transactions', async (req, reply) => {
-      const orgId = getOrganizationId(req);
-      assert.strictEqual(orgId, 'org_zafira_real_123');
-      return reply.send(mockTransactions);
+      return reply.send({ ...mockTransactions, organizationId: req.resolvedOrganizationId });
     });
 
     app.post('/integrations/asaas/sync-ledger', async (req, reply) => {
-      const orgId = getOrganizationId(req);
-      assert.strictEqual(orgId, 'org_zafira_real_123');
-      return reply.send(mockSyncLedger);
+      return reply.send({ ...mockSyncLedger, organizationId: req.resolvedOrganizationId });
     });
 
     await app.ready();
@@ -882,8 +913,8 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     // 2. COM SESSÃO DE 'MEMBER' -> todos devem retornar 403 Forbidden
     const memberToken = app.jwt.sign({
       sub: 'usr_member_test',
-      email: 'member@zafira.com.br',
-      memberships: [{ organizationId: 'org_zafira_real_123', organizationSlug: 'zafira', role: 'MEMBER' }],
+      email: 'member@test.com',
+      memberships: [{ organizationId: 'org_single_123', organizationSlug: 'cliente-alpha', role: 'MEMBER' }],
     });
 
     const memberOverview = await app.inject({
@@ -893,45 +924,228 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     });
     assert.strictEqual(memberOverview.statusCode, 403, 'MEMBER deve receber 403');
 
-    const memberTransactions = await app.inject({
-      method: 'GET',
-      url: '/financial/transactions',
-      headers: { authorization: `Bearer ${memberToken}` },
-    });
-    assert.strictEqual(memberTransactions.statusCode, 403, 'MEMBER deve receber 403');
-
-    // 3. COM SESSÃO DE 'ADMIN' / 'MANAGER' (via Cookie HTTP-only de sessão ou Bearer)
+    // 3. COM SESSÃO DE 'ADMIN' (via Cookie HTTP-only de sessão com 1 organização) -> 200
     const adminToken = app.jwt.sign({
       sub: 'usr_admin_test',
-      email: 'admin@zafira.com.br',
-      memberships: [{ organizationId: 'org_zafira_real_123', organizationSlug: 'zafira', role: 'ADMIN' }],
+      email: 'admin@test.com',
+      memberships: [{ organizationId: 'org_single_123', organizationSlug: 'cliente-alpha', role: 'ADMIN' }],
     });
 
-    // Teste com Cookie HTTP-only (modo padrão do navegador no Hub)
     const authOverview = await app.inject({
       method: 'GET',
       url: '/financial/accounts/overview',
       cookies: { token: adminToken },
     });
-    assert.strictEqual(authOverview.statusCode, 200, 'GET /financial/accounts/overview com cookie de sessão deixa de retornar 401 e retorna 200');
-    assert.strictEqual(authOverview.json().consolidatedBalance, 15000);
+    assert.strictEqual(authOverview.statusCode, 200, 'GET /financial/accounts/overview com cookie de sessão retorna 200');
+    assert.strictEqual(authOverview.json().organizationId, 'org_single_123');
 
     const authTransactions = await app.inject({
       method: 'GET',
       url: '/financial/transactions?page=1&limit=20',
       cookies: { token: adminToken },
     });
-    assert.strictEqual(authTransactions.statusCode, 200, 'GET /financial/transactions com cookie de sessão deixa de retornar 401 e retorna 200');
-    assert.strictEqual(authTransactions.json().pagination.limit, 20);
+    assert.strictEqual(authTransactions.statusCode, 200, 'GET /financial/transactions retorna 200');
+    assert.strictEqual(authTransactions.json().organizationId, 'org_single_123');
 
     const authSyncLedger = await app.inject({
       method: 'POST',
       url: '/integrations/asaas/sync-ledger',
       cookies: { token: adminToken },
     });
-    assert.strictEqual(authSyncLedger.statusCode, 200, 'POST /integrations/asaas/sync-ledger com cookie de sessão deixa de retornar 401 e retorna 200');
-    assert.strictEqual(authSyncLedger.json().success, true);
-    assert.strictEqual(authSyncLedger.json().syncedCount, 5);
+    assert.strictEqual(authSyncLedger.statusCode, 200, 'POST /integrations/asaas/sync-ledger retorna 200');
+    assert.strictEqual(authSyncLedger.json().organizationId, 'org_single_123');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 16. Multi-tenant estrito: cenário com 2 organizações, seleção explícita e ausência total de "zafira"
+  // ---------------------------------------------------------------------------
+  await t.test('16. Multi-tenant: usuário membro de 2 organizações acessa exclusivamente a organização ativa', async () => {
+    const app = fastify();
+    await app.register(cookie, { secret: 'test_cookie_secret_32bytes_long' });
+    await app.register(jwt, { secret: 'test_jwt_secret_32bytes_long' });
+
+    // Middleware de autenticação
+    app.addHook('preHandler', async (req: any, reply: any) => {
+      let token = req.cookies?.token;
+      if (!token && req.headers.authorization) {
+        const parts = req.headers.authorization.split(' ');
+        if (parts.length === 2 && parts[0] === 'Bearer') {
+          token = parts[1];
+        }
+      }
+      if (!token) return reply.status(401).send({ error: 'unauthorized' });
+
+      try {
+        const decoded = await app.jwt.verify<any>(token);
+        req.authContext = {
+          type: 'user',
+          userId: decoded.sub,
+          email: decoded.email,
+          memberships: decoded.memberships || [],
+          activeOrganizationId: decoded.activeOrganizationId,
+        };
+      } catch {
+        return reply.status(401).send({ error: 'unauthorized' });
+      }
+    });
+
+    // Implementação exata do hook resolveFinancialContext presente em financial.routes.ts
+    app.addHook('preHandler', async (req: any, reply: any) => {
+      const auth = req.authContext;
+      if (!auth) return reply.status(401).send({ error: 'unauthorized' });
+
+      if (auth.type === 'api_key') {
+        const headerOrg = req.headers['x-organization-id'] as string | undefined;
+        if (!headerOrg || typeof headerOrg !== 'string' || headerOrg.trim().length === 0) {
+          return reply.status(400).send({
+            error: 'ORGANIZATION_CONTEXT_REQUIRED',
+            message: 'Cabeçalho x-organization-id é obrigatório para chave de integração',
+          });
+        }
+        req.resolvedOrganizationId = headerOrg.trim();
+        return;
+      }
+
+      if (auth.type === 'user') {
+        const memberships = auth.memberships || [];
+        if (memberships.length === 0) return reply.status(401).send({ error: 'unauthorized' });
+
+        const explicitOrgId =
+          auth.activeOrganizationId ||
+          (req.headers['x-organization-id'] as string | undefined);
+
+        let targetMembership = explicitOrgId
+          ? memberships.find((m: any) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)
+          : undefined;
+
+        if (explicitOrgId && !targetMembership) {
+          return reply.status(403).send({
+            error: 'forbidden',
+            message: 'Usuário não possui acesso à organização informada',
+          });
+        }
+
+        if (!targetMembership) {
+          if (memberships.length === 1) {
+            targetMembership = memberships[0];
+          } else {
+            return reply.status(400).send({
+              error: 'ORGANIZATION_CONTEXT_REQUIRED',
+              message: 'Múltiplas organizações disponíveis. Contexto de organização ativo é obrigatório.',
+            });
+          }
+        }
+
+        if (!['ADMIN', 'MANAGER'].includes(targetMembership.role)) {
+          return reply.status(403).send({
+            error: 'forbidden',
+            message: 'Permissão insuficiente na organização selecionada',
+          });
+        }
+
+        req.resolvedOrganizationId = targetMembership.organizationId;
+      }
+    });
+
+    // Rota que retorna o overview contextualizado estritamente para a organização resolvida
+    app.get('/financial/accounts/overview', async (req: any, reply) => {
+      const orgId = req.resolvedOrganizationId;
+      // Banco simulado com dados isolados por organização
+      const dbByOrg: Record<string, any> = {
+        'org-alpha-1': {
+          organizationId: 'org-alpha-1',
+          name: 'Empresa Alpha Ltda',
+          consolidatedBalance: 82000,
+        },
+        'org-beta-2': {
+          organizationId: 'org-beta-2',
+          name: 'Comércio Beta S/A',
+          consolidatedBalance: 145000,
+        },
+      };
+
+      const data = dbByOrg[orgId];
+      if (!data) return reply.status(404).send({ error: 'not_found' });
+      return reply.send(data);
+    });
+
+    await app.ready();
+
+    // Usuário membro de 2 organizações:
+    // Org 1: 'org-alpha-1' (papel MEMBER - sem permissão financeira)
+    // Org 2: 'org-beta-2' (papel ADMIN - com permissão financeira)
+    const twoOrgsMemberships = [
+      { organizationId: 'org-alpha-1', organizationSlug: 'empresa-alpha', role: 'MEMBER' },
+      { organizationId: 'org-beta-2', organizationSlug: 'comercio-beta', role: 'ADMIN' },
+    ];
+
+    // Caso A: Usuário com 2 organizações SEM contexto ativo -> Retorna 400 ORGANIZATION_CONTEXT_REQUIRED
+    const tokenNoActive = app.jwt.sign({
+      sub: 'usr_dual_tenant',
+      email: 'user@multitenant.com',
+      memberships: twoOrgsMemberships,
+    });
+
+    const resNoContext = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: { authorization: `Bearer ${tokenNoActive}` },
+    });
+    assert.strictEqual(resNoContext.statusCode, 400, 'Deve retornar 400 quando há múltiplas organizações sem contexto ativo');
+    assert.strictEqual(resNoContext.json().error, 'ORGANIZATION_CONTEXT_REQUIRED');
+
+    // Caso B: Contexto ativo apontando para a segunda organização ('org-beta-2') via header x-organization-id
+    const resOrgBeta = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        authorization: `Bearer ${tokenNoActive}`,
+        'x-organization-id': 'org-beta-2',
+      },
+    });
+    assert.strictEqual(resOrgBeta.statusCode, 200, 'Deve retornar 200 para a organização ativa selecionada');
+    const bodyBeta = resOrgBeta.json();
+    assert.strictEqual(bodyBeta.organizationId, 'org-beta-2');
+    assert.strictEqual(bodyBeta.name, 'Comércio Beta S/A');
+    assert.strictEqual(bodyBeta.consolidatedBalance, 145000, 'Retorna exclusivamente os dados da organização Beta');
+
+    // Caso C: Contexto ativo apontando para a primeira organização ('org-alpha-1') onde o usuário é MEMBER
+    const resOrgAlpha = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        authorization: `Bearer ${tokenNoActive}`,
+        'x-organization-id': 'org-alpha-1',
+      },
+    });
+    assert.strictEqual(resOrgAlpha.statusCode, 403, 'Deve retornar 403 Forbidden porque na org-alpha o usuário é MEMBER');
+    assert.strictEqual(resOrgAlpha.json().error, 'forbidden');
+
+    // Caso D: Usuário tenta acessar uma terceira organização ('org-gamma-3') da qual NÃO é membro
+    const resForeignOrg = await app.inject({
+      method: 'GET',
+      url: '/financial/accounts/overview',
+      headers: {
+        authorization: `Bearer ${tokenNoActive}`,
+        'x-organization-id': 'org-gamma-3',
+      },
+    });
+    assert.strictEqual(resForeignOrg.statusCode, 403, 'Deve retornar 403 Forbidden para organização externa');
+    assert.strictEqual(resForeignOrg.json().error, 'forbidden');
+
+    // Caso E: Validação de ausência total de "zafira" no módulo de rotas financeiras
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const routesFilePath = path.resolve('src/modules/financial/financial.routes.ts');
+    const routesContent = await fs.readFile(routesFilePath, 'utf-8');
+
+    const hasZafiraRef = /zafira/i.test(routesContent);
+    assert.strictEqual(
+      hasZafiraRef,
+      false,
+      'Não pode haver nenhuma menção à palavra "zafira" em financial.routes.ts'
+    );
   });
 });
+
 

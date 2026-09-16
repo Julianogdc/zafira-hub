@@ -15,33 +15,94 @@ export async function financialRoutes(app: FastifyInstance) {
   const asaasService = new AsaasService(prisma);
   const interService = new InterService(prisma);
 
-  // Todas as rotas são protegidas por autenticação e perfil restrito (ADMIN ou MANAGER)
+  // Todas as rotas são protegidas por autenticação
   app.addHook('preHandler', authenticate);
-  app.addHook('preHandler', requireRole(['ADMIN', 'MANAGER']));
 
-  // Helper para obter organizationId de forma segura a partir de authContext ou sessão
-  const getOrganizationId = (req: FastifyRequest): string => {
+  /**
+   * Resolução multi-tenant segura de organização e validação de RBAC por organização.
+   * Não possui slug, ID ou nome de organização fixado no código.
+   */
+  const resolveFinancialContext = async (req: FastifyRequest, reply: FastifyReply) => {
     const auth = req.authContext;
-    if (auth && auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
-      const zafira = auth.memberships.find((m) => m.organizationSlug === 'zafira');
-      const orgId = (zafira || auth.memberships[0]).organizationId;
-      if (orgId) return orgId;
+    if (!auth) {
+      return reply.status(401).send({ error: 'unauthorized' });
     }
 
-    const user = (req as any).user;
-    if (user?.organizationId) {
-      return user.organizationId;
+    // 1. Chave de API de integração (server-to-server)
+    if (auth.type === 'api_key') {
+      const headerOrg = req.headers['x-organization-id'] as string | undefined;
+      if (!headerOrg || typeof headerOrg !== 'string' || headerOrg.trim().length === 0) {
+        return reply.status(400).send({
+          error: 'ORGANIZATION_CONTEXT_REQUIRED',
+          message: 'Cabeçalho x-organization-id é obrigatório para chave de integração',
+        });
+      }
+      (req as any).resolvedOrganizationId = headerOrg.trim();
+      return;
     }
 
-    if (auth && auth.type === 'api_key') {
-      const headerOrg = req.headers['x-organization-id'] as string;
-      const queryOrg = (req.query as any)?.organizationId;
-      if (headerOrg || queryOrg) return headerOrg || queryOrg;
-    }
+    // 2. Usuário autenticado
+    if (auth.type === 'user') {
+      const memberships = auth.memberships || [];
+      if (memberships.length === 0) {
+        return reply.status(401).send({ error: 'unauthorized' });
+      }
 
-    const err: any = new Error('Usuário não autenticado ou organização não identificada');
-    err.statusCode = 401;
-    throw err;
+      const explicitOrgId =
+        (auth as any).activeOrganizationId ||
+        (req.headers['x-organization-id'] as string | undefined) ||
+        (req as any).session?.organizationId ||
+        (req as any).user?.organizationId;
+
+      let targetMembership = explicitOrgId
+        ? memberships.find((m) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)
+        : undefined;
+
+      // Se foi informada organização explícita e ela não pertence às memberships do usuário: 403 Forbidden
+      if (explicitOrgId && !targetMembership) {
+        return reply.status(403).send({
+          error: 'forbidden',
+          message: 'Usuário não possui acesso à organização informada',
+        });
+      }
+
+      // Se nenhuma organização explícita foi fornecida:
+      if (!targetMembership) {
+        if (memberships.length === 1) {
+          // Única membership: utiliza essa organização
+          targetMembership = memberships[0];
+        } else {
+          // Múltiplas memberships sem contexto ativo: erro claro 400
+          return reply.status(400).send({
+            error: 'ORGANIZATION_CONTEXT_REQUIRED',
+            message: 'Múltiplas organizações disponíveis. Contexto de organização ativo é obrigatório.',
+          });
+        }
+      }
+
+      // Validação de perfil (RBAC) estrita na organização resolvida
+      if (!['ADMIN', 'MANAGER'].includes(targetMembership.role)) {
+        return reply.status(403).send({
+          error: 'forbidden',
+          message: 'Permissão insuficiente na organização selecionada',
+        });
+      }
+
+      (req as any).resolvedOrganizationId = targetMembership.organizationId;
+    }
+  };
+
+  app.addHook('preHandler', resolveFinancialContext);
+
+  // Helper para obter a organizationId já validada e resolvida
+  const getOrganizationId = (req: FastifyRequest): string => {
+    const orgId = (req as any).resolvedOrganizationId;
+    if (!orgId) {
+      const err: any = new Error('ORGANIZATION_CONTEXT_REQUIRED');
+      err.statusCode = 400;
+      throw err;
+    }
+    return orgId;
   };
 
   /**

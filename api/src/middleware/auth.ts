@@ -107,10 +107,23 @@ export function requireRole(allowedRoles: ('ADMIN' | 'MANAGER' | 'MEMBER')[]) {
       return;
     }
 
-    // Para usuários, verifica se possui permissão na organização Zafira
-    const zafiraMembership = auth.memberships.find((m) => m.organizationSlug === 'zafira');
+    // Determina a organização do contexto (ativa, cabeçalho ou única membership)
+    const headerOrg = request.headers['x-organization-id'] as string | undefined;
+    const explicitOrgId = (auth as any).activeOrganizationId || headerOrg;
 
-    if (!zafiraMembership || !allowedRoles.includes(zafiraMembership.role)) {
+    let targetMembership = explicitOrgId
+      ? auth.memberships.find((m) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)
+      : undefined;
+
+    if (!targetMembership) {
+      if (auth.memberships.length === 1) {
+        targetMembership = auth.memberships[0];
+      } else {
+        targetMembership = auth.memberships.find((m) => m.organizationSlug === 'zafira') || auth.memberships[0];
+      }
+    }
+
+    if (!targetMembership || !allowedRoles.includes(targetMembership.role)) {
       return reply.status(403).send({
         status: 'error',
         error: 'forbidden',
