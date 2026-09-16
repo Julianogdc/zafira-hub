@@ -144,8 +144,15 @@ export const financialApi = {
     return api.get<FinancialTransactionsResponse>(`/financial/transactions${qs ? `?${qs}` : ''}`);
   },
 
-  getCategories: async (): Promise<{ categories: FinancialCategoryItem[] }> => {
-    return api.get<{ categories: FinancialCategoryItem[] }>('/financial/categories');
+  getCategories: async (): Promise<FinancialCategoryItem[]> => {
+    const result = await api.get<{ categories: FinancialCategoryItem[] } | FinancialCategoryItem[]>('/financial/categories');
+    if (Array.isArray(result)) {
+      return result;
+    }
+    if (result && Array.isArray(result.categories)) {
+      return result.categories;
+    }
+    return [];
   },
 
   updateTransactionCategory: async (id: string, payload: UpdateCategoryPayload): Promise<any> => {

@@ -78,6 +78,9 @@ export function CaixaMovimentacoes() {
   const [ruleField, setRuleField] = useState<'DESCRIPTION' | 'COUNTERPARTY_NAME'>('DESCRIPTION');
   const [savingCategory, setSavingCategory] = useState<boolean>(false);
 
+  // Lista defensiva de opções de categorias para prevenir erros de renderização
+  const categoryOptions = Array.isArray(categories) ? categories : [];
+
   // Formatação de Moeda
   const formatBRL = (val: number | null | undefined) => {
     return (val ?? 0).toLocaleString('pt-BR', {
@@ -109,7 +112,7 @@ export function CaixaMovimentacoes() {
         financialApi.getCategories(),
       ]);
       setOverview(overviewData);
-      setCategories(catData.categories || []);
+      setCategories(Array.isArray(catData) ? catData : (Array.isArray((catData as any)?.categories) ? (catData as any).categories : []));
     } catch (err: any) {
       console.error('Erro ao carregar overview financeiro:', err);
       toast.error('Erro ao carregar resumo de caixa.');
@@ -469,7 +472,7 @@ export function CaixaMovimentacoes() {
               </SelectTrigger>
               <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200 max-h-56">
                 <SelectItem value="ALL">Todas as categorias</SelectItem>
-                {categories.map((c) => (
+                {categoryOptions.map((c) => (
                   <SelectItem key={c.id} value={c.id}>
                     {c.name}
                   </SelectItem>
@@ -756,7 +759,7 @@ export function CaixaMovimentacoes() {
                     <SelectValue placeholder="Selecione uma categoria" />
                   </SelectTrigger>
                   <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200 max-h-56">
-                    {categories.map((cat) => (
+                    {categoryOptions.map((cat) => (
                       <SelectItem key={cat.id} value={cat.id}>
                         {cat.name}
                       </SelectItem>

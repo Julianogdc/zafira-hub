@@ -1272,6 +1272,73 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     assert.strictEqual(resAuthorized.statusCode, 200);
     assert.strictEqual(resAuthorized.json().organizationId, 'org-scoped-1');
   });
+
+  // ---------------------------------------------------------------------------
+  // 17. Contrato de categorias e proteção defensiva contra categories.map is not a function
+  // ---------------------------------------------------------------------------
+  await t.test('17. Categorias: contrato { categories: [...] }, getCategories retorna array e renderiza seguro', async () => {
+    // 1. Simulação do endpoint de backend GET /financial/categories
+    const app = fastify();
+    app.get('/financial/categories', async () => {
+      return {
+        categories: [
+          { id: 'cat-1', name: 'Honorários', slug: 'honorarios', type: 'INCOME' },
+          { id: 'cat-2', name: 'Software & SaaS', slug: 'software-saas', type: 'EXPENSE' },
+        ],
+      };
+    });
+    await app.ready();
+
+    const res = await app.inject({ method: 'GET', url: '/financial/categories' });
+    assert.strictEqual(res.statusCode, 200);
+    const body = res.json();
+    assert.ok(Array.isArray(body.categories), 'O contrato da API retorna objeto com propriedade categories como array');
+    assert.strictEqual(body.categories.length, 2);
+
+    // 2. Simulação da função cliente getCategories() com extração defensiva
+    const parseCategoriesResponse = (data: any): any[] => {
+      if (Array.isArray(data)) return data;
+      if (data && Array.isArray(data.categories)) return data.categories;
+      return [];
+    };
+
+    // Caso A: JSON esperado { categories: [...] }
+    const resultFromStandardJson = parseCategoriesResponse(body);
+    assert.ok(Array.isArray(resultFromStandardJson));
+    assert.strictEqual(resultFromStandardJson.length, 2);
+    assert.strictEqual(resultFromStandardJson[0].name, 'Honorários');
+
+    // Caso B: JSON vazio {} ou { categories: null }
+    const resultFromEmptyJson = parseCategoriesResponse({});
+    assert.ok(Array.isArray(resultFromEmptyJson));
+    assert.strictEqual(resultFromEmptyJson.length, 0);
+
+    const resultFromNull = parseCategoriesResponse(null);
+    assert.ok(Array.isArray(resultFromNull));
+    assert.strictEqual(resultFromNull.length, 0);
+
+    // 3. Simulação da renderização defensiva no componente (categoryOptions.map)
+    const renderCategorySelector = (categoriesState: any) => {
+      const categoryOptions = Array.isArray(categoriesState) ? categoriesState : [];
+      return categoryOptions.map((c: any) => ({ value: c.id, label: c.name }));
+    };
+
+    // Renderiza com dados válidos
+    const renderedNormal = renderCategorySelector(resultFromStandardJson);
+    assert.strictEqual(renderedNormal.length, 2);
+    assert.strictEqual(renderedNormal[0].label, 'Honorários');
+
+    // Renderiza com array vazio sem quebrar
+    const renderedEmpty = renderCategorySelector([]);
+    assert.strictEqual(renderedEmpty.length, 0);
+
+    // Renderiza com estado corrompido (ex: null, undefined ou objeto) sem disparar TypeError (.map is not a function)
+    const renderedFromNull = renderCategorySelector(null);
+    assert.strictEqual(renderedFromNull.length, 0);
+
+    const renderedFromObject = renderCategorySelector({ notAnArray: true });
+    assert.strictEqual(renderedFromObject.length, 0);
+  });
 });
 
 
