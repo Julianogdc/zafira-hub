@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { authenticate, requireRole } from '../../../middleware/auth.js';
-import { AsaasIntegrationError } from './asaas.client.js';
+import { prisma } from '../../../lib/prisma.js';
+import { AsaasClient, AsaasIntegrationError } from './asaas.client.js';
 import { AsaasService } from './asaas.service.js';
 
 interface ClientParams {
@@ -9,7 +10,7 @@ interface ClientParams {
 }
 
 export function createAsaasRoutes(customService?: AsaasService) {
-  const service = customService || new AsaasService();
+  const service = customService || new AsaasService(new AsaasClient(), prisma);
 
   function handleError(error: unknown, reply: FastifyReply) {
     if (error instanceof AsaasIntegrationError) {

@@ -43,6 +43,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
 
     const mockClient: any = {
       getCustomers: async () => ({ data: [] }),
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
       getPayments: async ({ customer }: any) => {
         queriedCustomerParam = customer;
         return {
@@ -78,10 +79,12 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       },
       asaasPayment: {
+        findMany: async () => [],
         upsert: async (args: any) => {
           upsertedPayments.push(args);
           return args.create;
         },
+        update: async () => ({}),
       },
     };
 
@@ -749,6 +752,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       ],
       getAllPayments: async () => [],
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
     };
 
     const mockPrisma: any = {
@@ -763,6 +767,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         upsert: async () => ({}),
       },
       asaasPayment: {
+        findMany: async () => [],
         upsert: async () => ({}),
       },
     };
@@ -805,6 +810,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       ],
       getAllPayments: async () => [],
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
     };
 
     const mockPrisma: any = {
@@ -819,6 +825,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         upsert: async () => ({}),
       },
       asaasPayment: {
+        findMany: async () => [],
         upsert: async () => ({}),
       },
     };
@@ -860,6 +867,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       ],
       getAllPayments: async () => [],
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
     };
 
     const mockPrisma: any = {
@@ -877,6 +885,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       },
       asaasPayment: {
+        findMany: async () => [],
         upsert: async () => ({}),
       },
     };
@@ -906,6 +915,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         { id: 'cus_invalid_doc', name: 'Cliente Doc Incompleto', cpfCnpj: '123.456' },
       ],
       getAllPayments: async () => [],
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
     };
 
     const mockPrisma: any = {
@@ -914,7 +924,10 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         create: async () => { createCalled = true; return {}; },
       },
       clientIntegration: { upsert: async () => ({}) },
-      asaasPayment: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async () => [],
+        upsert: async () => ({}),
+      },
     };
 
     const service = new AsaasService(mockClient, mockPrisma);
@@ -938,6 +951,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         { id: 'cus_1', name: 'Cliente Novo', cpfCnpj: '11222333000144' },
       ],
       getAllPayments: async () => [],
+      getPaymentById: async (id: string) => ({ id, status: 'PENDING' }),
     };
 
     const mockPrisma: any = {
@@ -952,7 +966,10 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         },
       },
       clientIntegration: { upsert: async () => ({}) },
-      asaasPayment: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async () => [],
+        upsert: async () => ({}),
+      },
     };
 
     const service = new AsaasService(mockClient, mockPrisma);
@@ -981,6 +998,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
           dueDate: '2026-10-10',
         },
       ],
+      getPaymentById: async (id: string) => ({ id, status: 'RECEIVED' }),
     };
 
     const mockPrisma: any = {
@@ -990,6 +1008,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
       },
       clientIntegration: { upsert: async () => ({}) },
       asaasPayment: {
+        findMany: async () => [],
         upsert: async ({ create }: any) => {
           upsertedPaymentClientId = create.clientId;
           return create;
@@ -1407,6 +1426,12 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
           billingType: 'PIX',
         }
       ],
+      getPaymentById: async (id: string) => {
+        if (id === 'pay_z9bl8vgevjcb5ty3') {
+          return { id, status: 'PENDING', deleted: true, value: 1594, dueDate: currentMonthDueDateStr };
+        }
+        return { id, status: 'PENDING', deleted: false, value: 5, dueDate: currentMonthDueDateStr };
+      },
     };
 
     const mockPrisma: any = {
@@ -1439,10 +1464,18 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
             return newRecord;
           }
         },
-        findMany: async () => Array.from(localDatabase.values()).map((p) => ({
-          ...p,
-          client: p.client || { id: p.clientId, name: 'Cliente Teste' },
-        })),
+        findMany: async (args?: any) => {
+          let list = Array.from(localDatabase.values());
+          if (args?.where?.status?.in) {
+            list = list.filter((p) => args.where.status.in.includes(p.status));
+          } else if (args?.where?.status) {
+            list = list.filter((p) => p.status === args.where.status);
+          }
+          return list.map((p) => ({
+            ...p,
+            client: p.client || { id: p.clientId, name: 'Cliente Teste' },
+          }));
+        },
         count: async () => localDatabase.size,
         update: async ({ where, data }: any) => {
           for (const [k, v] of localDatabase.entries()) {
@@ -1719,6 +1752,8 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
           if (args?.where?.status?.in) {
             const allowed = args.where.status.in;
             list = list.filter((p) => allowed.includes(p.status));
+          } else if (args?.where?.status) {
+            list = list.filter((p) => p.status === args.where.status);
           }
           return list.map((p) => ({
             ...p,
@@ -1765,6 +1800,266 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     for (const m of calledAsaasMethods) {
       assert.ok(m.startsWith('GET '), `Método Asaas ${m} deve ser estritamente GET`);
     }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 32. Falha de dependência em reconcileActivePayments não retorna contadores zero com sucesso
+  // ---------------------------------------------------------------------------
+  await t.test('32. Falha de dependência não retorna contadores zero silenciosamente', async () => {
+    // Mock do cliente SEM o método getPaymentById
+    const incompleteClient: any = {
+      getAllCustomers: async () => [],
+      getAllPayments: async () => [],
+    };
+
+    const mockPrisma: any = {
+      client: { findMany: async () => [] },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async () => [],
+        upsert: async () => ({}),
+      },
+    };
+
+    const service = new AsaasService(incompleteClient, mockPrisma);
+    const syncRes = await service.syncAllWallet('org_dep_test');
+
+    assert.strictEqual(syncRes.success, false, 'Deve registrar falha quando dependência obrigatória estiver ausente');
+    assert.ok(syncRes.reconciliationErrors && syncRes.reconciliationErrors.length > 0, 'Deve registrar erro de reconciliação');
+    assert.ok(
+      syncRes.reconciliationErrors[0].includes('[RECONCILIATION_DEPENDENCY_ERROR]'),
+      'Deve conter código explícito RECONCILIATION_DEPENDENCY_ERROR'
+    );
+    assert.ok(syncRes.errors.length > 0, 'Lista geral de erros deve conter o erro de dependência');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 33. Serviço montado com dependências reais/injetadas executa getPaymentById
+  // ---------------------------------------------------------------------------
+  await t.test('33. Serviço montado com dependências reais/injetadas executa getPaymentById para cobranças ativas', async () => {
+    const orgId = 'org_dep_real';
+    const calls: string[] = [];
+
+    const mockClient: any = {
+      getAllCustomers: async () => [],
+      getAllPayments: async () => [],
+      getPaymentById: async (id: string) => {
+        calls.push(id);
+        return { id, status: 'PENDING', deleted: false, value: 100 };
+      },
+    };
+
+    const mockPrisma: any = {
+      client: { findMany: async () => [] },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async (args: any) => {
+          if (args?.where?.status?.in) {
+            return [
+              { id: 'db_1', externalId: 'pay_ativa_1', status: AsaasPaymentStatus.PENDING, value: 100 },
+              { id: 'db_2', externalId: 'pay_ativa_2', status: AsaasPaymentStatus.OVERDUE, value: 200 },
+            ];
+          }
+          return [];
+        },
+        upsert: async () => ({}),
+        update: async () => ({}),
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const syncRes = await service.syncAllWallet(orgId);
+
+    assert.strictEqual(syncRes.success, true);
+    assert.strictEqual(syncRes.reconciledActivePayments, 2);
+    assert.strictEqual(syncRes.reconciledDeletedPayments, 0);
+    assert.deepStrictEqual(calls, ['pay_ativa_1', 'pay_ativa_2'], 'Deve ter executado getPaymentById para ambas cobranças');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 34. PNEUTEK local PENDING + GET individual { deleted: true } resulta em DELETED
+  // ---------------------------------------------------------------------------
+  await t.test('34. PNEUTEK local PENDING + GET individual { deleted: true } resulta em DELETED', async () => {
+    const orgId = 'org_pneutek_deleted_test';
+    const localDb = new Map<string, any>();
+
+    localDb.set('pay_z9bl8vgevjcb5ty3', {
+      id: 'db_pneutek_34',
+      externalId: 'pay_z9bl8vgevjcb5ty3',
+      organizationId: orgId,
+      clientId: 'cli_pneutek',
+      value: 1594,
+      status: AsaasPaymentStatus.PENDING,
+      rawPayload: { status: 'PENDING' },
+    });
+
+    const mockClient: any = {
+      getAllCustomers: async () => [],
+      getAllPayments: async () => [],
+      getPaymentById: async (id: string) => {
+        if (id === 'pay_z9bl8vgevjcb5ty3') {
+          return { id, status: 'PENDING', deleted: true, value: 1594 };
+        }
+        return { id, status: 'PENDING', deleted: false, value: 100 };
+      },
+    };
+
+    const mockPrisma: any = {
+      client: { findMany: async () => [] },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async (args: any) => {
+          let list = Array.from(localDb.values());
+          if (args?.where?.status?.in) {
+            list = list.filter((p) => args.where.status.in.includes(p.status));
+          } else if (args?.where?.status) {
+            list = list.filter((p) => p.status === args.where.status);
+          }
+          return list;
+        },
+        upsert: async () => ({}),
+        update: async ({ where, data }: any) => {
+          for (const [k, v] of localDb.entries()) {
+            if (v.id === where.id || v.externalId === where.id) {
+              const updated = { ...v, ...data };
+              localDb.set(k, updated);
+              return updated;
+            }
+          }
+        },
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+    const syncRes = await service.syncAllWallet(orgId);
+
+    assert.strictEqual(syncRes.success, true);
+    assert.strictEqual(syncRes.reconciledDeletedPayments, 1);
+
+    const record = localDb.get('pay_z9bl8vgevjcb5ty3');
+    assert.strictEqual(record.status, AsaasPaymentStatus.DELETED, 'Status local deve passar para DELETED');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 35. Sincronização seguinte NÃO regrava a cobrança como PENDING por causa da listagem resumida
+  // ---------------------------------------------------------------------------
+  await t.test('35. Sincronização seguinte não a regrava como PENDING por causa da listagem resumida', async () => {
+    const orgId = 'org_precedence_test';
+    const localDb = new Map<string, any>();
+
+    // Cobrança já confirmada como DELETED no banco local
+    localDb.set('pay_z9bl8vgevjcb5ty3', {
+      id: 'db_pneutek_35',
+      externalId: 'pay_z9bl8vgevjcb5ty3',
+      organizationId: orgId,
+      clientId: 'cli_pneutek',
+      value: 1594,
+      status: AsaasPaymentStatus.DELETED,
+      rawPayload: { status: 'DELETED', deleted: true },
+    });
+
+    // Cobrança ativa do Cliente Teste
+    localDb.set('pay_xtm5d9d6kci3avnc', {
+      id: 'db_teste_35',
+      externalId: 'pay_xtm5d9d6kci3avnc',
+      organizationId: orgId,
+      clientId: 'cli_teste',
+      value: 5,
+      status: AsaasPaymentStatus.PENDING,
+      rawPayload: { status: 'PENDING' },
+    });
+
+    // Simulação da listagem geral do Asaas: traz pay_z9bl8vgevjcb5ty3 com status PENDING e sem deleted: true
+    const mockClient: any = {
+      getAllCustomers: async () => [
+        { id: 'cus_pneutek', name: 'PNEUTEK', cpfCnpj: '27702502000194' },
+        { id: 'cus_teste', name: 'Cliente Teste', cpfCnpj: '11122233344' },
+      ],
+      getAllPayments: async () => [
+        {
+          id: 'pay_z9bl8vgevjcb5ty3',
+          customer: 'cus_pneutek',
+          value: 1594,
+          status: 'PENDING',
+          // O Asaas na listagem padrão omite ou não envia deleted: true
+          billingType: 'PIX',
+          dueDate: '2026-09-20',
+        },
+        {
+          id: 'pay_xtm5d9d6kci3avnc',
+          customer: 'cus_teste',
+          value: 5,
+          status: 'PENDING',
+          billingType: 'PIX',
+          dueDate: '2026-09-20',
+        },
+      ],
+      getPaymentById: async (id: string) => {
+        if (id === 'pay_z9bl8vgevjcb5ty3') {
+          return { id, status: 'PENDING', deleted: true, value: 1594 };
+        }
+        return { id, status: 'PENDING', deleted: false, value: 5 };
+      },
+    };
+
+    const mockPrisma: any = {
+      client: {
+        findMany: async () => [
+          { id: 'cli_pneutek', document: '27702502000194', name: 'PNEUTEK', integrations: [{ provider: 'ASAAS', externalId: 'cus_pneutek' }] },
+          { id: 'cli_teste', document: '11122233344', name: 'Cliente Teste', integrations: [{ provider: 'ASAAS', externalId: 'cus_teste' }] },
+        ],
+      },
+      clientIntegration: { upsert: async () => ({}) },
+      asaasPayment: {
+        findMany: async (args: any) => {
+          let list = Array.from(localDb.values());
+          if (args?.where?.status?.in) {
+            list = list.filter((p) => args.where.status.in.includes(p.status));
+          } else if (args?.where?.status) {
+            list = list.filter((p) => p.status === args.where.status);
+          }
+          return list.map((p) => ({
+            ...p,
+            client: { id: p.clientId, name: p.clientId === 'cli_pneutek' ? 'PNEUTEK' : 'Cliente Teste' },
+          }));
+        },
+        upsert: async ({ where, create, update }: any) => {
+          const externalId = where.externalId;
+          const existing = localDb.get(externalId);
+          if (existing) {
+            const updated = { ...existing, ...update };
+            localDb.set(externalId, updated);
+            return updated;
+          }
+          const created = { id: `db_${externalId}`, externalId, ...create };
+          localDb.set(externalId, created);
+          return created;
+        },
+        update: async ({ where, data }: any) => {
+          for (const [k, v] of localDb.entries()) {
+            if (v.id === where.id || v.externalId === where.id) {
+              const updated = { ...v, ...data };
+              localDb.set(k, updated);
+              return updated;
+            }
+          }
+        },
+      },
+    };
+
+    const service = new AsaasService(mockClient, mockPrisma);
+
+    // Executa a sincronização seguinte
+    const syncRes = await service.syncAllWallet(orgId);
+    assert.strictEqual(syncRes.success, true);
+
+    // Preservação do dado individual: cobrança da PNEUTEK deve permanecer DELETED
+    const pneutekFinal = localDb.get('pay_z9bl8vgevjcb5ty3');
+    assert.strictEqual(
+      pneutekFinal.status,
+      AsaasPaymentStatus.DELETED,
+      'Cobrança já DELETED jamais pode regredir para PENDING por listagem resumida'
+    );
   });
 });
 
