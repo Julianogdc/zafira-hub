@@ -37,10 +37,31 @@ export interface FinancialAccountsOverviewResponse {
 export interface FinancialCategoryItem {
   id: string;
   name: string;
-  slug: string;
+  slug?: string;
   color?: string | null;
   icon?: string | null;
-  type: 'INCOME' | 'EXPENSE' | 'BOTH' | 'TRANSFER';
+  type: 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'FEE' | 'TAX' | 'OTHER';
+  isSystem?: boolean;
+  isActive?: boolean;
+  _count?: {
+    transactions: number;
+  };
+}
+
+export interface FinancialCategoryRuleItem {
+  id: string;
+  categoryId: string;
+  matchField: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
+  matchType: 'CONTAINS' | 'EXACT';
+  matchValueNormalized: string;
+  priority: number;
+  isActive: boolean;
+  category?: {
+    id: string;
+    name: string;
+    color?: string | null;
+    type: string;
+  };
 }
 
 export interface FinancialTransactionItem {
@@ -94,6 +115,7 @@ export interface UpdateCategoryPayload {
   rulePattern?: string;
   ruleField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
   ruleMatchType?: 'CONTAINS' | 'EXACT';
+  rulePriority?: number;
 }
 
 export interface SyncLedgerResult {
@@ -148,8 +170,10 @@ export const financialApi = {
     return api.get<FinancialTransactionsResponse>(`/financial/transactions${qs ? `?${qs}` : ''}`);
   },
 
-  getCategories: async (): Promise<FinancialCategoryItem[]> => {
-    const result = await api.get<{ categories: FinancialCategoryItem[] } | FinancialCategoryItem[]>('/financial/categories');
+  getCategories: async (includeArchived = false): Promise<FinancialCategoryItem[]> => {
+    const result = await api.get<{ categories: FinancialCategoryItem[] } | FinancialCategoryItem[]>(
+      `/financial/categories${includeArchived ? '?includeArchived=true' : ''}`
+    );
     if (Array.isArray(result)) {
       return result;
     }
@@ -157,6 +181,66 @@ export const financialApi = {
       return result.categories;
     }
     return [];
+  },
+
+  createCategory: async (data: { name: string; type?: string; color?: string }): Promise<FinancialCategoryItem> => {
+    return api.post('/financial/categories', data);
+  },
+
+  updateCategory: async (id: string, data: { name?: string; type?: string; color?: string }): Promise<FinancialCategoryItem> => {
+    return api.patch(`/financial/categories/${id}`, data);
+  },
+
+  archiveCategory: async (id: string): Promise<{ success: boolean; category: FinancialCategoryItem }> => {
+    return api.post(`/financial/categories/${id}/archive`);
+  },
+
+  reactivateCategory: async (id: string): Promise<{ success: boolean; category: FinancialCategoryItem }> => {
+    return api.post(`/financial/categories/${id}/reactivate`);
+  },
+
+  deleteCategory: async (id: string): Promise<{ success: boolean; message: string }> => {
+    return api.delete(`/financial/categories/${id}`);
+  },
+
+  migrateCategory: async (id: string, targetCategoryId: string): Promise<{ success: boolean; migratedCount: number }> => {
+    return api.post(`/financial/categories/${id}/migrate`, { targetCategoryId });
+  },
+
+  getCategoryRules: async (): Promise<FinancialCategoryRuleItem[]> => {
+    const res = await api.get<{ rules: FinancialCategoryRuleItem[] }>('/financial/category-rules');
+    return res.rules || [];
+  },
+
+  createCategoryRule: async (data: {
+    categoryId: string;
+    matchField: string;
+    matchType: string;
+    matchValue: string;
+    priority?: number;
+    isActive?: boolean;
+  }): Promise<FinancialCategoryRuleItem> => {
+    return api.post('/financial/category-rules', data);
+  },
+
+  updateCategoryRule: async (id: string, data: Partial<FinancialCategoryRuleItem>): Promise<FinancialCategoryRuleItem> => {
+    return api.patch(`/financial/category-rules/${id}`, data);
+  },
+
+  deleteCategoryRule: async (id: string): Promise<{ success: boolean }> => {
+    return api.delete(`/financial/category-rules/${id}`);
+  },
+
+  previewCategoryRule: async (data: {
+    matchField: string;
+    matchType: string;
+    matchValue: string;
+  }): Promise<{ totalMatches: number; sampleMatches: any[] }> => {
+    return api.post('/financial/category-rules/preview', data);
+  },
+
+  applyCategoryRule: async (id: string): Promise<{ success: boolean; appliedCount: number }> => {
+    return api.post(`/financial/category-rules/${id}/apply`);
   },
 
   updateTransactionCategory: async (id: string, payload: UpdateCategoryPayload): Promise<any> => {

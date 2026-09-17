@@ -1,6 +1,6 @@
 import { prisma as defaultPrisma } from '../../lib/prisma.js';
 import { FinancialAccountProvider, FinancialTransactionDirection, FinancialTransactionKind } from '@prisma/client';
-import { financialCategoryService } from './financial-category.service.js';
+import { FinancialCategoryService, financialCategoryService } from './financial-category.service.js';
 
 export interface FinancialAccountsOverviewResponse {
   asaasBalance: number;
@@ -40,9 +40,11 @@ export interface FinancialTransactionsFilters {
 
 export class FinancialService {
   private readonly prisma: typeof defaultPrisma;
+  private readonly categoryService: FinancialCategoryService;
 
-  constructor(prismaClient?: any) {
+  constructor(prismaClient?: any, categoryService?: FinancialCategoryService) {
     this.prisma = prismaClient || defaultPrisma;
+    this.categoryService = categoryService || new FinancialCategoryService(this.prisma);
   }
 
   /**
@@ -300,6 +302,9 @@ export class FinancialService {
       categoryId: string;
       createRule?: boolean;
       ruleMatchField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
+      ruleMatchType?: 'CONTAINS' | 'EXACT';
+      rulePattern?: string;
+      rulePriority?: number;
     }
   ) {
     const tx = await this.prisma.financialTransaction.findUnique({
@@ -323,19 +328,21 @@ export class FinancialService {
     });
 
     if (data.createRule) {
-      const matchField = data.ruleMatchField || (tx.counterpartyName ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
-      let matchVal = '';
-      if (matchField === 'COUNTERPARTY_NAME') matchVal = tx.counterpartyName || '';
-      else if (matchField === 'COUNTERPARTY_DOCUMENT') matchVal = tx.counterpartyDocument || '';
-      else matchVal = tx.description;
+      const matchField = data.ruleMatchField || (data as any).ruleField || (tx.counterpartyName ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
+      let matchVal = data.rulePattern?.trim() || '';
+      if (!matchVal) {
+        if (matchField === 'COUNTERPARTY_NAME') matchVal = tx.counterpartyName || '';
+        else if (matchField === 'COUNTERPARTY_DOCUMENT') matchVal = tx.counterpartyDocument || '';
+        else matchVal = tx.description;
+      }
 
       if (matchVal) {
-        await financialCategoryService.createCategoryRule(organizationId, {
+        await this.categoryService.createCategoryRule(organizationId, {
           categoryId: data.categoryId,
           matchField: matchField as any,
-          matchType: 'CONTAINS',
+          matchType: data.ruleMatchType || 'CONTAINS',
           matchValue: matchVal,
-          priority: 20,
+          priority: data.rulePriority ?? 20,
         });
       }
     }

@@ -184,15 +184,284 @@ export async function financialRoutes(app: FastifyInstance) {
 
   /**
    * GET /financial/categories
-   * Lista categorias ativas da organização
+   * Lista categorias da organização com contagem de transações (suporta ?includeArchived=true)
    */
   const handleGetCategories = async (req: FastifyRequest, reply: FastifyReply) => {
     const organizationId = getOrganizationId(req);
-    const categories = await categoryService.ensureDefaultCategories(organizationId);
+    const query = req.query as { includeArchived?: string };
+    const categories = await categoryService.listCategories(organizationId, {
+      includeArchived: query.includeArchived === 'true',
+    });
     return reply.send({ categories });
   };
   app.get('/financial/categories', handleGetCategories);
   app.get('/api/financial/categories', handleGetCategories);
+
+  /**
+   * POST /financial/categories
+   * Criação de nova categoria (ADMIN / MANAGER)
+   */
+  const handleCreateCategory = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const body = req.body as { name: string; type?: any; color?: string };
+    if (!body || !body.name) {
+      return reply.status(400).send({ error: 'Nome da categoria é obrigatório' });
+    }
+
+    try {
+      const category = await categoryService.createCategory(organizationId, {
+        name: body.name,
+        type: body.type || 'EXPENSE',
+        color: body.color,
+      });
+      return reply.status(201).send(category);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/categories', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategory);
+  app.post('/api/financial/categories', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategory);
+
+  /**
+   * PATCH /financial/categories/:id
+   * Atualização de nome, tipo e cor da categoria (ADMIN / MANAGER)
+   */
+  const handleUpdateCategoryAttrs = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+    const body = req.body as { name?: string; type?: any; color?: string };
+
+    try {
+      const updated = await categoryService.updateCategory(organizationId, id, body);
+      return reply.send(updated);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.patch('/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryAttrs);
+  app.patch('/api/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryAttrs);
+
+  /**
+   * POST /financial/categories/:id/archive
+   * Arquiva categoria (ADMIN / MANAGER)
+   */
+  const handleArchiveCategory = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+
+    try {
+      const archived = await categoryService.archiveCategory(organizationId, id);
+      return reply.send({ success: true, category: archived });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/categories/:id/archive', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleArchiveCategory);
+  app.post('/api/financial/categories/:id/archive', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleArchiveCategory);
+
+  /**
+   * POST /financial/categories/:id/reactivate
+   * Reativa categoria arquivada (ADMIN / MANAGER)
+   */
+  const handleReactivateCategory = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+
+    try {
+      const reactivated = await categoryService.reactivateCategory(organizationId, id);
+      return reply.send({ success: true, category: reactivated });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/categories/:id/reactivate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleReactivateCategory);
+  app.post('/api/financial/categories/:id/reactivate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleReactivateCategory);
+
+  /**
+   * DELETE /financial/categories/:id
+   * Exclusão segura: permitida SOMENTE se 0 transações vinculadas.
+   * Se houver movimentações, retorna 409 Conflict com código CATEGORY_HAS_TRANSACTIONS.
+   */
+  const handleDeleteCategory = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+
+    try {
+      await categoryService.deleteCategory(organizationId, id);
+      return reply.send({ success: true, message: 'Categoria excluída com sucesso.' });
+    } catch (err: any) {
+      if (err.code === 'CATEGORY_HAS_TRANSACTIONS') {
+        return reply.status(409).send({
+          error: 'CATEGORY_HAS_TRANSACTIONS',
+          message: err.message,
+          transactionCount: err.transactionCount,
+        });
+      }
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.delete('/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategory);
+  app.delete('/api/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategory);
+
+  /**
+   * POST /financial/categories/:id/migrate
+   * Migração de movimentações de uma categoria para outra antes de exclusão/arquivamento
+   */
+  const handleMigrateCategory = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id: sourceCategoryId } = req.params as { id: string };
+    const body = req.body as { targetCategoryId: string };
+
+    if (!body?.targetCategoryId) {
+      return reply.status(400).send({ error: 'targetCategoryId é obrigatório' });
+    }
+
+    try {
+      const res = await categoryService.migrateCategoryTransactions(
+        organizationId,
+        sourceCategoryId,
+        body.targetCategoryId
+      );
+      return reply.send({ success: true, ...res });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/categories/:id/migrate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleMigrateCategory);
+  app.post('/api/financial/categories/:id/migrate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleMigrateCategory);
+
+  /**
+   * GET /financial/category-rules
+   * Lista regras de categorização automática
+   */
+  const handleGetRules = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const rules = await categoryService.listRules(organizationId);
+    return reply.send({ rules });
+  };
+  app.get('/financial/category-rules', handleGetRules);
+  app.get('/api/financial/category-rules', handleGetRules);
+
+  /**
+   * POST /financial/category-rules
+   * Criação manual de regra de categorização (ADMIN / MANAGER)
+   */
+  const handleCreateCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const body = req.body as {
+      categoryId: string;
+      matchField: any;
+      matchType: any;
+      matchValue?: string;
+      pattern?: string;
+      priority?: number;
+      isActive?: boolean;
+    };
+
+    const matchVal = body.matchValue || body.pattern;
+    if (!body.categoryId || !body.matchField || !body.matchType || !matchVal) {
+      return reply.status(400).send({ error: 'Campos obrigatórios ausentes para criação de regra' });
+    }
+
+    try {
+      const rule = await categoryService.createCategoryRule(organizationId, {
+        categoryId: body.categoryId,
+        matchField: body.matchField,
+        matchType: body.matchType,
+        matchValue: matchVal,
+        priority: body.priority,
+        isActive: body.isActive,
+      });
+      return reply.status(201).send(rule);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/category-rules', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategoryRule);
+  app.post('/api/financial/category-rules', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategoryRule);
+
+  /**
+   * PATCH /financial/category-rules/:id
+   * Atualização de regra (ADMIN / MANAGER)
+   */
+  const handleUpdateCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+    const body = req.body as any;
+
+    try {
+      const updated = await categoryService.updateCategoryRule(organizationId, id, body);
+      return reply.send(updated);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.patch('/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryRule);
+  app.patch('/api/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryRule);
+
+  /**
+   * DELETE /financial/category-rules/:id
+   * Exclusão de regra (ADMIN / MANAGER)
+   */
+  const handleDeleteCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+
+    try {
+      await categoryService.deleteCategoryRule(organizationId, id);
+      return reply.send({ success: true, message: 'Regra excluída com sucesso.' });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.delete('/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategoryRule);
+  app.delete('/api/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategoryRule);
+
+  /**
+   * POST /financial/category-rules/preview
+   * Prévia de impacto de uma regra sobre movimentações sem mutação silenciosa
+   */
+  const handlePreviewCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const body = req.body as {
+      matchField: any;
+      matchType: any;
+      matchValue?: string;
+      pattern?: string;
+    };
+
+    const matchValue = body.matchValue || body.pattern;
+    if (!body.matchField || !body.matchType || !matchValue) {
+      return reply.status(400).send({ error: 'Critérios incompletos para prévia da regra' });
+    }
+
+    const preview = await categoryService.previewRuleMatches(organizationId, {
+      matchField: body.matchField,
+      matchType: body.matchType,
+      matchValue,
+    });
+    return reply.send(preview);
+  };
+  app.post('/financial/category-rules/preview', handlePreviewCategoryRule);
+  app.post('/api/financial/category-rules/preview', handlePreviewCategoryRule);
+
+  /**
+   * POST /financial/category-rules/:id/apply
+   * Aplicação retroativa explícita de uma regra (ADMIN / MANAGER)
+   */
+  const handleApplyCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const { id } = req.params as { id: string };
+
+    try {
+      const res = await categoryService.applyRuleRetroactively(organizationId, id);
+      return reply.send({ success: true, ...res });
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  };
+  app.post('/financial/category-rules/:id/apply', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyCategoryRule);
+  app.post('/api/financial/category-rules/:id/apply', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyCategoryRule);
 
   /**
    * PATCH /financial/transactions/:id/category
@@ -207,6 +476,7 @@ export async function financialRoutes(app: FastifyInstance) {
       rulePattern?: string;
       ruleField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
       ruleMatchType?: 'CONTAINS' | 'EXACT';
+      rulePriority?: number;
     };
 
     if (!body || !body.categoryId) {
@@ -216,44 +486,19 @@ export async function financialRoutes(app: FastifyInstance) {
     const updated = await financialService.updateTransactionCategory(
       organizationId,
       id,
-      body.categoryId,
-      body.createRule
-        ? {
-            pattern: body.rulePattern || '',
-            field: body.ruleField,
-            matchType: body.ruleMatchType,
-          }
-        : undefined
+      {
+        categoryId: body.categoryId,
+        createRule: body.createRule,
+        rulePattern: body.rulePattern,
+        ruleMatchField: body.ruleField,
+        ruleMatchType: body.ruleMatchType,
+        rulePriority: body.rulePriority,
+      }
     );
     return reply.send(updated);
   };
   app.patch('/financial/transactions/:id/category', handleUpdateCategory);
   app.patch('/api/financial/transactions/:id/category', handleUpdateCategory);
-
-  /**
-   * POST /financial/category-rules
-   * Criação manual de regra de categorização
-   */
-  const handleCreateCategoryRule = async (req: FastifyRequest, reply: FastifyReply) => {
-    const organizationId = getOrganizationId(req);
-    const body = req.body as {
-      name: string;
-      categoryId: string;
-      matchField: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
-      matchType: 'CONTAINS' | 'EXACT';
-      pattern: string;
-      priority?: number;
-    };
-
-    if (!body.name || !body.categoryId || !body.matchField || !body.matchType || !body.pattern) {
-      return reply.status(400).send({ error: 'Campos obrigatórios ausentes para criação de regra' });
-    }
-
-    const rule = await categoryService.createRule(organizationId, body);
-    return reply.status(201).send(rule);
-  };
-  app.post('/financial/category-rules', handleCreateCategoryRule);
-  app.post('/api/financial/category-rules', handleCreateCategoryRule);
 
   /**
    * PATCH /financial/transfers/:id/confirm

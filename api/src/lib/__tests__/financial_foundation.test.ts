@@ -2228,6 +2228,371 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       }
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 16. Gestão de Categorias e Classificação Automática do Caixa Inter PJ
+  // ---------------------------------------------------------------------------
+  await t.test('16. Gestão de Categorias e Classificação Automática do Caixa Inter PJ (9 testes obrigatórios)', async (tSub) => {
+    // 1. Criar e editar categoria
+    await tSub.test('16.1 Criar e editar categoria: valida unicidade e atualização de tipo/cor', async () => {
+      const categoriesDb: any[] = [];
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => categoriesDb,
+          findFirst: async (args: any) => {
+            return categoriesDb.find((c) => {
+              if (c.organizationId !== args.where.organizationId) return false;
+              if (args.where.id && c.id === args.where.id) return true;
+              if (args.where.name?.equals && c.name.toLowerCase() === args.where.name.equals.toLowerCase()) {
+                if (args.where.id?.not && c.id === args.where.id.not) return false;
+                return true;
+              }
+              return false;
+            }) || null;
+          },
+          create: async (args: any) => {
+            const cat = { id: `cat-${Date.now()}-${Math.random()}`, ...args.data, _count: { transactions: 0 } };
+            categoriesDb.push(cat);
+            return cat;
+          },
+          update: async (args: any) => {
+            const index = categoriesDb.findIndex((c) => c.id === args.where.id);
+            assert.ok(index !== -1);
+            categoriesDb[index] = { ...categoriesDb[index], ...args.data };
+            return categoriesDb[index];
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Cria categoria
+      const created = await catService.createCategory('org-cat-1', {
+        name: 'Tráfego Pago Google Ads',
+        type: 'EXPENSE',
+        color: '#4285F4',
+      });
+      assert.strictEqual(created.name, 'Tráfego Pago Google Ads');
+      assert.strictEqual(created.type, 'EXPENSE');
+      assert.strictEqual(created.color, '#4285F4');
+      assert.strictEqual(created.isActive, true);
+
+      // Edita categoria
+      const updated = await catService.updateCategory('org-cat-1', created.id, {
+        name: 'Google Ads & YouTube',
+        color: '#EA4335',
+      });
+      assert.strictEqual(updated.name, 'Google Ads & YouTube');
+      assert.strictEqual(updated.color, '#EA4335');
+    });
+
+    // 2. Arquivar e reativar categoria
+    await tSub.test('16.2 Arquivar e reativar categoria: altera isActive e preserva integridade', async () => {
+      const catRecord = {
+        id: 'cat-archive-test',
+        organizationId: 'org-archive',
+        name: 'Ferramentas de IA',
+        type: 'EXPENSE',
+        isActive: true,
+        isSystem: false,
+      };
+
+      const mockPrisma: any = {
+        financialCategory: {
+          findFirst: async () => catRecord,
+          update: async (args: any) => {
+            Object.assign(catRecord, args.data);
+            return catRecord;
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Arquivar
+      const archived = await catService.archiveCategory('org-archive', 'cat-archive-test');
+      assert.strictEqual(archived.isActive, false);
+
+      // Reativar
+      const reactivated = await catService.reactivateCategory('org-archive', 'cat-archive-test');
+      assert.strictEqual(reactivated.isActive, true);
+    });
+
+    // 3. Bloquear exclusão de categoria com movimentações vinculadas
+    await tSub.test('16.3 Bloqueia exclusão de categoria que possui movimentações com CATEGORY_HAS_TRANSACTIONS', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findFirst: async () => ({
+            id: 'cat-with-tx',
+            organizationId: 'org-test',
+            name: 'Honorários',
+            isSystem: false,
+          }),
+        },
+        financialTransaction: {
+          count: async () => 14, // 14 movimentações vinculadas
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      await assert.rejects(
+        async () => {
+          await catService.deleteCategory('org-test', 'cat-with-tx');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'CATEGORY_HAS_TRANSACTIONS');
+          assert.strictEqual(err.transactionCount, 14);
+          assert.ok(err.message.includes('possui 14 movimentação(ões) vinculada(s)'));
+          return true;
+        }
+      );
+    });
+
+    // 4. Excluir categoria sem movimentações vinculadas
+    await tSub.test('16.4 Exclui categoria com sucesso quando há 0 movimentações vinculadas', async () => {
+      let deletedId = '';
+      let rulesDeleted = false;
+
+      const mockPrisma: any = {
+        financialCategory: {
+          findFirst: async () => ({
+            id: 'cat-empty',
+            organizationId: 'org-test',
+            name: 'Categoria Temporária',
+            isSystem: false,
+          }),
+          delete: async (args: any) => {
+            deletedId = args.where.id;
+            return { id: deletedId };
+          },
+        },
+        financialTransaction: {
+          count: async () => 0, // 0 movimentações
+        },
+        financialCategoryRule: {
+          deleteMany: async () => {
+            rulesDeleted = true;
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+      const res = await catService.deleteCategory('org-test', 'cat-empty');
+
+      assert.strictEqual(res.id, 'cat-empty');
+      assert.strictEqual(deletedId, 'cat-empty');
+      assert.strictEqual(rulesDeleted, true);
+    });
+
+    // 5. Criar regra e classificar nova movimentação automaticamente
+    await tSub.test('16.5 Classificação automática por regra ativa e prioridade', async () => {
+      const rules = [
+        {
+          id: 'rule-low-priority',
+          organizationId: 'org-auto',
+          categoryId: 'cat-geral',
+          matchField: 'DESCRIPTION',
+          matchType: 'CONTAINS',
+          matchValueNormalized: 'servico',
+          priority: 5,
+          isActive: true,
+        },
+        {
+          id: 'rule-high-priority',
+          organizationId: 'org-auto',
+          categoryId: 'cat-aws-cloud',
+          matchField: 'DESCRIPTION',
+          matchType: 'CONTAINS',
+          matchValueNormalized: 'amazon web services',
+          priority: 50,
+          isActive: true,
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-geral', name: 'Geral' },
+            { id: 'cat-aws-cloud', name: 'Infraestrutura Cloud' },
+            { id: 'cat-review', name: 'Para revisar' },
+          ],
+          create: async () => ({ id: 'cat-review', name: 'Para revisar' }),
+        },
+        financialCategoryRule: {
+          findMany: async () => rules.sort((a, b) => b.priority - a.priority),
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Transação contendo 'amazon web services' deve casar com a regra de maior prioridade (50)
+      const res = await catService.categorizeTransaction('org-auto', {
+        description: 'PAGAMENTO AMAZON WEB SERVICES CLOUD SP',
+      });
+
+      assert.strictEqual(res.categoryId, 'cat-aws-cloud');
+      assert.strictEqual(res.categorizationSource, 'AUTO_RULE');
+      assert.strictEqual(res.categorizationConfidence, 0.95);
+    });
+
+    // 6. Regra manual prevalece sobre sugestão genérica
+    await tSub.test('16.6 Classificação manual pelo usuário grava MANUAL com confiança 1.0 e cria regra configurada', async () => {
+      let updatedTransaction: any = null;
+      let createdRuleData: any = null;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findUnique: async () => ({
+            id: 'tx-manual-1',
+            organizationId: 'org-manual',
+            description: 'PIX RECEBIDO JULIANO ASSESSORIA',
+            counterpartyName: 'JULIANO SILVA',
+            amount: 4500.0,
+          }),
+          update: async (args: any) => {
+            updatedTransaction = args.data;
+            return { id: args.where.id, ...args.data };
+          },
+        },
+        financialCategory: {
+          findFirst: async () => ({ id: 'cat-consultoria', organizationId: 'org-manual' }),
+        },
+        financialCategoryRule: {
+          create: async (args: any) => {
+            createdRuleData = args.data;
+            return { id: 'rule-new-1', ...args.data };
+          },
+        },
+      };
+
+      const finService = new FinancialService(mockPrisma);
+
+      await finService.updateTransactionCategory('org-manual', 'tx-manual-1', {
+        categoryId: 'cat-consultoria',
+        createRule: true,
+        ruleField: 'COUNTERPARTY_NAME',
+        ruleMatchType: 'EXACT',
+        rulePattern: 'JULIANO SILVA',
+        rulePriority: 30,
+      });
+
+      // Valida que a transação foi salva estritamente como MANUAL
+      assert.strictEqual(updatedTransaction.categoryId, 'cat-consultoria');
+      assert.strictEqual(updatedTransaction.categorizationSource, 'MANUAL');
+      assert.strictEqual(updatedTransaction.categorizationConfidence, 1.0);
+
+      // Valida criação da regra configurada
+      assert.ok(createdRuleData);
+      assert.strictEqual(createdRuleData.categoryId, 'cat-consultoria');
+      assert.strictEqual(createdRuleData.matchField, 'COUNTERPARTY_NAME');
+      assert.strictEqual(createdRuleData.matchType, 'EXACT');
+      assert.strictEqual(createdRuleData.priority, 30);
+    });
+
+    // 7. Movimento sem regra permanece "Para revisar"
+    await tSub.test('7. Movimento sem correspondência permanece com categoria Para revisar e status PENDING', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rev-id', name: 'Para revisar' },
+          ],
+          create: async (args: any) => ({ id: 'mock-created-cat', ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [], // Zero regras
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+      const res = await catService.categorizeTransaction('org-pendente', {
+        description: 'DESPESA DESCONHECIDA SEM PADRAO',
+      });
+
+      assert.strictEqual(res.categoryId, 'cat-rev-id');
+      assert.strictEqual(res.categorizationSource, 'PENDING');
+      assert.strictEqual(res.categorizationConfidence, 0.5);
+    });
+
+    // 8. Multi-tenant e RBAC
+    await tSub.test('8. RBAC estrito: MEMBER é bloqueado com 403; ADMIN e MANAGER autorizados', async () => {
+      const testApp = fastify();
+      testApp.decorate('authContext', null as any);
+
+      testApp.addHook('preHandler', async (req: any) => {
+        const role = req.headers['x-role'] || 'MEMBER';
+        req.authContext = {
+          type: 'user',
+          userId: 'user-rbac',
+          memberships: [{ organizationId: 'org-tenant-1', role }],
+          activeOrganizationId: 'org-tenant-1',
+        };
+      });
+
+      testApp.post('/financial/categories', {
+        preHandler: [requireRole(['ADMIN', 'MANAGER'])],
+      }, async () => ({ success: true }));
+
+      await testApp.ready();
+
+      // MEMBER tentando criar categoria -> 403 Forbidden
+      const memberRes = await testApp.inject({
+        method: 'POST',
+        url: '/financial/categories',
+        headers: { 'x-role': 'MEMBER' },
+        payload: { name: 'Nova Categoria' },
+      });
+      assert.strictEqual(memberRes.statusCode, 403);
+
+      // MANAGER criando categoria -> 200 OK
+      const managerRes = await testApp.inject({
+        method: 'POST',
+        url: '/financial/categories',
+        headers: { 'x-role': 'MANAGER' },
+        payload: { name: 'Nova Categoria' },
+      });
+      assert.strictEqual(managerRes.statusCode, 200);
+
+      // ADMIN criando categoria -> 200 OK
+      const adminRes = await testApp.inject({
+        method: 'POST',
+        url: '/financial/categories',
+        headers: { 'x-role': 'ADMIN' },
+        payload: { name: 'Nova Categoria' },
+      });
+      assert.strictEqual(adminRes.statusCode, 200);
+    });
+
+    // 9. Regressão de datas, CREDIT/DEBIT e BANK_WRITE_FORBIDDEN
+    await tSub.test('9. Regressão estrita: datas ISO válidas, CREDIT/DEBIT e BANK_WRITE_FORBIDDEN', async () => {
+      // 1. Data normalizada válida
+      const date = normalizeInterDate('17/09/2026');
+      assert.strictEqual(date.toISOString().slice(0, 10), '2026-09-17');
+
+      // 2. Direção estruturada CREDIT/DEBIT
+      assert.strictEqual(normalizeInterDirection({ tipoOperacao: 'C', titulo: 'PIX RECEBIDO' }), 'CREDIT');
+      assert.strictEqual(normalizeInterDirection({ tipoOperacao: 'D', titulo: 'PIX ENVIADO' }), 'DEBIT');
+
+      // 3. BANK_WRITE_FORBIDDEN
+      const client = new InterClient({
+        clientId: 'id',
+        clientSecret: 'sec',
+        crtBase64: Buffer.from('crt').toString('base64'),
+        keyBase64: Buffer.from('key').toString('base64'),
+      });
+
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource('POST', '/banking/v2/pix');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          return true;
+        }
+      );
+    });
+  });
 });
 
 
