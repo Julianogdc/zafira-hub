@@ -68,6 +68,7 @@ import {
 } from '@/services/financial';
 import { clientsService, HubClient } from '@/services/clients';
 import { toast } from 'sonner';
+import { formatBankDateTimeDisplay, formatCounterpartyDisplay } from '@/utils/financialFormatters';
 
 export function CaixaMovimentacoes() {
   // Estados de dados
@@ -392,8 +393,10 @@ export function CaixaMovimentacoes() {
     setSelectedClientId(tx.clientId || tx.client?.id || '');
     setTeachFutureClientRule(true);
 
-    setRulePattern(tx.counterpartyName || tx.description || '');
-    setRuleField(tx.counterpartyDocument ? 'COUNTERPARTY_DOCUMENT' : tx.counterpartyName ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
+    const safeCp = formatCounterpartyDisplay(tx.counterpartyName);
+    const hasSafeCp = safeCp !== 'Não informada pelo banco';
+    setRulePattern(hasSafeCp ? safeCp : (tx.description || ''));
+    setRuleField(tx.counterpartyDocument ? 'COUNTERPARTY_DOCUMENT' : hasSafeCp ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
     setRuleMatchType(tx.counterpartyDocument ? 'EXACT' : 'CONTAINS');
     setRulePriority(25);
     setCreateRule(false);
@@ -415,12 +418,14 @@ export function CaixaMovimentacoes() {
         const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
         if (revCat) catIdToSend = revCat.id;
       }
+      const safeCp = formatCounterpartyDisplay(selectedTx.counterpartyName);
+      const hasSafeCp = safeCp !== 'Não informada pelo banco';
       await financialApi.updateTransactionCategory(selectedTx.id, {
         categoryId: catIdToSend || undefined,
         clientId,
         createRule: true,
-        rulePattern: selectedTx.counterpartyName || selectedTx.description,
-        ruleField: selectedTx.counterpartyDocument ? 'COUNTERPARTY_DOCUMENT' : 'COUNTERPARTY_NAME',
+        rulePattern: hasSafeCp ? safeCp : selectedTx.description,
+        ruleField: selectedTx.counterpartyDocument ? 'COUNTERPARTY_DOCUMENT' : hasSafeCp ? 'COUNTERPARTY_NAME' : 'DESCRIPTION',
         ruleMatchType: selectedTx.counterpartyDocument ? 'EXACT' : 'CONTAINS',
         rulePriority: 25,
         ruleLinkClient: true,
@@ -455,7 +460,9 @@ export function CaixaMovimentacoes() {
         categoryId: catIdToSend || undefined,
         clientId: selectedClientId || null,
         createRule: shouldCreateRule,
-        rulePattern: shouldCreateRule ? (rulePattern || selectedTx.counterpartyName || selectedTx.description) : undefined,
+        rulePattern: shouldCreateRule
+          ? (rulePattern || (formatCounterpartyDisplay(selectedTx.counterpartyName) !== 'Não informada pelo banco' ? selectedTx.counterpartyName : selectedTx.description))
+          : undefined,
         ruleField: shouldCreateRule ? ruleField : undefined,
         ruleMatchType: shouldCreateRule ? ruleMatchType : undefined,
         rulePriority: shouldCreateRule ? rulePriority : undefined,
@@ -1057,9 +1064,9 @@ export function CaixaMovimentacoes() {
                             <div className="font-medium text-white text-xs truncate max-w-sm">
                               {tx.description}
                             </div>
-                            {tx.counterpartyName && (
+                            {formatCounterpartyDisplay(tx.counterpartyName) !== 'Não informada pelo banco' && (
                               <div className="text-[11px] text-zinc-400 truncate mt-0.5">
-                                {tx.counterpartyName}
+                                {formatCounterpartyDisplay(tx.counterpartyName)}
                               </div>
                             )}
                           </div>
@@ -1731,7 +1738,11 @@ export function CaixaMovimentacoes() {
                 const isCredit = selectedTx.direction === 'CREDIT' || (selectedTx.direction as string) === 'INCOME';
                 const isInternal = selectedTx.kind === 'TRANSFER_INTERNAL';
                 const interTime = getInterTime(selectedTx);
-                const hasTime = interTime !== 'Horário não informado pelo banco';
+                const dateDisplay = formatBankDateTimeDisplay(
+                  selectedTx.occurredAt || selectedTx.transactedAt,
+                  selectedTx.datePrecision,
+                  interTime
+                );
 
                 return (
                   <SheetHeader className="p-6 border-b border-white/5 bg-zinc-900/30 space-y-4">
@@ -1776,11 +1787,11 @@ export function CaixaMovimentacoes() {
 
                     {/* Metadados temporais com precisão bancária oficial */}
                     <div className="pt-2 border-t border-white/5 space-y-1">
-                      {hasTime ? (
+                      {dateDisplay.hasRealTime ? (
                         <div className="flex items-center gap-2 text-xs">
                           <span className="text-zinc-400">Data bancária:</span>
                           <span className="font-medium text-zinc-200">
-                            {formatDate(selectedTx.occurredAt || selectedTx.transactedAt)} às {interTime}
+                            {dateDisplay.displayWithTime}
                           </span>
                         </div>
                       ) : (
@@ -1788,7 +1799,7 @@ export function CaixaMovimentacoes() {
                           <div className="flex items-center gap-2">
                             <span className="text-zinc-400">Data bancária:</span>
                             <span className="font-medium text-zinc-200">
-                              {formatDate(selectedTx.occurredAt || selectedTx.transactedAt)}
+                              {dateDisplay.dateOnly}
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] pt-0.5">
@@ -1818,7 +1829,7 @@ export function CaixaMovimentacoes() {
                     <div className="flex justify-between items-center gap-4">
                       <span className="text-zinc-500 shrink-0">Contraparte:</span>
                       <span className="font-medium text-white text-right">
-                        {selectedTx.counterpartyName || 'Não informada pelo banco'}
+                        {formatCounterpartyDisplay(selectedTx.counterpartyName)}
                       </span>
                     </div>
 

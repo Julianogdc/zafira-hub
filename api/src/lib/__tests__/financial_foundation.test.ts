@@ -18,6 +18,8 @@ import {
   normalizeInterAmount,
   extractInterDatePrecision,
   extractInterTime,
+  formatBankDateTimeDisplay,
+  formatCounterpartyDisplay,
 } from '../../modules/integrations/inter/inter.normalizer.js';
 import { requireRole } from '../../middleware/auth.js';
 
@@ -3457,7 +3459,92 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(tx2.amount, 250.0);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 20. Formatação rigorosa de Data/Horário e Contraparte na Gaveta Lateral
+  // ---------------------------------------------------------------------------
+  await t.test('20. Formatação rigorosa de Data/Horário e Contraparte na Gaveta Lateral', async (tSub) => {
+    // 20.1 DATE_ONLY nunca exibe horário e nunca concatena a string "às"
+    await tSub.test('20.1 DATE_ONLY exibe somente data e nunca concatena "às"', async () => {
+      const result = formatBankDateTimeDisplay('2026-09-16T12:00:00Z', 'DATE_ONLY', null);
+      assert.strictEqual(result.dateOnly, '16/09/2026');
+      assert.strictEqual(result.hasRealTime, false);
+      assert.strictEqual(result.time, null);
+      assert.strictEqual(result.displayWithTime, '16/09/2026');
+      assert.strictEqual(result.displayWithTime.includes('às'), false, 'A string "às" NUNCA pode aparecer em DATE_ONLY');
+    });
+
+    // 20.2 DATETIME com horário real exibe a data e horário completo com "às"
+    await tSub.test('20.2 DATETIME com horário real exibe data e hora corretas', async () => {
+      const result = formatBankDateTimeDisplay('2026-09-17T14:32:00Z', 'DATETIME', '14:32');
+      assert.strictEqual(result.dateOnly, '17/09/2026');
+      assert.strictEqual(result.hasRealTime, true);
+      assert.strictEqual(result.time, '14:32');
+      assert.strictEqual(result.displayWithTime, '17/09/2026 às 14:32');
+    });
+
+    // 20.3 A string "às" NUNCA fica sozinha quando time for nulo, vazio, indefinido ou técnico
+    await tSub.test('20.3 A string "às" nunca fica sozinha em cenários de fallback', async () => {
+      const scenarios = [
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: null },
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: '' },
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: '   ' },
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: undefined },
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: '12:00' },
+        { date: '2026-09-16', precision: 'DATETIME' as const, time: '00:00' },
+        { date: '2026-09-16', precision: 'DATE_ONLY' as const, time: '14:32' },
+      ];
+
+      for (const s of scenarios) {
+        const res = formatBankDateTimeDisplay(s.date, s.precision, s.time);
+        assert.strictEqual(
+          res.displayWithTime.endsWith('às') || res.displayWithTime.endsWith('às '),
+          false,
+          `Não deve terminar com 'às' para o cenário: ${JSON.stringify(s)}`
+        );
+        assert.strictEqual(
+          res.displayWithTime.includes('às'),
+          false,
+          `Não deve conter 'às' para o cenário: ${JSON.stringify(s)}`
+        );
+      }
+    });
+
+    // 20.4 Contraparte normalizada: nunca usa "Informado pelo banco" como nome de pessoa/empresa
+    await tSub.test('20.4 Contraparte nunca exibe "Informado pelo banco" ou variações vazias', async () => {
+      const invalidCounterparties = [
+        null,
+        undefined,
+        '',
+        '   ',
+        'Informado pelo banco',
+        'informado pelo banco',
+        'INFORMADO PELO BANCO',
+        'Informada pelo banco',
+        'Não informado',
+        'nao informado',
+        'Sem contraparte',
+        'null',
+        'undefined',
+      ];
+
+      for (const cp of invalidCounterparties) {
+        const formatted = formatCounterpartyDisplay(cp);
+        assert.strictEqual(
+          formatted,
+          'Não informada pelo banco',
+          `Deve retornar fallback limpo para: ${cp}`
+        );
+      }
+
+      // Contrapartes legítimas permanecem intactas
+      assert.strictEqual(formatCounterpartyDisplay('Biolab Farmacêutica'), 'Biolab Farmacêutica');
+      assert.strictEqual(formatCounterpartyDisplay('Google Cloud Brasil'), 'Google Cloud Brasil');
+      assert.strictEqual(formatCounterpartyDisplay('Fornecedor Alpha LTDA'), 'Fornecedor Alpha LTDA');
+    });
+  });
 });
+
 
 
 
