@@ -242,6 +242,77 @@ export class InterClient {
   }
 
   /**
+   * Executa requisição HTTPS utilizando o transporte nativo node:https.request com mTLS real em memória.
+   * Não expõe segredos nem dados sensíveis.
+   */
+  private executeRequest(options: {
+    method: 'GET' | 'POST';
+    url: string;
+    headers: Record<string, string>;
+    body?: string;
+    timeoutMs: number;
+    agent: https.Agent;
+  }): Promise<{
+    status: number;
+    headers: Record<string, string | string[] | undefined>;
+    text: () => Promise<string>;
+    json: <T = any>() => Promise<T>;
+  }> {
+    return new Promise((resolve, reject) => {
+      const parsedUrl = new URL(options.url);
+
+      const reqOptions: https.RequestOptions = {
+        protocol: parsedUrl.protocol,
+        hostname: parsedUrl.hostname,
+        port: parsedUrl.port ? Number(parsedUrl.port) : 443,
+        path: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: options.method,
+        headers: options.headers,
+        agent: options.agent,
+        timeout: options.timeoutMs,
+      };
+
+      const req = https.request(reqOptions, (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          const bodyBuffer = Buffer.concat(chunks);
+          const bodyString = bodyBuffer.toString('utf8');
+          const statusCode = res.statusCode || 500;
+
+          resolve({
+            status: statusCode,
+            headers: res.headers as Record<string, string | string[] | undefined>,
+            text: async () => bodyString,
+            json: async <T = any>() => {
+              if (!bodyString.trim()) return {} as T;
+              return JSON.parse(bodyString) as T;
+            },
+          });
+        });
+      });
+
+      req.on('timeout', () => {
+        req.destroy();
+        reject(new InterIntegrationError('Tempo limite excedido na autenticação do Banco Inter', 504, 'INTER_TIMEOUT'));
+      });
+
+      req.on('error', (err: any) => {
+        reject(new InterIntegrationError(
+          `Erro de conexão mTLS com Banco Inter: ${err?.message || 'Falha de rede'}`,
+          502,
+          'INTER_CONNECTION_ERROR'
+        ));
+      });
+
+      if (options.body) {
+        req.write(options.body);
+      }
+      req.end();
+    });
+  }
+
+  /**
    * Obtém token OAuth2 (Client Credentials).
    * ÚNICO endpoint que realiza requisição POST externa.
    */
@@ -263,23 +334,20 @@ export class InterClient {
       scope: this.oauthScope,
     });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
     try {
-      const response = await fetch(tokenUrl, {
+      const response = await this.executeRequest({
         method: 'POST',
-        signal: controller.signal,
+        url: tokenUrl,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           Accept: 'application/json',
         },
         body: bodyParams.toString(),
-        // @ts-ignore - dispatcher/agent no node fetch
         agent,
+        timeoutMs: this.timeoutMs,
       });
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         // Whitelist estrita de campos seguros: error, error_description, code, message
         let diagError: string | undefined;
         let diagDescription: string | undefined;
@@ -330,7 +398,7 @@ export class InterClient {
         );
       }
 
-      const data = (await response.json()) as any;
+      const data = await response.json<any>();
       if (!data?.access_token) {
         throw new InterIntegrationError(
           'Token não retornado pela autenticação do Banco Inter',
@@ -346,16 +414,11 @@ export class InterClient {
       return this.cachedToken;
     } catch (err: any) {
       if (err instanceof InterIntegrationError) throw err;
-      if (err?.name === 'AbortError') {
-        throw new InterIntegrationError('Tempo limite excedido na autenticação do Banco Inter', 504, 'INTER_TIMEOUT');
-      }
       throw new InterIntegrationError(
         `Erro de conexão mTLS com Banco Inter: ${err?.message || 'Falha de rede'}`,
         502,
         'INTER_CONNECTION_ERROR'
       );
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
 
@@ -380,26 +443,23 @@ export class InterClient {
     const url = `${this.baseUrl}${cleanEndpoint}${queryString ? `?${queryString}` : ''}`;
     const agent = this.getHttpsAgent();
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
-
     try {
-      const response = await fetch(url, {
+      const response = await this.executeRequest({
         method: 'GET',
-        signal: controller.signal,
+        url,
         headers: {
           Authorization: `Bearer ${token}`,
           Accept: 'application/json',
           'User-Agent': 'ZafiraHub-Inter-Integration/2.0',
         },
-        // @ts-ignore - dispatcher/agent no node fetch
         agent,
+        timeoutMs: this.timeoutMs,
       });
 
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         let errMsg = `Banco Inter retornou status ${response.status}`;
         try {
-          const body = await response.json();
+          const body = await response.json<any>();
           if (body?.detail || body?.title || body?.message) {
             errMsg = body.detail || body.title || body.message;
           }
@@ -410,19 +470,14 @@ export class InterClient {
         throw new InterIntegrationError(errMsg, response.status >= 500 ? 502 : response.status, 'INTER_API_ERROR');
       }
 
-      return (await response.json()) as T;
+      return await response.json<T>();
     } catch (err: any) {
       if (err instanceof InterIntegrationError) throw err;
-      if (err?.name === 'AbortError') {
-        throw new InterIntegrationError('Tempo limite excedido ao consultar Banco Inter', 504, 'INTER_TIMEOUT');
-      }
       throw new InterIntegrationError(
         `Erro ao comunicar com Banco Inter: ${err?.message || 'Falha desconhecida'}`,
         502,
         'INTER_NETWORK_ERROR'
       );
-    } finally {
-      clearTimeout(timeoutId);
     }
   }
 

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
 import fastify from 'fastify';
 import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
@@ -225,7 +227,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   // 2.1 Diagnóstico seguro de respostas OAuth não-2xx (captura estrita de campos whitelist)
   // ---------------------------------------------------------------------------
   await t.test('2.1 Diagnóstico OAuth 400: captura com whitelist (error, error_description, code, message) e zero vazamento', async (tSub) => {
-    const originalFetch = globalThis.fetch;
+    const originalHttpsRequest = https.request;
     const originalConsoleError = console.error;
 
     let loggedErrors: string[] = [];
@@ -233,8 +235,40 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       loggedErrors.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
     };
 
+    let lastCapturedOptions: any = null;
+    let lastCapturedBody = '';
+
+    const mockHttps = (
+      statusCode: number,
+      body: string,
+      headers: Record<string, string> = { 'content-type': 'application/json' }
+    ) => {
+      lastCapturedOptions = null;
+      lastCapturedBody = '';
+      https.request = ((options: any, callback?: any) => {
+        lastCapturedOptions = options;
+        const req = new EventEmitter() as any;
+        req.write = (chunk: any) => {
+          lastCapturedBody += String(chunk);
+        };
+        req.end = (chunk?: any) => {
+          if (chunk) lastCapturedBody += String(chunk);
+          process.nextTick(() => {
+            const res = new EventEmitter() as any;
+            res.statusCode = statusCode;
+            res.headers = headers;
+            if (callback) callback(res);
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        };
+        req.destroy = () => {};
+        return req;
+      }) as any;
+    };
+
     tSub.afterEach(() => {
-      globalThis.fetch = originalFetch;
+      https.request = originalHttpsRequest;
       console.error = originalConsoleError;
       loggedErrors = [];
     });
@@ -249,15 +283,10 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
 
     // 1. Resposta OAuth 400 com invalid_client
     await tSub.test('1. Resposta OAuth 400 com invalid_client registra e propaga erro formatado', async () => {
-      globalThis.fetch = (async () => {
-        return new Response(
-          JSON.stringify({
-            error: 'invalid_client',
-            error_description: 'Client credentials are not authorized or disabled',
-          }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }) as any;
+      mockHttps(400, JSON.stringify({
+        error: 'invalid_client',
+        error_description: 'Client credentials are not authorized or disabled',
+      }));
 
       await assert.rejects(
         async () => {
@@ -281,15 +310,10 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
 
     // 2. Resposta OAuth 400 com invalid_scope
     await tSub.test('2. Resposta OAuth 400 com invalid_scope registra erro com escopo rejeitado', async () => {
-      globalThis.fetch = (async () => {
-        return new Response(
-          JSON.stringify({
-            error: 'invalid_scope',
-            error_description: 'The requested scope is not configured for application',
-          }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }) as any;
+      mockHttps(400, JSON.stringify({
+        error: 'invalid_scope',
+        error_description: 'The requested scope is not configured for application',
+      }));
 
       await assert.rejects(
         async () => {
@@ -308,9 +332,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     // 3. Resposta não-JSON (HTML ou texto simples, ex: Bad Request do Gateway/WAF)
     await tSub.test('3. Resposta não-JSON não expõe corpo bruto e registra status com segurança', async () => {
       const rawHtml = '<html><head><title>400 Bad Request</title></head><body>Proxy sensitive info</body></html>';
-      globalThis.fetch = (async () => {
-        return new Response(rawHtml, { status: 400, headers: { 'Content-Type': 'text/html' } });
-      }) as any;
+      mockHttps(400, rawHtml, { 'content-type': 'text/html' });
 
       await assert.rejects(
         async () => {
@@ -331,16 +353,11 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
 
     // 4. Garantia de que token, Client ID, Client Secret, Authorization, certificado e chave nunca aparecem
     await tSub.test('4. Credenciais, Client ID/Secret, certificados e tokens jamais aparecem em erro ou logs', async () => {
-      globalThis.fetch = (async () => {
-        return new Response(
-          JSON.stringify({
-            error: 'unauthorized',
-            error_description: 'Unauthorized access',
-            access_token: 'SUPER_SECRET_TOKEN_DO_NOT_LEAK',
-          }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
-      }) as any;
+      mockHttps(400, JSON.stringify({
+        error: 'unauthorized',
+        error_description: 'Unauthorized access',
+        access_token: 'SUPER_SECRET_TOKEN_DO_NOT_LEAK',
+      }));
 
       try {
         await testClient.getAccessToken();
@@ -381,53 +398,88 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   // ---------------------------------------------------------------------------
   // 2.2 Conformidade do formato OAuth e prevenção estrita de falso saldo zero
   // ---------------------------------------------------------------------------
-  await t.test('2.2 Conformidade OAuth (urlencoded + Accept json) e proteção contra falso saldo zero', async (tSub) => {
-    const originalFetch = globalThis.fetch;
+  await t.test('2.2 Conformidade OAuth (mTLS real no node:https.request + Accept json) e proteção contra falso saldo zero', async (tSub) => {
+    const originalHttpsRequest = https.request;
     tSub.afterEach(() => {
-      globalThis.fetch = originalFetch;
+      https.request = originalHttpsRequest;
     });
 
-    // 1. Validar que o pedido OAuth envia exatamente os 4 campos no corpo urlencoded e Accept: application/json
-    await tSub.test('1. Requisição OAuth serializa os quatro campos urlencoded e envia Accept: application/json', async () => {
-      let capturedUrl = '';
-      let capturedMethod = '';
-      let capturedHeaders: any = null;
-      let capturedBody = '';
+    let lastCapturedOptions: any = null;
+    let lastCapturedBody = '';
 
-      globalThis.fetch = (async (url: any, opts: any) => {
-        capturedUrl = String(url);
-        capturedMethod = opts.method;
-        capturedHeaders = opts.headers;
-        capturedBody = opts.body;
-
-        return new Response(
-          JSON.stringify({
-            access_token: 'valid-mock-token-abc',
-            expires_in: 3600,
-            token_type: 'Bearer',
-            scope: 'extrato.read',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
-        );
+    const mockHttps = (
+      statusCode: number,
+      body: string,
+      headers: Record<string, string> = { 'content-type': 'application/json' }
+    ) => {
+      lastCapturedOptions = null;
+      lastCapturedBody = '';
+      https.request = ((options: any, callback?: any) => {
+        lastCapturedOptions = options;
+        const req = new EventEmitter() as any;
+        req.write = (chunk: any) => {
+          lastCapturedBody += String(chunk);
+        };
+        req.end = (chunk?: any) => {
+          if (chunk) lastCapturedBody += String(chunk);
+          process.nextTick(() => {
+            const res = new EventEmitter() as any;
+            res.statusCode = statusCode;
+            res.headers = headers;
+            if (callback) callback(res);
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        };
+        req.destroy = () => {};
+        return req;
       }) as any;
+    };
+
+    // 1. Prova do mTLS real no transporte node:https.request e serialização dos 4 campos urlencoded
+    await tSub.test('1. Transporte node:https.request recebe agent configurado com cert e key em memória e Accept json', async () => {
+      mockHttps(200, JSON.stringify({
+        access_token: 'valid-mock-token-abc',
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: 'extrato.read',
+      }));
+
+      const fakeCrt = '-----BEGIN CERTIFICATE-----\nFAKE_CRT_RAW\n-----END CERTIFICATE-----';
+      const fakeKey = '-----BEGIN PRIVATE KEY-----\nFAKE_KEY_RAW\n-----END PRIVATE KEY-----';
 
       const client = new InterClient({
         clientId: 'my-inter-client-id',
         clientSecret: 'my-inter-client-secret',
-        crtBase64: Buffer.from('FAKE_CRT').toString('base64'),
-        keyBase64: Buffer.from('FAKE_KEY').toString('base64'),
+        crtBase64: Buffer.from(fakeCrt).toString('base64'),
+        keyBase64: Buffer.from(fakeKey).toString('base64'),
         oauthScope: 'extrato.read',
       });
 
       const token = await client.getAccessToken();
       assert.strictEqual(token, 'valid-mock-token-abc');
-      assert.ok(capturedUrl.endsWith('/oauth/v2/token'));
-      assert.strictEqual(capturedMethod, 'POST');
-      assert.strictEqual(capturedHeaders['Content-Type'], 'application/x-www-form-urlencoded');
-      assert.strictEqual(capturedHeaders['Accept'], 'application/json');
+
+      // Prova de que o transporte nativo https.request foi acionado com o agente mTLS
+      assert.ok(lastCapturedOptions, 'https.request deve ter sido acionado');
+      assert.strictEqual(lastCapturedOptions.method, 'POST');
+      assert.strictEqual(lastCapturedOptions.hostname, 'cdpj.partners.bancointer.com.br');
+      assert.strictEqual(lastCapturedOptions.path, '/oauth/v2/token');
+      assert.ok(lastCapturedOptions.agent instanceof https.Agent, 'agent deve ser https.Agent');
+
+      // Prova de que cert e key chegaram ao agente mTLS no transporte
+      const agentOptions = (lastCapturedOptions.agent as any).options;
+      assert.ok(Buffer.isBuffer(agentOptions.cert), 'Certificado deve ser Buffer em memória');
+      assert.ok(Buffer.isBuffer(agentOptions.key), 'Chave privada deve ser Buffer em memória');
+      assert.strictEqual(agentOptions.cert.toString('utf8'), fakeCrt);
+      assert.strictEqual(agentOptions.key.toString('utf8'), fakeKey);
+      assert.strictEqual(agentOptions.rejectUnauthorized, true, 'rejectUnauthorized deve ser estritamente true');
+
+      // Validação de headers
+      assert.strictEqual(lastCapturedOptions.headers['Content-Type'], 'application/x-www-form-urlencoded');
+      assert.strictEqual(lastCapturedOptions.headers['Accept'], 'application/json');
 
       // Verifica os 4 campos no formulário urlencoded
-      const params = new URLSearchParams(capturedBody);
+      const params = new URLSearchParams(lastCapturedBody);
       assert.strictEqual(params.get('client_id'), 'my-inter-client-id');
       assert.strictEqual(params.get('client_secret'), 'my-inter-client-secret');
       assert.strictEqual(params.get('grant_type'), 'client_credentials');
