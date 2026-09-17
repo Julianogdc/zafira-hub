@@ -1816,7 +1816,7 @@ export function CaixaMovimentacoes() {
                           </div>
                           <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] pt-0.5">
                             <Clock className="w-3 h-3 text-zinc-600" />
-                            <span>Horário não informado pelo banco</span>
+                            <span>Horário indisponível nesta consulta do Banco Inter</span>
                           </div>
                         </div>
                       )}
