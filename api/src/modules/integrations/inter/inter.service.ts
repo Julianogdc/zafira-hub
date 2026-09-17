@@ -6,6 +6,7 @@ import {
   normalizeInterDate,
   normalizeInterDirection,
   normalizeInterAmount,
+  generateInterExternalId,
 } from './inter.normalizer.js';
 
 export interface InterSyncResult {
@@ -141,13 +142,47 @@ export class InterService {
         const occurredAt = normalizeInterDate(rawDate);
         const direction = normalizeInterDirection(item);
         const amount = normalizeInterAmount(item.valor);
-        const externalId =
-          item.idTransacao ||
-          `${occurredAt.toISOString().slice(0, 10)}_${direction}_${amount}_${item.titulo || ''}`;
+        const externalId = generateInterExternalId(item, occurredAt, direction, amount);
         const description = (item.descricao || item.titulo || 'Transação Banco Inter').trim();
         const counterpartyName = item.contraparte?.nome?.trim() || null;
         const counterpartyDocument = item.contraparte?.cpfCnpj?.replace(/\D/g, '').trim() || null;
         const externalReference = item.chavePix || item.idTransacao || null;
+
+        // Prevenção contra criação de registros fantasmas de R$ 0,00:
+        // Se amount === 0, verifica se já existe registro com valor real na mesma data e contraparte
+        if (amount === 0 && this.prisma.financialTransaction?.findFirst) {
+          const dateOnlyStr = occurredAt.toISOString().slice(0, 10);
+          const existingWithAmount = await this.prisma.financialTransaction.findFirst({
+            where: {
+              accountId: account.id,
+              occurredAt: {
+                gte: new Date(`${dateOnlyStr}T00:00:00.000Z`),
+                lte: new Date(`${dateOnlyStr}T23:59:59.999Z`),
+              },
+              amount: { gt: 0 },
+              OR: [
+                { counterpartyName: counterpartyName || undefined },
+                { description: description },
+              ],
+            },
+          });
+          if (existingWithAmount) {
+            // Já existe o registro canônico com valor real: não cria duplicata de R$ 0,00
+            continue;
+          }
+        }
+
+        // Verifica se já existe o registro para preservar classificação MANUAL
+        const existingTx = this.prisma.financialTransaction?.findUnique
+          ? await this.prisma.financialTransaction.findUnique({
+              where: {
+                accountId_externalId: {
+                  accountId: account.id,
+                  externalId,
+                },
+              },
+            })
+          : null;
 
         // Categorização automática
         const catService = new FinancialCategoryService(this.prisma);
@@ -160,6 +195,28 @@ export class InterService {
 
         // Kind inicial (pode ser refinado para TRANSFER_INTERNAL na reconciliação)
         const kind = direction === 'CREDIT' ? 'CUSTOMER_PAYMENT' : 'EXPENSE';
+
+        const updateData: any = {
+          amount,
+          occurredAt,
+          direction,
+          description,
+          counterpartyName,
+          counterpartyDocument,
+          externalReference,
+          rawPayload: item as any,
+        };
+
+        // Preserva categorização e cliente se o usuário já classificou manualmente
+        if (existingTx && existingTx.categorizationSource === 'MANUAL') {
+          // Não sobrescreve categoryId nem clientId manuais
+        } else {
+          updateData.categoryId = cat.categoryId;
+          updateData.clientId = cat.clientId || null;
+          updateData.suggestedClientId = cat.suggestedClientId || null;
+          updateData.categorizationSource = cat.categorizationSource;
+          updateData.categorizationConfidence = cat.categorizationConfidence;
+        }
 
         await this.prisma.financialTransaction.upsert({
           where: {
@@ -187,16 +244,7 @@ export class InterService {
             categorizationConfidence: cat.categorizationConfidence,
             rawPayload: item as any,
           },
-          update: {
-            amount,
-            occurredAt,
-            direction,
-            description,
-            counterpartyName,
-            counterpartyDocument,
-            externalReference,
-            rawPayload: item as any,
-          },
+          update: updateData,
         });
 
         syncedTransactions += 1;
@@ -358,6 +406,130 @@ export class InterService {
       updatedCount,
       autoMatchedTransfers: autoMatched,
       reviewTransfers: reviewCount,
+    };
+  }
+
+  /**
+   * Rotina de reparo local, segura e estritamente idempotente para duplicatas comprovadas do Banco Inter PJ.
+   *
+   * Critério objetivo de duplicidade:
+   * 1. Mesma conta bancária (accountId) e organização (organizationId).
+   * 2. Mesma data civil (occurredAt ano-mês-dia).
+   * 3. Mesma contraparte ou descrição bancária idêntica.
+   * 4. Um registro é canônico (amount > 0) e o outro é duplicado espúrio (amount === 0).
+   *
+   * Regras de preservação e mesclagem:
+   * - O registro canônico (com valor real > 0) é preservado.
+   * - Se o registro de R$ 0,00 possuir classificação manual (categorizationSource === 'MANUAL'),
+   *   essa classificação (categoryId, clientId, categorizationSource, categorizationConfidence)
+   *   é transferida para o registro canônico.
+   * - Se houver vínculos de transferências internas (sourceTransfer / destTransfer), são mantidos.
+   * - Apenas o registro duplicado confirmado de R$ 0,00 é excluído.
+   * - Execução 100% idempotente: executar novamente resulta em 0 alterações.
+   */
+  async repairInterDuplicates(organizationId?: string): Promise<{
+    totalInspected: number;
+    mergedCount: number;
+    removedCount: number;
+  }> {
+    const whereClause: any = {
+      account: { provider: 'INTER' },
+    };
+    if (organizationId) {
+      whereClause.organizationId = organizationId;
+    }
+
+    const transactions = await this.prisma.financialTransaction.findMany({
+      where: whereClause,
+      include: {
+        category: true,
+        client: true,
+        sourceTransfer: true,
+        destTransfer: true,
+      },
+      orderBy: [{ occurredAt: 'desc' }, { createdAt: 'asc' }],
+    });
+
+    // Agrupa por assinatura unívoca: accountId + data civil + contraparte/descrição normalizada
+    const groups = new Map<string, typeof transactions>();
+
+    for (const tx of transactions) {
+      const dateStr = tx.occurredAt.toISOString().slice(0, 10);
+      const raw = (tx.rawPayload as any) || {};
+      const cp = (tx.counterpartyName || raw.contraparte?.nome || tx.description || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      const key = `${tx.accountId}__${dateStr}__${cp}`;
+
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(tx);
+    }
+
+    let mergedCount = 0;
+    let removedCount = 0;
+
+    for (const [, list] of groups.entries()) {
+      if (list.length < 2) continue;
+
+      // Separa canônicos (amount > 0) e espúrios (amount === 0)
+      const validTxs = list.filter((t) => Number(t.amount) > 0);
+      const zeroTxs = list.filter((t) => Number(t.amount) === 0);
+
+      // Duplicata comprovada: existe pelo menos um com valor real e pelo menos um com valor 0
+      if (validTxs.length >= 1 && zeroTxs.length >= 1) {
+        // Registro canônico preferencial
+        const canonical = validTxs[0];
+
+        for (const duplicate of zeroTxs) {
+          // Se o duplicado foi classificado manualmente e o canônico não foi:
+          // transfere a classificação manual para o canônico
+          const shouldTransferClassification =
+            duplicate.categorizationSource === 'MANUAL' &&
+            canonical.categorizationSource !== 'MANUAL';
+
+          if (shouldTransferClassification) {
+            await this.prisma.financialTransaction.update({
+              where: { id: canonical.id },
+              data: {
+                categoryId: duplicate.categoryId,
+                clientId: duplicate.clientId,
+                suggestedClientId: duplicate.suggestedClientId,
+                categorizationSource: 'MANUAL',
+                categorizationConfidence: 1.0,
+              },
+            });
+            mergedCount += 1;
+          }
+
+          // Se o duplicado tiver transferência vinculada e o canônico não tiver, transfere
+          if (duplicate.sourceTransfer && !canonical.sourceTransfer) {
+            await this.prisma.financialTransfer.update({
+              where: { id: duplicate.sourceTransfer.id },
+              data: { sourceTransactionId: canonical.id },
+            });
+          }
+          if (duplicate.destTransfer && !canonical.destTransfer) {
+            await this.prisma.financialTransfer.update({
+              where: { id: duplicate.destTransfer.id },
+              data: { destinationTransactionId: canonical.id },
+            });
+          }
+
+          // Remove com segurança o registro de R$ 0,00 comprovadamente espúrio
+          await this.prisma.financialTransaction.delete({
+            where: { id: duplicate.id },
+          });
+
+          removedCount += 1;
+        }
+      }
+    }
+
+    return {
+      totalInspected: transactions.length,
+      mergedCount,
+      removedCount,
     };
   }
 }

@@ -568,4 +568,25 @@ export async function financialRoutes(app: FastifyInstance) {
   };
   app.post('/integrations/inter/reprocess', handleReprocessInter);
   app.post('/api/integrations/inter/reprocess', handleReprocessInter);
+
+  /**
+   * POST /integrations/inter/repair-duplicates e /financial/inter/repair-duplicates
+   * Rotina de reparo local, segura e idempotente para duplicatas comprovadas do Banco Inter PJ.
+   * - Mescla classificações manuais para o registro canônico com valor real.
+   * - Preserva transferências e histórico.
+   * - Remove exclusivamente duplicatas comprovadas de R$ 0,00.
+   */
+  const handleRepairInterDuplicates = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const result = await interService.repairInterDuplicates(organizationId);
+    return reply.send({
+      success: true,
+      message: 'Reparo de duplicatas concluído com sucesso.',
+      ...result,
+    });
+  };
+  app.post('/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+  app.post('/api/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+  app.post('/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+  app.post('/api/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
 }

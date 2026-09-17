@@ -94,6 +94,7 @@ export interface FinancialTransactionItem {
   transferStatus?: FinancialTransferStatus | null;
   pairedTransactionId?: string | null;
   isConciliated?: boolean;
+  rawPayload?: any;
 }
 
 export interface FinancialTransactionsParams {
@@ -275,5 +276,17 @@ export const financialApi = {
 
   reprocessInter: async (): Promise<{ success: boolean; message: string; reprocessedCount: number; updatedCount: number }> => {
     return api.post('/integrations/inter/reprocess');
+  },
+
+  repairInterDuplicates: async (): Promise<{
+    success: boolean;
+    message: string;
+    reprocessedCount: number;
+    mergedCount: number;
+    removedCount: number;
+    autoMatchedTransfers?: number;
+    reviewTransfers?: number;
+  }> => {
+    return api.post('/financial/inter/repair-duplicates');
   },
 };

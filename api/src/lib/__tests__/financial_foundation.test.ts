@@ -570,6 +570,8 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
             return args.create;
           },
           findMany: async () => [],
+          findUnique: async () => null,
+          findFirst: async () => null,
         },
         financialCategory: {
           findMany: async () => [{ id: 'cat-1', name: 'Geral', type: 'INCOME' }],
@@ -2942,6 +2944,386 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       // Isolamento total: NÃO vincula e NÃO sugere cliente da organização B
       assert.strictEqual(result.clientId, null);
       assert.strictEqual(result.suggestedClientId, null);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 18. Integridade do Extrato Inter PJ e Reparo de Duplicatas (6 testes obrigatórios)
+  // ---------------------------------------------------------------------------
+  await t.test('18. Integridade do Extrato Inter PJ e Reparo de Duplicatas (6 testes obrigatórios)', async (tSub) => {
+    // 18.1 Duas importações iguais não duplicam movimentações (idempotência do sync)
+    await tSub.test('18.1 Duas importações iguais não duplicam movimentações (idempotência do sync)', async () => {
+      const db = new Map<string, any>();
+
+      const mockPrisma: any = {
+        financialAccount: {
+          findFirst: async () => ({ id: 'acc-inter-sync', provider: 'INTER', name: 'Conta Inter PJ', currentBalance: 1000 }),
+          findMany: async () => [{ id: 'acc-inter-sync', provider: 'INTER', isActive: true }],
+          update: async () => ({ id: 'acc-inter-sync', currentBalance: 1000 }),
+        },
+        financialTransaction: {
+          findUnique: async (args: any) => db.get(args.where.accountId_externalId.externalId) || null,
+          findFirst: async () => null,
+          upsert: async (args: any) => {
+            const extId = args.where.accountId_externalId.externalId;
+            const existing = db.get(extId);
+            if (existing) {
+              const updated = { ...existing, ...args.update };
+              db.set(extId, updated);
+              return updated;
+            }
+            const created = { id: `tx-${extId}`, ...args.create };
+            db.set(extId, created);
+            return created;
+          },
+        },
+        financialCategory: {
+          findMany: async () => [],
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findMany: async () => [],
+        },
+      };
+
+      const mockClient: any = {
+        isConfigured: () => true,
+        getStatement: async () => [
+          {
+            idTransacao: 'tx-inter-001',
+            valor: 450.0,
+            tipoOperacao: 'D',
+            titulo: 'Pix enviado',
+            descricao: 'Pix enviado para Juliano',
+            dataHoraMovimento: '2026-09-16 10:00:00',
+          },
+          {
+            idTransacao: 'tx-inter-002',
+            valor: 750.0,
+            tipoOperacao: 'C',
+            titulo: 'Pix recebido',
+            descricao: 'Pix recebido de Arnaldo',
+            dataHoraMovimento: '2026-09-16 11:00:00',
+          },
+        ],
+        getBalances: async () => ({ disponivel: 1200 }),
+      };
+
+      const interService = new InterService(mockClient, mockPrisma);
+
+      // Primeira sincronização
+      const run1 = await interService.syncAccountAndStatement('org-test-1');
+      assert.strictEqual(run1.success, true);
+      assert.strictEqual(run1.syncedTransactions, 2);
+      assert.strictEqual(db.size, 2);
+
+      // Segunda sincronização com os mesmos dados
+      const run2 = await interService.syncAccountAndStatement('org-test-1');
+      assert.strictEqual(run2.success, true);
+      assert.strictEqual(run2.syncedTransactions, 2);
+      // Banco não duplicou: permanece com exatamente 2 registros
+      assert.strictEqual(db.size, 2);
+    });
+
+    // 18.2 Ausência de campo de valor não cria duplicata artificial de R$ 0,00
+    await tSub.test('18.2 Ausência de campo de valor não cria duplicata artificial de R$ 0,00', async () => {
+      const db = new Map<string, any>();
+      // Pré-insere o registro canônico com valor real
+      db.set('ext-tx-valid', {
+        id: 'tx-valid-1',
+        accountId: 'acc-inter-1',
+        externalId: 'ext-tx-valid',
+        amount: 450.0,
+        direction: 'DEBIT',
+        occurredAt: new Date('2026-09-16T12:00:00.000Z'),
+        description: 'Pix enviado para Juliano',
+        counterpartyName: 'JULIANO CESAR',
+      });
+
+      let insertedCount = 0;
+      const mockPrisma: any = {
+        financialAccount: {
+          findFirst: async () => ({ id: 'acc-inter-1', provider: 'INTER', name: 'Conta Inter PJ' }),
+          findMany: async () => [{ id: 'acc-inter-1', provider: 'INTER', isActive: true }],
+          update: async () => ({ id: 'acc-inter-1' }),
+        },
+        financialTransaction: {
+          findUnique: async () => null,
+          findFirst: async (args: any) => {
+            // Simula encontrar o registro com valor real existente na mesma data
+            if (args.where.amount?.gt === 0) {
+              return db.get('ext-tx-valid');
+            }
+            return null;
+          },
+          upsert: async () => {
+            insertedCount++;
+            return {};
+          },
+        },
+        financialCategory: {
+          findMany: async () => [],
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findMany: async () => [],
+        },
+      };
+
+      const mockClient: any = {
+        isConfigured: () => true,
+        getStatement: async () => [
+          {
+            // Item sem valor ou com valor zero
+            valor: 0,
+            tipoOperacao: 'D',
+            titulo: 'Pix enviado',
+            descricao: 'Pix enviado para Juliano',
+            dataHoraMovimento: '2026-09-16',
+            contraparte: { nome: 'JULIANO CESAR' },
+          },
+        ],
+        getBalances: async () => ({ disponivel: 1200 }),
+      };
+
+      const interService = new InterService(mockClient, mockPrisma);
+      const res = await interService.syncAccountAndStatement('org-test-1');
+
+      assert.strictEqual(res.success, true);
+      // Não inseriu duplicata com valor 0
+      assert.strictEqual(insertedCount, 0);
+    });
+
+    // 18.3 Reparo remove/mescla somente duplicatas comprovadas
+    await tSub.test('18.3 Reparo remove/mescla somente duplicatas comprovadas', async () => {
+      const records = [
+        // Par 1: Canônico (450) + Duplicado espúrio (0)
+        {
+          id: 'tx-canon-1',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          counterpartyName: 'JULIANO CESAR',
+          description: 'Pix enviado Juliano',
+          amount: 450.0,
+          direction: 'DEBIT',
+          categorizationSource: 'PENDING',
+          categoryId: null,
+          clientId: null,
+        },
+        {
+          id: 'tx-dup-1',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          counterpartyName: 'JULIANO CESAR',
+          description: 'Pix enviado Juliano',
+          amount: 0,
+          direction: 'DEBIT',
+          categorizationSource: 'MANUAL',
+          categoryId: 'cat-prolabore',
+          clientId: null,
+        },
+        // Transação legítima isolada (não duplicada)
+        {
+          id: 'tx-legit-single',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-15T10:00:00Z'),
+          counterpartyName: 'PAGAMENTO ENERGIA',
+          description: 'Pagamento conta de luz',
+          amount: 320.0,
+          direction: 'DEBIT',
+          categorizationSource: 'PENDING',
+          categoryId: null,
+          clientId: null,
+        },
+      ];
+
+      const deletedIds: string[] = [];
+      const updatedData = new Map<string, any>();
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => records.filter((r) => !deletedIds.includes(r.id)),
+          update: async (args: any) => {
+            updatedData.set(args.where.id, args.data);
+            return { id: args.where.id, ...args.data };
+          },
+          delete: async (args: any) => {
+            deletedIds.push(args.where.id);
+            return { id: args.where.id };
+          },
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const repairResult = await interService.repairInterDuplicates('org-test-1');
+
+      assert.strictEqual(repairResult.totalInspected, 3);
+      assert.strictEqual(repairResult.mergedCount, 1);
+      assert.strictEqual(repairResult.removedCount, 1);
+
+      // Excluiu exclusivamente o registro duplicado de valor 0
+      assert.deepStrictEqual(deletedIds, ['tx-dup-1']);
+      // O registro legítimo e o canônico NÃO foram excluídos
+      assert.strictEqual(deletedIds.includes('tx-canon-1'), false);
+      assert.strictEqual(deletedIds.includes('tx-legit-single'), false);
+    });
+
+    // 18.4 Classificação manual, categoria e cliente do duplicado são preservados no canônico
+    await tSub.test('18.4 Classificação manual, categoria e cliente do duplicado são transferidos para o canônico', async () => {
+      const canonicalTx = {
+        id: 'tx-canon-biolab',
+        accountId: 'acc-1',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        counterpartyName: 'BIOLAB LTDA',
+        description: 'Pix recebido Biolab',
+        amount: 1800.0,
+        direction: 'CREDIT',
+        categorizationSource: 'PENDING',
+        categoryId: null,
+        clientId: null,
+      };
+
+      const duplicateZeroTx = {
+        id: 'tx-dup-biolab',
+        accountId: 'acc-1',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        counterpartyName: 'BIOLAB LTDA',
+        description: 'Pix recebido Biolab',
+        amount: 0,
+        direction: 'CREDIT',
+        categorizationSource: 'MANUAL',
+        categoryId: 'cat-rec-clientes',
+        clientId: 'cli-biolab-id',
+        suggestedClientId: null,
+      };
+
+      let canonicalUpdateArgs: any = null;
+      let duplicateDeleted = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [canonicalTx, duplicateZeroTx],
+          update: async (args: any) => {
+            if (args.where.id === canonicalTx.id) {
+              canonicalUpdateArgs = args.data;
+            }
+            return { id: args.where.id, ...args.data };
+          },
+          delete: async (args: any) => {
+            if (args.where.id === duplicateZeroTx.id) {
+              duplicateDeleted = true;
+            }
+            return { id: args.where.id };
+          },
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const res = await interService.repairInterDuplicates('org-test-1');
+
+      assert.strictEqual(res.mergedCount, 1);
+      assert.strictEqual(res.removedCount, 1);
+      assert.strictEqual(duplicateDeleted, true);
+
+      // Metadados manuais foram mesclados no registro canônico de R$ 1.800
+      assert.ok(canonicalUpdateArgs);
+      assert.strictEqual(canonicalUpdateArgs.categoryId, 'cat-rec-clientes');
+      assert.strictEqual(canonicalUpdateArgs.clientId, 'cli-biolab-id');
+      assert.strictEqual(canonicalUpdateArgs.categorizationSource, 'MANUAL');
+      assert.strictEqual(canonicalUpdateArgs.categorizationConfidence, 1.0);
+    });
+
+    // 18.5 Reparo é 100% idempotente (segunda execução = 0 alterações)
+    await tSub.test('18.5 Reparo é 100% idempotente (segunda execução = 0 alterações)', async () => {
+      let state = [
+        {
+          id: 'tx-canon',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          counterpartyName: 'FORNECEDOR XYZ',
+          description: 'Pagamento boleto',
+          amount: 500.0,
+          direction: 'DEBIT',
+          categorizationSource: 'PENDING',
+        },
+        {
+          id: 'tx-dup',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          counterpartyName: 'FORNECEDOR XYZ',
+          description: 'Pagamento boleto',
+          amount: 0,
+          direction: 'DEBIT',
+          categorizationSource: 'MANUAL',
+          categoryId: 'cat-fornecedores',
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state[idx] = { ...state[idx], ...args.data };
+            return state[idx];
+          },
+          delete: async (args: any) => {
+            state = state.filter((s) => s.id !== args.where.id);
+            return { id: args.where.id };
+          },
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+
+      // 1ª execução: repara duplicata
+      const run1 = await interService.repairInterDuplicates('org-test-1');
+      assert.strictEqual(run1.removedCount, 1);
+      assert.strictEqual(state.length, 1);
+
+      // 2ª execução: 0 alterações
+      const run2 = await interService.repairInterDuplicates('org-test-1');
+      assert.strictEqual(run2.mergedCount, 0);
+      assert.strictEqual(run2.removedCount, 0);
+      assert.strictEqual(state.length, 1);
+    });
+
+    // 18.6 Regressão de segurança: BANK_WRITE_FORBIDDEN bloqueia qualquer escrita bancária POST/PUT/DELETE
+    await tSub.test('18.6 Regressão de segurança: BANK_WRITE_FORBIDDEN bloqueia escrita bancária', async () => {
+      const client = new InterClient({
+        clientId: 'id',
+        clientSecret: 'secret',
+        crtBase64: Buffer.from('crt').toString('base64'),
+        keyBase64: Buffer.from('key').toString('base64'),
+      });
+
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource('POST', '/banking/v2/extrato/reprocessar');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          return true;
+        }
+      );
+
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource('DELETE', '/banking/v2/extrato/duplicatas');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          return true;
+        }
+      );
     });
   });
 });

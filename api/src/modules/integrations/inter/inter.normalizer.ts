@@ -213,3 +213,110 @@ export function normalizeInterAmount(rawAmount: unknown): number {
 
   return 0;
 }
+
+/**
+ * Gera um externalId determinístico, imutável e robusto para itens do extrato do Banco Inter.
+ * Prioriza identificador único bancário oficial do Inter (idTransacao, codigoTransacao, nossoNumero).
+ * Fallback composto normalizado que previne variações de string e colisões espúrias.
+ */
+export function generateInterExternalId(
+  item: any,
+  occurredAt: Date,
+  direction: FinancialTransactionDirection,
+  amount: number
+): string {
+  if (!item || typeof item !== 'object') {
+    const dateStr = occurredAt.toISOString().slice(0, 10);
+    return `inter_${dateStr}_${direction}_${amount}`;
+  }
+
+  // 1. Identificadores oficiais do Banco Inter
+  const officialId = String(item.idTransacao || item.codigoTransacao || item.nossoNumero || '').trim();
+  if (officialId) {
+    return officialId;
+  }
+
+  // 2. Fallback determinístico estruturado
+  const dateStr = occurredAt.toISOString().slice(0, 10);
+  const cleanTitle = String(item.titulo || item.descricao || 'transacao')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '_')
+    .slice(0, 40);
+
+  // Contraparte (documento ou nome limpo) para desambiguar lançamentos múltiplos no mesmo dia
+  const cpDoc = String(item.contraparte?.cpfCnpj || '').replace(/\D/g, '').trim();
+  const cpName = String(item.contraparte?.nome || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '_')
+    .slice(0, 30);
+  const cpSuffix = cpDoc || cpName || 'SEM_CP';
+
+  return `inter_${dateStr}_${direction}_${amount}_${cleanTitle}_${cpSuffix}`;
+}
+
+/**
+ * Mascara com segurança CPF ou CNPJ para exibição na gaveta de detalhes, protegendo a privacidade.
+ */
+export function maskDocument(rawDoc?: string | null): string {
+  if (!rawDoc) return 'Documento não informado';
+  const clean = rawDoc.replace(/\D/g, '').trim();
+  if (!clean) return 'Documento não informado';
+
+  if (clean.length === 11) {
+    // CPF: ***.456.789-**
+    return `***.${clean.slice(3, 6)}.${clean.slice(6, 9)}-**`;
+  }
+
+  if (clean.length === 14) {
+    // CNPJ: **.345.678/0001-**
+    return `**.${clean.slice(2, 5)}.${clean.slice(5, 8)}/${clean.slice(8, 12)}-**`;
+  }
+
+  // Fallback genérico seguro
+  if (clean.length > 4) {
+    return `***${clean.slice(-4)}`;
+  }
+
+  return '***';
+}
+
+/**
+ * Extrai o horário informado pelo banco se existir de forma comprovável.
+ * Se o banco não tiver informado horário (ex: date-only ou meia-noite padrão), retorna null.
+ * REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou.
+ */
+export function extractInterTime(rawPayload: any): string | null {
+  if (!rawPayload || typeof rawPayload !== 'object') return null;
+
+  const rawCandidate = String(
+    rawPayload.dataHoraMovimento ||
+    rawPayload.dataHora ||
+    rawPayload.horaLancamento ||
+    rawPayload.hora ||
+    ''
+  ).trim();
+
+  if (!rawCandidate) return null;
+
+  // Procura padrão HH:mm ou HH:mm:ss
+  const timeMatch = rawCandidate.match(/(?:[ T]|^)(\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!timeMatch) return null;
+
+  const hours = parseInt(timeMatch[1], 10);
+  const minutes = parseInt(timeMatch[2], 10);
+
+  // Se for exatamente 00:00 ou 12:00 gerado artificialmente por date-only:
+  // Verifica se o campo original era apenas data sem hora
+  if (rawCandidate.length <= 10 && !rawCandidate.includes(':')) {
+    return null;
+  }
+
+  if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  }
+
+  return null;
+}
+
