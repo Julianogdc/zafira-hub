@@ -123,6 +123,7 @@ export function CaixaMovimentacoes() {
   const [ruleFormOpen, setRuleFormOpen] = useState<boolean>(false);
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [formRuleCatId, setFormRuleCatId] = useState<string>('');
+  const [formRuleClientId, setFormRuleClientId] = useState<string>('');
   const [formRuleField, setFormRuleField] = useState<'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT'>('DESCRIPTION');
   const [formRuleType, setFormRuleType] = useState<'CONTAINS' | 'EXACT'>('CONTAINS');
   const [formRuleValue, setFormRuleValue] = useState<string>('');
@@ -528,6 +529,10 @@ export function CaixaMovimentacoes() {
         toast.success('Regra automática criada com sucesso!');
       }
       setRuleFormOpen(false);
+      setEditingRuleId(null);
+      setFormRuleClientId('');
+      setFormRuleValue('');
+      setRulePreview(null);
       await loadRules();
     } catch (err: any) {
       toast.error(err.response?.data?.error || 'Erro ao salvar regra.');
@@ -1403,7 +1408,18 @@ export function CaixaMovimentacoes() {
       </Dialog>
 
       {/* 8. MODAL DE FORMULÁRIO DE REGRA AUTOMÁTICA */}
-      <Dialog open={ruleFormOpen} onOpenChange={setRuleFormOpen}>
+      <Dialog
+        open={ruleFormOpen}
+        onOpenChange={(open) => {
+          setRuleFormOpen(open);
+          if (!open) {
+            setEditingRuleId(null);
+            setFormRuleClientId('');
+            setFormRuleValue('');
+            setRulePreview(null);
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-[480px] bg-zinc-950 border-white/10 text-zinc-100">
           <DialogHeader>
             <DialogTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1549,7 +1565,13 @@ export function CaixaMovimentacoes() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setRuleFormOpen(false)}
+              onClick={() => {
+                setRuleFormOpen(false);
+                setEditingRuleId(null);
+                setFormRuleClientId('');
+                setFormRuleValue('');
+                setRulePreview(null);
+              }}
               className="text-xs bg-zinc-900 border-white/10"
             >
               Cancelar
