@@ -289,36 +289,82 @@ export function maskDocument(rawDoc?: string | null): string {
  * - dataMovimento, dataEntrada ou formato somente data (ex: YYYY-MM-DD) => DATE_ONLY
  * - Horário técnico "12:00:00" nunca é considerado horário real do Inter se a string original for date-only.
  */
+/**
+ * Valida se uma string de horário representa um horário bancário real e não um horário técnico (00:00 ou 12:00).
+ */
+function isRealBankTime(timeStr: string): boolean {
+  const clean = timeStr.trim();
+  return (
+    clean !== '12:00' &&
+    clean !== '12:00:00' &&
+    clean !== '00:00' &&
+    clean !== '00:00:00'
+  );
+}
+
+/**
+ * Identifica rigorosamente a precisão temporal do lançamento do Banco Inter PJ:
+ * - dataHoraMovimento, dataHoraLancamento, dataHora, dataInclusao, horario contendo hora real => DATETIME
+ * - hora, horaLancamento, horaMovimento presentes e preenchidos com hora real => DATETIME
+ * - Campos aninhados (transacao, pix, detalhes) com hora real => DATETIME
+ * - dataMovimento, dataEntrada ou formato somente data (ex: YYYY-MM-DD) => DATE_ONLY
+ * - Horários técnicos "12:00" ou "00:00" nunca são considerados horários reais do Inter.
+ */
 export function extractInterDatePrecision(item: any): FinancialDatePrecision {
   if (!item || typeof item !== 'object') return 'DATE_ONLY';
 
-  // 1. Campo explícito de hora preenchido
-  if (typeof item.hora === 'string' && item.hora.trim() && item.hora.includes(':')) {
-    return 'DATETIME';
-  }
-  if (typeof item.horaLancamento === 'string' && item.horaLancamento.trim() && item.horaLancamento.includes(':')) {
-    return 'DATETIME';
-  }
+  // 1. Campos explícitos de hora preenchidos (raiz ou aninhados)
+  const explicitHourCandidates = [
+    item.hora,
+    item.horaLancamento,
+    item.horaMovimento,
+    item.horario,
+    item.transacao?.hora,
+    item.transacao?.horario,
+    item.pix?.horario,
+    item.pix?.hora,
+    item.detalhes?.hora,
+  ];
 
-  // 2. Campo dataHoraMovimento / dataHoraTransacao / dataHora
-  const rawDateTime = item.dataHoraMovimento || item.dataHoraTransacao || item.dataHora;
-  if (typeof rawDateTime === 'string') {
-    const trimmed = rawDateTime.trim();
-    // Exige separador de espaço ou T seguido de dígitos de hora
-    const match = trimmed.match(/[ T](\d{2}):(\d{2})/);
-    if (match) {
-      return 'DATETIME';
+  for (const cand of explicitHourCandidates) {
+    if (typeof cand === 'string' && cand.trim() && cand.includes(':')) {
+      const match = cand.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return 'DATETIME';
+      }
     }
   }
 
-  // 3. Demais casos (dataEntrada, dataMovimento, data, strings YYYY-MM-DD)
+  // 2. Campos com data e hora combinados (raiz ou aninhados)
+  const combinedCandidates = [
+    item.dataHoraMovimento,
+    item.dataHoraLancamento,
+    item.dataHora,
+    item.dataHoraTransacao,
+    item.dataInclusao,
+    item.timestamp,
+    item.transacao?.dataHora,
+    item.transacao?.dataHoraLancamento,
+    item.pix?.dataHora,
+  ];
+
+  for (const cand of combinedCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.trim().match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return 'DATETIME';
+      }
+    }
+  }
+
+  // 3. Demais casos (dataEntrada, dataMovimento, data, strings YYYY-MM-DD ou horários técnicos 00:00/12:00)
   return 'DATE_ONLY';
 }
 
 /**
  * Extrai o horário informado pelo banco se existir de forma comprovável.
  * Se o banco não tiver informado horário (ex: date-only ou normalizado), retorna null.
- * REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou.
+ * REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou e nunca aceitar 12:00 ou 00:00.
  */
 export function extractInterTime(rawPayload: any): string | null {
   if (!rawPayload || typeof rawPayload !== 'object') return null;
@@ -328,26 +374,48 @@ export function extractInterTime(rawPayload: any): string | null {
     return null;
   }
 
-  // Campo explícito de hora
-  if (typeof rawPayload.hora === 'string' && rawPayload.hora.trim()) {
-    const m = rawPayload.hora.match(/(\d{2}:\d{2}(?::\d{2})?)/);
-    if (m) return m[1];
-  }
-  if (typeof rawPayload.horaLancamento === 'string' && rawPayload.horaLancamento.trim()) {
-    const m = rawPayload.horaLancamento.match(/(\d{2}:\d{2}(?::\d{2})?)/);
-    if (m) return m[1];
+  // 1. Campos explícitos de hora
+  const explicitHourCandidates = [
+    rawPayload.hora,
+    rawPayload.horaLancamento,
+    rawPayload.horaMovimento,
+    rawPayload.horario,
+    rawPayload.transacao?.hora,
+    rawPayload.transacao?.horario,
+    rawPayload.pix?.horario,
+    rawPayload.pix?.hora,
+    rawPayload.detalhes?.hora,
+  ];
+
+  for (const cand of explicitHourCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return match[1];
+      }
+    }
   }
 
-  const rawCandidate = String(
-    rawPayload.dataHoraMovimento ||
-    rawPayload.dataHoraTransacao ||
-    rawPayload.dataHora ||
-    ''
-  ).trim();
+  // 2. Campos combinados de data e hora
+  const combinedCandidates = [
+    rawPayload.dataHoraMovimento,
+    rawPayload.dataHoraLancamento,
+    rawPayload.dataHora,
+    rawPayload.dataHoraTransacao,
+    rawPayload.dataInclusao,
+    rawPayload.timestamp,
+    rawPayload.transacao?.dataHora,
+    rawPayload.transacao?.dataHoraLancamento,
+    rawPayload.pix?.dataHora,
+  ];
 
-  const timeMatch = rawCandidate.match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
-  if (timeMatch) {
-    return timeMatch[1];
+  for (const cand of combinedCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.trim().match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return match[1];
+      }
+    }
   }
 
   return null;

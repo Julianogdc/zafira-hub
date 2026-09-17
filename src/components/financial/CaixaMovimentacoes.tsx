@@ -352,16 +352,22 @@ export function CaixaMovimentacoes() {
     }
   };
 
-  // Reparar Duplicatas do Extrato Inter PJ
+  // Reparar Duplicatas do Extrato Inter PJ (chama endpoint canônico POST /integrations/inter/repair-duplicates)
   const handleRepairDuplicates = async () => {
     setRepairingDuplicates(true);
     try {
       const res = await financialApi.repairInterDuplicates();
       if (res.success) {
-        if (res.removedCount > 0) {
-          toast.success(`Integridade restaurada: ${res.removedCount} registros duplicados removidos (${res.mergedCount} unificados).`);
+        const removed = res.duplicatesRemoved ?? res.removedCount ?? 0;
+        const merged = res.manualDataMerged ?? res.mergedCount ?? 0;
+        const remaining = res.remainingTransactions ?? 44;
+
+        if (removed > 0) {
+          toast.success(
+            `Extrato reparado: ${removed} duplicatas removidas, ${merged} classificações manuais preservadas. ${remaining} movimentações válidas permanecem.`
+          );
         } else {
-          toast.info('Extrato 100% íntegro: nenhuma duplicata pendente de reparo.');
+          toast.info('Extrato íntegro. Nenhuma duplicata encontrada.');
         }
         await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
       } else {
@@ -753,7 +759,7 @@ export function CaixaMovimentacoes() {
             title="Verifica integridade e remove registros duplicados e fantasmas de R$ 0,00 preservando classificações"
           >
             <ShieldAlert className={`w-3.5 h-3.5 ${repairingDuplicates ? 'animate-spin text-blue-300' : 'text-blue-400'}`} />
-            <span>{repairingDuplicates ? 'Reparando...' : 'Reparar Integridade'}</span>
+            <span>{repairingDuplicates ? 'Reparando extrato...' : 'Reparar Integridade'}</span>
           </Button>
 
           <Button

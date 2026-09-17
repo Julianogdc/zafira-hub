@@ -281,13 +281,26 @@ export const financialApi = {
 
   repairInterDuplicates: async (): Promise<{
     success: boolean;
-    message: string;
-    reprocessedCount: number;
-    mergedCount: number;
-    removedCount: number;
-    autoMatchedTransfers?: number;
-    reviewTransfers?: number;
+    scanned: number;
+    duplicatesRemoved: number;
+    manualDataMerged: number;
+    remainingTransactions: number;
+    message?: string;
+    totalInspected?: number;
+    mergedCount?: number;
+    removedCount?: number;
   }> => {
-    return api.post('/financial/inter/repair-duplicates');
+    return api.post('/integrations/inter/repair-duplicates');
+  },
+
+  getInterDateDiagnostics: async (): Promise<{
+    totalTransactions: number;
+    dateFieldPresence: Record<string, number>;
+    detectedPrecision: {
+      DATETIME: number;
+      DATE_ONLY: number;
+    };
+  }> => {
+    return api.get('/integrations/inter/diagnostics/date-fields');
   },
 };

@@ -570,23 +570,50 @@ export async function financialRoutes(app: FastifyInstance) {
   app.post('/api/integrations/inter/reprocess', handleReprocessInter);
 
   /**
-   * POST /integrations/inter/repair-duplicates e /financial/inter/repair-duplicates
+   * POST /integrations/inter/repair-duplicates (ENDPOINT CANÔNICO)
    * Rotina de reparo local, segura e idempotente para duplicatas comprovadas do Banco Inter PJ.
    * - Mescla classificações manuais para o registro canônico com valor real.
    * - Preserva transferências e histórico.
    * - Remove exclusivamente duplicatas comprovadas de R$ 0,00.
+   * - Retorna: scanned, duplicatesRemoved, manualDataMerged, remainingTransactions
    */
   const handleRepairInterDuplicates = async (req: FastifyRequest, reply: FastifyReply) => {
     const organizationId = getOrganizationId(req);
     const result = await interService.repairInterDuplicates(organizationId);
     return reply.send({
       success: true,
+      scanned: result.scanned,
+      duplicatesRemoved: result.duplicatesRemoved,
+      manualDataMerged: result.manualDataMerged,
+      remainingTransactions: result.remainingTransactions,
+      // Retrocompatibilidade
+      totalInspected: result.totalInspected,
+      removedCount: result.removedCount,
+      mergedCount: result.mergedCount,
       message: 'Reparo de duplicatas concluído com sucesso.',
-      ...result,
     });
   };
+
+  // Endpoint canônico oficial
   app.post('/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
   app.post('/api/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+
+  // Redirecionamento/alias interno para compatibilidade
   app.post('/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
   app.post('/api/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+
+  /**
+   * GET / POST /integrations/inter/diagnostics/date-fields
+   * Diagnóstico seguro sobre os rawPayloads das transações Inter armazenadas.
+   * Não expõe dados pessoais, valores financeiros, descrições ou credenciais.
+   */
+  const handleGetInterDateDiagnostics = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const diagnostics = await interService.getInterDateFieldDiagnostics(organizationId);
+    return reply.send(diagnostics);
+  };
+  app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  app.post('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  app.post('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
 }

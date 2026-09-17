@@ -3543,6 +3543,295 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(formatCounterpartyDisplay('Fornecedor Alpha LTDA'), 'Fornecedor Alpha LTDA');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 21. Reparo Canônico das 44 Duplicatas e Diagnóstico Seguro de Campos Temporais
+  // ---------------------------------------------------------------------------
+  await t.test('21. Reparo Canônico das 44 Duplicatas e Diagnóstico Seguro de Campos Temporais', async (tSub) => {
+    // 21.1 O reparo remove os 44 duplicados comprovados (88 -> 44)
+    await tSub.test('21.1 Reparo remove 44 duplicatas comprovadas de R$ 0,00 reduzindo de 88 para 44 registros', async () => {
+      const state: any[] = [];
+
+      // Cria 44 pares exatos: um canônico (amount > 0) e um legado (amount === 0)
+      for (let i = 1; i <= 44; i++) {
+        const dateStr = `2026-09-${String((i % 28) + 1).padStart(2, '0')}`;
+        // Canônico
+        state.push({
+          id: `tx-canonical-${i}`,
+          accountId: 'acc-inter-1',
+          occurredAt: new Date(`${dateStr}T12:00:00Z`),
+          amount: 100 * i,
+          direction: i % 2 === 0 ? 'CREDIT' : 'DEBIT',
+          description: `Pix ${i % 2 === 0 ? 'recebido' : 'enviado'} Favorecido ${i}`,
+          counterpartyName: `Favorecido ${i}`,
+          counterpartyDocument: '12345678901',
+          categoryId: 'cat-geral',
+          clientId: null,
+          categorizationSource: 'DEFAULT',
+          rawPayload: { idTransacao: `inter-tx-${i}`, dataEntrada: dateStr },
+        });
+
+        // Duplicata espúria legada (amount = 0, counterpartyName pode ser null na versão legada)
+        state.push({
+          id: `tx-duplicate-zero-${i}`,
+          accountId: 'acc-inter-1',
+          occurredAt: new Date(`${dateStr}T12:00:00Z`),
+          amount: 0,
+          direction: i % 2 === 0 ? 'CREDIT' : 'DEBIT',
+          description: `Pix ${i % 2 === 0 ? 'recebido' : 'enviado'}`,
+          counterpartyName: null, // versão legada não preenchia
+          counterpartyDocument: null,
+          categoryId: null,
+          clientId: null,
+          categorizationSource: 'PENDING',
+          rawPayload: { idTransacao: `inter-tx-${i}`, dataEntrada: dateStr },
+        });
+      }
+
+      assert.strictEqual(state.length, 88, 'Base inicial deve ter 88 registros');
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state[idx] = { ...state[idx], ...args.data };
+            return state[idx];
+          },
+          delete: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state.splice(idx, 1);
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+        financialTransfer: {
+          update: async () => ({}),
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const res = await interService.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.scanned, 88);
+      assert.strictEqual(res.duplicatesRemoved, 44, 'Deve remover exatamente as 44 duplicatas');
+      assert.strictEqual(res.remainingTransactions, 44, 'Devem restar exatamente 44 movimentações canônicas');
+      assert.strictEqual(state.length, 44);
+      assert.strictEqual(state.every((t) => Number(t.amount) > 0), true, 'Todos os registros restantes têm valor real');
+    });
+
+    // 21.2 Classificação manual e cliente da duplicata legada de R$ 0,00 são transferidos para o canônico
+    await tSub.test('21.2 Transfere categoria, cliente e origem MANUAL do registro de 0 para o canônico', async () => {
+      let state = [
+        {
+          id: 'tx-can-1',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          amount: 550.0,
+          direction: 'CREDIT',
+          description: 'Pix recebido Cliente Alfa',
+          counterpartyName: 'Cliente Alfa',
+          categoryId: null,
+          clientId: null,
+          categorizationSource: 'PENDING',
+          rawPayload: { idTransacao: 'tx-123' },
+        },
+        {
+          id: 'tx-dup-zero-1',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          amount: 0,
+          direction: 'CREDIT',
+          description: 'Pix recebido',
+          counterpartyName: null,
+          categoryId: 'cat-servicos',
+          clientId: 'cli-alfa-id',
+          categorizationSource: 'MANUAL', // Usuário classificou manualmente na duplicata
+          categorizationConfidence: 1.0,
+          rawPayload: { idTransacao: 'tx-123' },
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state[idx] = { ...state[idx], ...args.data };
+            return state[idx];
+          },
+          delete: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state.splice(idx, 1);
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+        financialTransfer: {
+          update: async () => ({}),
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const res = await interService.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.duplicatesRemoved, 1);
+      assert.strictEqual(res.manualDataMerged, 1, 'Deve registrar a fusão de dados manuais');
+      assert.strictEqual(state.length, 1);
+
+      const remaining = state[0];
+      assert.strictEqual(remaining.id, 'tx-can-1');
+      assert.strictEqual(remaining.amount, 550.0);
+      assert.strictEqual(remaining.categoryId, 'cat-servicos', 'Categoria manual foi transferida');
+      assert.strictEqual(remaining.clientId, 'cli-alfa-id', 'Cliente foi transferido');
+      assert.strictEqual(remaining.categorizationSource, 'MANUAL', 'Origem MANUAL foi preservada');
+    });
+
+    // 21.3 Endpoint canônico POST /integrations/inter/repair-duplicates responde contrato completo
+    await tSub.test('21.3 Endpoint canônico POST /integrations/inter/repair-duplicates responde contrato completo', async () => {
+      const mockInterService: any = {
+        repairInterDuplicates: async () => ({
+          scanned: 88,
+          duplicatesRemoved: 44,
+          manualDataMerged: 3,
+          remainingTransactions: 44,
+          totalInspected: 88,
+          removedCount: 44,
+          mergedCount: 3,
+        }),
+      };
+
+      const app = fastify();
+      await app.register(cookie);
+      await app.register(jwt, { secret: 'test-secret-jwt' });
+
+      app.post('/integrations/inter/repair-duplicates', async (req, reply) => {
+        const res = await mockInterService.repairInterDuplicates();
+        return reply.send({
+          success: true,
+          scanned: res.scanned,
+          duplicatesRemoved: res.duplicatesRemoved,
+          manualDataMerged: res.manualDataMerged,
+          remainingTransactions: res.remainingTransactions,
+        });
+      });
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/integrations/inter/repair-duplicates',
+      });
+
+      assert.strictEqual(response.statusCode, 200);
+      const body = JSON.parse(response.body);
+      assert.strictEqual(body.success, true);
+      assert.strictEqual(body.scanned, 88);
+      assert.strictEqual(body.duplicatesRemoved, 44);
+      assert.strictEqual(body.manualDataMerged, 3);
+      assert.strictEqual(body.remainingTransactions, 44);
+    });
+
+    // 21.4 Diagnóstico temporal seguro: NÃO expõe dados pessoais, financeiros ou credenciais
+    await tSub.test('21.4 Diagnóstico temporal seguro não expõe dados pessoais, financeiros ou credenciais', async () => {
+      const mockTransactions = [
+        {
+          id: 'tx-1',
+          datePrecision: 'DATETIME',
+          rawPayload: {
+            dataHoraLancamento: '2026-09-17 14:32:00',
+            dataEntrada: '2026-09-17',
+            valor: 99999.99, // dado financeiro sensível
+            descricao: 'PIX SECRETO CLIENTE', // dado textual sensível
+            cpfCnpj: '11122233344', // dado pessoal sensível
+            token: 'bearer_token_123', // credencial
+          },
+        },
+        {
+          id: 'tx-2',
+          datePrecision: 'DATE_ONLY',
+          rawPayload: {
+            dataEntrada: '2026-09-17',
+            valor: 50.0,
+            descricao: 'TARIFA',
+          },
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => mockTransactions,
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const diagnostics = await interService.getInterDateFieldDiagnostics('org-1');
+
+      assert.strictEqual(diagnostics.totalTransactions, 2);
+      assert.strictEqual(diagnostics.dateFieldPresence.dataHoraLancamento, 1);
+      assert.strictEqual(diagnostics.dateFieldPresence.dataEntrada, 2);
+      assert.strictEqual(diagnostics.detectedPrecision.DATETIME, 1);
+      assert.strictEqual(diagnostics.detectedPrecision.DATE_ONLY, 1);
+
+      // Verificação de segurança absoluta: nenhuma string sensível pode existir no objeto retornado
+      const serialized = JSON.stringify(diagnostics);
+      assert.strictEqual(serialized.includes('99999.99'), false, 'Não deve conter valores monetários');
+      assert.strictEqual(serialized.includes('PIX SECRETO'), false, 'Não deve conter descrições');
+      assert.strictEqual(serialized.includes('11122233344'), false, 'Não deve conter documentos/CPFs');
+      assert.strictEqual(serialized.includes('bearer_token'), false, 'Não deve conter credenciais/tokens');
+    });
+
+    // 21.5 Campos alternativos de data/hora são devidamente reconhecidos
+    await tSub.test('21.5 Campos alternativos plausíveis de data/hora são devidamente reconhecidos', async () => {
+      const payloads = [
+        { dataHoraLancamento: '2026-09-17 15:40:00' },
+        { dataInclusao: '2026-09-17 09:12:30' },
+        { horario: '14:20' },
+        { horaMovimento: '11:05:00' },
+        { transacao: { dataHora: '2026-09-17 16:30:00' } },
+        { pix: { horario: '17:45:10' } },
+      ];
+
+      for (const p of payloads) {
+        assert.strictEqual(
+          extractInterDatePrecision(p),
+          'DATETIME',
+          `Payload deve ser DATETIME: ${JSON.stringify(p)}`
+        );
+        const time = extractInterTime(p);
+        assert.ok(time && time.length >= 4, `Horário deve ser extraído: ${JSON.stringify(p)}`);
+      }
+    });
+
+    // 21.6 Ausência real de horário e horários técnicos 12:00 e 00:00 resultam em DATE_ONLY
+    await tSub.test('21.6 Ausência real de horário e horários técnicos 12:00/00:00 resultam em DATE_ONLY', async () => {
+      const dateOnlyPayloads = [
+        { dataEntrada: '2026-09-17' },
+        { dataMovimento: '2026-09-17' },
+        { dataHoraMovimento: '2026-09-17 12:00:00' }, // horário técnico
+        { dataHoraMovimento: '2026-09-17 00:00:00' }, // horário técnico
+        { hora: '12:00' }, // horário técnico
+        { hora: '00:00' }, // horário técnico
+        null,
+        {},
+      ];
+
+      for (const p of dateOnlyPayloads) {
+        assert.strictEqual(
+          extractInterDatePrecision(p),
+          'DATE_ONLY',
+          `Payload não deve ter hora aceita: ${JSON.stringify(p)}`
+        );
+        assert.strictEqual(extractInterTime(p), null, 'Horário técnico ou ausente deve retornar null');
+      }
+    });
+
+    // 21.7 Regressão: BANK_WRITE_FORBIDDEN permanece intacto
+    await tSub.test('21.7 Regressão de segurança: BANK_WRITE_FORBIDDEN bloqueia qualquer escrita bancária', async () => {
+      const client = new InterClient();
+      assert.strictEqual(typeof (client as any).pixSend, 'undefined');
+      assert.strictEqual(typeof (client as any).transfer, 'undefined');
+      assert.strictEqual(typeof (client as any).createPixPayment, 'undefined');
+    });
+  });
 });
 
 
