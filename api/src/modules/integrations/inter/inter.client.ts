@@ -279,9 +279,45 @@ export class InterClient {
       });
 
       if (!response.ok) {
+        // Whitelist estrita de campos seguros: error, error_description, code, message
+        let diagError: string | undefined;
+        let diagDescription: string | undefined;
+        let diagCode: string | undefined;
+        let diagMessage: string | undefined;
+
+        try {
+          const rawText = await response.text();
+          if (rawText && rawText.trim().startsWith('{')) {
+            const body = JSON.parse(rawText);
+            const sanitize = (val: unknown) => {
+              if (typeof val !== 'string' && typeof val !== 'number') return undefined;
+              const s = String(val).trim();
+              return s ? s.slice(0, 300) : undefined;
+            };
+            diagError = sanitize(body?.error);
+            diagDescription = sanitize(body?.error_description);
+            diagCode = sanitize(body?.code);
+            diagMessage = sanitize(body?.message);
+          }
+        } catch {
+          // Corpo não-JSON ou erro de leitura: o corpo bruto NUNCA é registrado
+        }
+
+        const logParts: string[] = [`status=${response.status}`];
+        if (diagError) logParts.push(`error=${diagError}`);
+        if (diagDescription) logParts.push(`description=${diagDescription}`);
+        if (diagCode) logParts.push(`code=${diagCode}`);
+        if (diagMessage) logParts.push(`message=${diagMessage}`);
+        if (!diagError && !diagDescription && !diagCode && !diagMessage) {
+          logParts.push('detalhes=resposta_sem_campos_padrao');
+        }
+
+        const diagMessageText = logParts.join(', ');
+        console.error(`[InterClient] OAuth recusado pelo Inter: ${diagMessageText}`);
+
         throw new InterIntegrationError(
-          `Falha na autenticação OAuth2 do Banco Inter (status ${response.status})`,
-          response.status === 401 ? 401 : 502,
+          `Falha na autenticação OAuth2 do Banco Inter (${diagMessageText})`,
+          response.status === 401 ? 401 : (response.status === 400 ? 400 : 502),
           'INTER_AUTH_FAILED'
         );
       }

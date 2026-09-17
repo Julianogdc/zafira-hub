@@ -222,6 +222,163 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   });
 
   // ---------------------------------------------------------------------------
+  // 2.1 Diagnóstico seguro de respostas OAuth não-2xx (captura estrita de campos whitelist)
+  // ---------------------------------------------------------------------------
+  await t.test('2.1 Diagnóstico OAuth 400: captura com whitelist (error, error_description, code, message) e zero vazamento', async (tSub) => {
+    const originalFetch = globalThis.fetch;
+    const originalConsoleError = console.error;
+
+    let loggedErrors: string[] = [];
+    console.error = (...args: any[]) => {
+      loggedErrors.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    };
+
+    tSub.afterEach(() => {
+      globalThis.fetch = originalFetch;
+      console.error = originalConsoleError;
+      loggedErrors = [];
+    });
+
+    const testClient = new InterClient({
+      clientId: 'secret-cli-id-999',
+      clientSecret: 'secret-cli-pass-888',
+      crtBase64: Buffer.from('FAKE_CERT_BYTES').toString('base64'),
+      keyBase64: Buffer.from('FAKE_KEY_BYTES').toString('base64'),
+      oauthScope: 'extrato.read',
+    });
+
+    // 1. Resposta OAuth 400 com invalid_client
+    await tSub.test('1. Resposta OAuth 400 com invalid_client registra e propaga erro formatado', async () => {
+      globalThis.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            error: 'invalid_client',
+            error_description: 'Client credentials are not authorized or disabled',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }) as any;
+
+      await assert.rejects(
+        async () => {
+          await testClient.getAccessToken();
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'INTER_AUTH_FAILED');
+          assert.strictEqual(err.statusCode, 400);
+          assert.ok(err.message.includes('status=400'));
+          assert.ok(err.message.includes('error=invalid_client'));
+          assert.ok(err.message.includes('description=Client credentials are not authorized or disabled'));
+          return true;
+        }
+      );
+
+      const logFound = loggedErrors.some((log) =>
+        log.includes('[InterClient] OAuth recusado pelo Inter: status=400, error=invalid_client')
+      );
+      assert.ok(logFound, 'Deve registrar log com os campos seguros extraídos');
+    });
+
+    // 2. Resposta OAuth 400 com invalid_scope
+    await tSub.test('2. Resposta OAuth 400 com invalid_scope registra erro com escopo rejeitado', async () => {
+      globalThis.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            error: 'invalid_scope',
+            error_description: 'The requested scope is not configured for application',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }) as any;
+
+      await assert.rejects(
+        async () => {
+          await testClient.getAccessToken();
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'INTER_AUTH_FAILED');
+          assert.strictEqual(err.statusCode, 400);
+          assert.ok(err.message.includes('error=invalid_scope'));
+          assert.ok(err.message.includes('description=The requested scope is not configured for application'));
+          return true;
+        }
+      );
+    });
+
+    // 3. Resposta não-JSON (HTML ou texto simples, ex: Bad Request do Gateway/WAF)
+    await tSub.test('3. Resposta não-JSON não expõe corpo bruto e registra status com segurança', async () => {
+      const rawHtml = '<html><head><title>400 Bad Request</title></head><body>Proxy sensitive info</body></html>';
+      globalThis.fetch = (async () => {
+        return new Response(rawHtml, { status: 400, headers: { 'Content-Type': 'text/html' } });
+      }) as any;
+
+      await assert.rejects(
+        async () => {
+          await testClient.getAccessToken();
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'INTER_AUTH_FAILED');
+          assert.strictEqual(err.statusCode, 400);
+          assert.ok(!err.message.includes(rawHtml), 'Corpo bruto HTML jamais deve ser exposto na mensagem');
+          assert.ok(err.message.includes('resposta_sem_campos_padrao'));
+          return true;
+        }
+      );
+
+      const leakedHtml = loggedErrors.some((log) => log.includes(rawHtml));
+      assert.strictEqual(leakedHtml, false, 'Corpo bruto HTML jamais deve ser emitido no log');
+    });
+
+    // 4. Garantia de que token, Client ID, Client Secret, Authorization, certificado e chave nunca aparecem
+    await tSub.test('4. Credenciais, Client ID/Secret, certificados e tokens jamais aparecem em erro ou logs', async () => {
+      globalThis.fetch = (async () => {
+        return new Response(
+          JSON.stringify({
+            error: 'unauthorized',
+            error_description: 'Unauthorized access',
+            access_token: 'SUPER_SECRET_TOKEN_DO_NOT_LEAK',
+          }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }) as any;
+
+      try {
+        await testClient.getAccessToken();
+        assert.fail('Deveria ter lançado erro');
+      } catch (err: any) {
+        const fullErrStr = `${err.message} ${err.stack || ''}`;
+        const allLogs = loggedErrors.join(' ');
+
+        // Verificações estritas de não-vazamento
+        assert.ok(!fullErrStr.includes('secret-cli-pass-888'), 'Client secret não deve vazar no erro');
+        assert.ok(!allLogs.includes('secret-cli-pass-888'), 'Client secret não deve vazar nos logs');
+        assert.ok(!fullErrStr.includes('SUPER_SECRET_TOKEN_DO_NOT_LEAK'), 'Token não deve vazar no erro');
+        assert.ok(!allLogs.includes('SUPER_SECRET_TOKEN_DO_NOT_LEAK'), 'Token não deve vazar nos logs');
+        assert.ok(!fullErrStr.includes('FAKE_CERT_BYTES'), 'Certificado não deve vazar no erro');
+        assert.ok(!allLogs.includes('FAKE_CERT_BYTES'), 'Certificado não deve vazar nos logs');
+        assert.ok(!fullErrStr.includes('FAKE_KEY_BYTES'), 'Chave não deve vazar no erro');
+        assert.ok(!allLogs.includes('FAKE_KEY_BYTES'), 'Chave não deve vazar nos logs');
+        assert.ok(!fullErrStr.includes('Authorization:'), 'Authorization header não deve vazar');
+        assert.ok(!allLogs.includes('Authorization:'), 'Authorization header não deve vazar nos logs');
+      }
+    });
+
+    // 5. Regressão: proteção BANK_WRITE_FORBIDDEN permanece inviolável
+    await tSub.test('5. Regressão: BANK_WRITE_FORBIDDEN bloqueia qualquer escrita bancária', async () => {
+      await assert.rejects(
+        async () => {
+          await testClient.requestBankingResource('POST', '/banking/v2/saldo');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          return true;
+        }
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // 3. Isolamento multitenant estrito por organizationId no FinancialService
   // ---------------------------------------------------------------------------
   await t.test('3. FinancialService filtra estritamente por organizationId', async () => {
