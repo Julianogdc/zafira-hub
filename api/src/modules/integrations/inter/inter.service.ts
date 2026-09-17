@@ -715,6 +715,252 @@ export class InterService {
       },
     };
   }
+
+  /**
+   * Prévia somente leitura dos horários do extrato completo do Banco Inter PJ.
+   * Não grava nada no banco de dados.
+   * Retorna contadores agregados seguros sem expor dados pessoais, valores ou credenciais.
+   */
+  async previewEnrichedTimes(
+    organizationId: string,
+    range?: { startDate?: string; endDate?: string }
+  ): Promise<{
+    totalReceived: number;
+    withOfficialTransactionId: number;
+    withRealTimestamp: number;
+    withoutTimestamp: number;
+    scopeAvailable: boolean;
+  }> {
+    let dataInicio: string;
+    let dataFim: string;
+
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    if (range?.startDate && range?.endDate) {
+      dataInicio = range.startDate;
+      dataFim = range.endDate;
+    } else {
+      const txLimits = await this.prisma.financialTransaction.aggregate({
+        where: { organizationId, account: { provider: 'INTER' } },
+        _min: { occurredAt: true },
+        _max: { occurredAt: true },
+      });
+
+      if (txLimits._min.occurredAt && txLimits._max.occurredAt) {
+        dataInicio = txLimits._min.occurredAt.toISOString().slice(0, 10);
+        dataFim = txLimits._max.occurredAt.toISOString().slice(0, 10);
+        const startMs = new Date(dataInicio).getTime();
+        const endMs = new Date(dataFim).getTime();
+        if ((endMs - startMs) / (1000 * 60 * 60 * 24) > 90) {
+          const d90 = new Date(now.getTime() - 89 * 24 * 60 * 60 * 1000);
+          dataInicio = d90.toISOString().slice(0, 10);
+          dataFim = todayStr;
+        }
+      } else {
+        const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        dataInicio = d30.toISOString().slice(0, 10);
+        dataFim = todayStr;
+      }
+    }
+
+    const completeItems = await this.client.getCompleteStatement(dataInicio, dataFim);
+
+    let withOfficialTransactionId = 0;
+    let withRealTimestamp = 0;
+    let withoutTimestamp = 0;
+
+    for (const item of completeItems) {
+      const officialId = String(item.idTransacao || item.codigoTransacao || item.nossoNumero || '').trim();
+      if (officialId) {
+        withOfficialTransactionId += 1;
+      }
+
+      const rawDateTimeStr = String(item.dataHoraMovimento || item.dataHora || item.dataHoraLancamento || '').trim();
+      let hasRealTime = false;
+
+      if (rawDateTimeStr) {
+        const match = rawDateTimeStr.match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+        if (match) {
+          const timeStr = match[1];
+          if (timeStr !== '12:00' && timeStr !== '12:00:00' && timeStr !== '00:00' && timeStr !== '00:00:00') {
+            hasRealTime = true;
+          }
+        }
+      }
+
+      if (hasRealTime) {
+        withRealTimestamp += 1;
+      } else {
+        withoutTimestamp += 1;
+      }
+    }
+
+    return {
+      totalReceived: completeItems.length,
+      withOfficialTransactionId,
+      withRealTimestamp,
+      withoutTimestamp,
+      scopeAvailable: true,
+    };
+  }
+
+  /**
+   * Aplicação controlada dos horários oficiais analíticos do Banco Inter PJ.
+   * Regras estritas:
+   * - Atualiza SOMENTE registros que possuem ligação inequívoca por identificador bancário oficial.
+   * - Grava datePrecision = DATETIME e atualiza occurredAt com a data/hora oficial.
+   * - Preserva valores, categorias, clientes, conciliações e histórico.
+   * - NENHUM registro é criado ou removido.
+   * - Retorna contadores de atualizados, ignorados e ambíguos.
+   */
+  async applyEnrichedTimes(
+    organizationId: string,
+    range?: { startDate?: string; endDate?: string }
+  ): Promise<{
+    success: boolean;
+    updatedCount: number;
+    skippedCount: number;
+    ambiguousCount: number;
+    message: string;
+  }> {
+    let dataInicio: string;
+    let dataFim: string;
+
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    if (range?.startDate && range?.endDate) {
+      dataInicio = range.startDate;
+      dataFim = range.endDate;
+    } else {
+      const txLimits = await this.prisma.financialTransaction.aggregate({
+        where: { organizationId, account: { provider: 'INTER' } },
+        _min: { occurredAt: true },
+        _max: { occurredAt: true },
+      });
+
+      if (txLimits._min.occurredAt && txLimits._max.occurredAt) {
+        dataInicio = txLimits._min.occurredAt.toISOString().slice(0, 10);
+        dataFim = txLimits._max.occurredAt.toISOString().slice(0, 10);
+        const startMs = new Date(dataInicio).getTime();
+        const endMs = new Date(dataFim).getTime();
+        if ((endMs - startMs) / (1000 * 60 * 60 * 24) > 90) {
+          const d90 = new Date(now.getTime() - 89 * 24 * 60 * 60 * 1000);
+          dataInicio = d90.toISOString().slice(0, 10);
+          dataFim = todayStr;
+        }
+      } else {
+        const d30 = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        dataInicio = d30.toISOString().slice(0, 10);
+        dataFim = todayStr;
+      }
+    }
+
+    const completeItems = await this.client.getCompleteStatement(dataInicio, dataFim);
+
+    // Carrega todas as transações Inter existentes da organização
+    const existingTransactions = await this.prisma.financialTransaction.findMany({
+      where: {
+        organizationId,
+        account: { provider: 'INTER' },
+      },
+    });
+
+    const getOfficialId = (rawPayload: any, extRef?: string | null): string => {
+      if (rawPayload && typeof rawPayload === 'object') {
+        const id = String(rawPayload.idTransacao || rawPayload.codigoTransacao || rawPayload.nossoNumero || '').trim();
+        if (id) return id;
+      }
+      if (extRef && typeof extRef === 'string') {
+        const cleanRef = extRef.trim();
+        if (cleanRef && !cleanRef.startsWith('inter_')) return cleanRef;
+      }
+      return '';
+    };
+
+    // Mapeia transações locais por identificador oficial
+    const existingByOfficialId = new Map<string, typeof existingTransactions>();
+    for (const tx of existingTransactions) {
+      const offId = getOfficialId(tx.rawPayload, tx.externalReference);
+      if (offId) {
+        const list = existingByOfficialId.get(offId) || [];
+        list.push(tx);
+        existingByOfficialId.set(offId, list);
+      }
+    }
+
+    let updatedCount = 0;
+    let skippedCount = 0;
+    let ambiguousCount = 0;
+
+    for (const item of completeItems) {
+      const itemOfficialId = String(item.idTransacao || item.codigoTransacao || item.nossoNumero || '').trim();
+      const rawDateTimeStr = String(item.dataHoraMovimento || item.dataHora || item.dataHoraLancamento || '').trim();
+
+      // Se não possui identificador oficial ou não possui string de data/hora
+      if (!itemOfficialId || !rawDateTimeStr) {
+        skippedCount += 1;
+        continue;
+      }
+
+      // Valida se o horário é real e não técnico (00:00 ou 12:00)
+      const match = rawDateTimeStr.match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+      if (!match) {
+        skippedCount += 1;
+        continue;
+      }
+      const timeStr = match[1];
+      if (timeStr === '12:00' || timeStr === '12:00:00' || timeStr === '00:00' || timeStr === '00:00:00') {
+        skippedCount += 1;
+        continue;
+      }
+
+      const candidates = existingByOfficialId.get(itemOfficialId) || [];
+
+      if (candidates.length === 0) {
+        // Nenhuma transação existente encontrada com este ID oficial
+        skippedCount += 1;
+      } else if (candidates.length > 1) {
+        // Ambiguidade detectada (múltiplas transações com mesmo ID oficial): NÃO atualiza
+        ambiguousCount += 1;
+      } else {
+        // Exatamente 1 correspondência inequívoca
+        const target = candidates[0];
+
+        try {
+          const parsedRealDate = normalizeInterDate(rawDateTimeStr);
+          const currentRaw = (target.rawPayload as any) || {};
+          const updatedRaw = {
+            ...currentRaw,
+            dataHoraMovimento: rawDateTimeStr,
+            interTransactionId: itemOfficialId,
+          };
+
+          await this.prisma.financialTransaction.update({
+            where: { id: target.id },
+            data: {
+              occurredAt: parsedRealDate,
+              datePrecision: 'DATETIME',
+              rawPayload: updatedRaw,
+            },
+          });
+
+          updatedCount += 1;
+        } catch {
+          skippedCount += 1;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      updatedCount,
+      skippedCount,
+      ambiguousCount,
+      message: `${updatedCount} movimentações tiveram seus horários oficiais aplicados com sucesso.`,
+    };
+  }
 }
 
 export const interService = new InterService();

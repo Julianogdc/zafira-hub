@@ -38,6 +38,31 @@ export interface InterStatementItem {
   };
 }
 
+export interface InterCompleteStatementItem {
+  dataHoraMovimento?: string; // Formato ISO 8601 ex: 2026-09-17T14:32:00.663504
+  dataHoraSolicitacao?: string;
+  dataEntrada?: string; // YYYY-MM-DD
+  dataMovimento?: string;
+  tipoOperacao: 'C' | 'D' | string;
+  tipoTransacao: string;
+  valor: number;
+  titulo: string;
+  descricao?: string;
+  idTransacao?: string;
+  codigoTransacao?: string;
+  nossoNumero?: string;
+  endToEnd?: string;
+  endToEndId?: string;
+  chavePix?: string;
+  codigoSolicitacao?: string;
+  contraparte?: {
+    nome?: string;
+    cpfCnpj?: string;
+    banco?: string;
+  };
+  [key: string]: any;
+}
+
 /**
  * Cliente HTTP para a API do Banco Inter PJ.
  * Política de segurança de rede e métodos:
@@ -520,6 +545,46 @@ export class InterClient {
   async getStatement(dataInicio: string, dataFim: string): Promise<InterStatementItem[]> {
     const res = await this.requestBankingResource<any>('GET', '/banking/v2/extrato', { dataInicio, dataFim });
     return Array.isArray(res) ? res : res?.transacoes || [];
+  }
+
+  /**
+   * Consulta extrato analítico completo por período (GET /banking/v2/extrato/completo).
+   * Fornece dataHoraMovimento real oficial quando registrado pelo Banco Inter.
+   * Regras de segurança:
+   * - Acesso estritamente somente leitura (GET).
+   * - Validação oficial de formato (YYYY-MM-DD) e intervalo de até 90 dias.
+   * - Tratamento seguro de escopo sem exposição de credenciais.
+   */
+  async getCompleteStatement(dataInicio: string, dataFim: string): Promise<InterCompleteStatementItem[]> {
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(dataInicio) || !dateRegex.test(dataFim)) {
+      throw new InterIntegrationError('Datas inicial e final devem estar no formato YYYY-MM-DD.', 400, 'INVALID_DATE_FORMAT');
+    }
+
+    const start = new Date(dataInicio).getTime();
+    const end = new Date(dataFim).getTime();
+    if (end < start) {
+      throw new InterIntegrationError('A data final não pode ser anterior à data inicial.', 400, 'INVALID_DATE_RANGE');
+    }
+
+    const diffDays = (end - start) / (1000 * 60 * 60 * 24);
+    if (diffDays > 90) {
+      throw new InterIntegrationError('O período máximo permitido para extrato no Banco Inter é de 90 dias.', 400, 'RANGE_EXCEEDED');
+    }
+
+    try {
+      const res = await this.requestBankingResource<any>('GET', '/banking/v2/extrato/completo', { dataInicio, dataFim });
+      return Array.isArray(res) ? res : res?.transacoes || [];
+    } catch (err: any) {
+      if (err instanceof InterIntegrationError && err.statusCode === 403) {
+        throw new InterIntegrationError(
+          'Permissão insuficiente no Banco Inter. É necessário verificar se a permissão "extrato.read" ou Extrato Analítico está ativada no Portal do Desenvolvedor Inter Empresas.',
+          403,
+          'SCOPE_INSUFFICIENT'
+        );
+      }
+      throw err;
+    }
   }
 }
 

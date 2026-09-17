@@ -304,4 +304,26 @@ export const financialApi = {
   }> => {
     return api.get('/integrations/inter/diagnostics/date-fields');
   },
+
+  previewInterEnrichedTimes: async (): Promise<{
+    totalReceived: number;
+    withOfficialTransactionId: number;
+    withRealTimestamp: number;
+    withoutTimestamp: number;
+    scopeAvailable: boolean;
+    error?: string;
+    message?: string;
+  }> => {
+    return api.get('/integrations/inter/preview-enriched-times');
+  },
+
+  applyInterEnrichedTimes: async (): Promise<{
+    success: boolean;
+    updatedCount: number;
+    skippedCount: number;
+    ambiguousCount: number;
+    message: string;
+  }> => {
+    return api.post('/integrations/inter/apply-enriched-times', {});
+  },
 };

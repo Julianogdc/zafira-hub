@@ -615,4 +615,50 @@ export async function financialRoutes(app: FastifyInstance) {
   };
   app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
   app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+
+  /**
+   * GET /integrations/inter/preview-enriched-times (SOMENTE LEITURA)
+   * Prévia segura dos horários reais do extrato completo do Banco Inter PJ.
+   * Não grava nada no banco de dados e retorna exclusivamente contadores agregados.
+   */
+  const handlePreviewInterEnrichedTimes = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const query = (req.query as { startDate?: string; endDate?: string } | undefined) || {};
+    try {
+      const result = await interService.previewEnrichedTimes(organizationId, query);
+      return reply.send(result);
+    } catch (err: any) {
+      const statusCode = err.statusCode || 500;
+      return reply.status(statusCode).send({
+        error: err.code || 'INTER_PREVIEW_ERROR',
+        message: err.message || 'Erro ao consultar prévia do extrato completo.',
+        scopeAvailable: false,
+      });
+    }
+  };
+  app.get('/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
+  app.get('/api/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
+
+  /**
+   * POST /integrations/inter/apply-enriched-times
+   * Aplicação controlada e segura dos horários oficiais analíticos do Banco Inter PJ.
+   * Atualiza unicamente lançamentos com identificador oficial bancário comprovado.
+   * Não cria e não exclui nenhuma movimentação.
+   */
+  const handleApplyInterEnrichedTimes = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const body = (req.body as { startDate?: string; endDate?: string } | undefined) || {};
+    try {
+      const result = await interService.applyEnrichedTimes(organizationId, body);
+      return reply.send(result);
+    } catch (err: any) {
+      const statusCode = err.statusCode || 500;
+      return reply.status(statusCode).send({
+        error: err.code || 'INTER_APPLY_ERROR',
+        message: err.message || 'Erro ao aplicar horários do extrato completo.',
+      });
+    }
+  };
+  app.post('/integrations/inter/apply-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyInterEnrichedTimes);
+  app.post('/api/integrations/inter/apply-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyInterEnrichedTimes);
 }

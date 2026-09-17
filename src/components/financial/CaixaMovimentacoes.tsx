@@ -89,6 +89,15 @@ export function CaixaMovimentacoes() {
   const [syncingInter, setSyncingInter] = useState<boolean>(false);
   const [reprocessingInter, setReprocessingInter] = useState<boolean>(false);
   const [repairingDuplicates, setRepairingDuplicates] = useState<boolean>(false);
+  const [checkingTimes, setCheckingTimes] = useState<boolean>(false);
+  const [applyingTimes, setApplyingTimes] = useState<boolean>(false);
+  const [previewResult, setPreviewResult] = useState<{
+    totalReceived: number;
+    withOfficialTransactionId: number;
+    withRealTimestamp: number;
+    withoutTimestamp: number;
+    scopeAvailable: boolean;
+  } | null>(null);
 
   // Filtros
   const [selectedAccountId, setSelectedAccountId] = useState<string>('ALL');
@@ -384,6 +393,46 @@ export function CaixaMovimentacoes() {
       toast.error(err.response?.data?.message || 'Falha ao reparar duplicatas do Banco Inter.');
     } finally {
       setRepairingDuplicates(false);
+    }
+  };
+
+  // Verificar horários do Inter (prévia somente leitura do extrato completo)
+  const handleCheckInterTimes = async () => {
+    setCheckingTimes(true);
+    try {
+      const res = await financialApi.previewInterEnrichedTimes();
+      setPreviewResult(res);
+      if (res.scopeAvailable) {
+        toast.info(
+          `Extrato analítico verificado: ${res.totalReceived} recebidas, ${res.withRealTimestamp} com horário real, ${res.withOfficialTransactionId} com ID oficial, ${res.withoutTimestamp} sem horário.`
+        );
+      } else {
+        toast.error(res.message || 'Permissão insuficiente ou erro ao consultar extrato analítico do Banco Inter.');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Erro ao verificar horários do extrato analítico.');
+    } finally {
+      setCheckingTimes(false);
+    }
+  };
+
+  // Aplicar horários oficiais (somente com identificador bancário oficial único)
+  const handleApplyInterTimes = async () => {
+    setApplyingTimes(true);
+    try {
+      const res = await financialApi.applyInterEnrichedTimes();
+      if (res.success) {
+        toast.success(
+          `Horários oficiais aplicados: ${res.updatedCount} movimentações atualizadas. (${res.skippedCount} ignoradas, ${res.ambiguousCount} ambíguas)`
+        );
+        await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
+      } else {
+        toast.error(res.message || 'Não foi possível aplicar os horários oficiais.');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Falha ao aplicar horários oficiais.');
+    } finally {
+      setApplyingTimes(false);
     }
   };
 
@@ -755,6 +804,34 @@ export function CaixaMovimentacoes() {
             <span>Gerenciar categorias</span>
           </Button>
 
+          {/* BOTÃO VERIFICAR HORÁRIOS DO INTER (PRÉVIA SOMENTE LEITURA) */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCheckInterTimes}
+            disabled={checkingTimes || applyingTimes}
+            className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 text-xs gap-1.5 h-8"
+            title="Consulta o extrato completo analítico sem gravar nada e apresenta contadores de horários reais disponíveis"
+          >
+            <Clock className={`w-3.5 h-3.5 ${checkingTimes ? 'animate-spin text-purple-300' : 'text-purple-400'}`} />
+            <span>{checkingTimes ? 'Consultando analítico...' : 'Verificar Horários Inter'}</span>
+          </Button>
+
+          {/* BOTÃO APLICAR HORÁRIOS OFICIAIS (APLICAÇÃO CONTROLADA) */}
+          {previewResult && previewResult.withRealTimestamp > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleApplyInterTimes}
+              disabled={applyingTimes || checkingTimes}
+              className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 text-xs gap-1.5 h-8"
+              title="Aplica com segurança os horários reais oficiais vinculados exclusivamente por ID bancário oficial comprovado"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${applyingTimes ? 'animate-spin text-emerald-300' : 'text-emerald-400'}`} />
+              <span>{applyingTimes ? 'Aplicando horários...' : 'Aplicar Horários Oficiais'}</span>
+            </Button>
+          )}
+
           {/* BOTÃO REPARAR DUPLICATAS / INTEGRIDADE */}
           <Button
             variant="outline"
@@ -768,27 +845,30 @@ export function CaixaMovimentacoes() {
             <span>{repairingDuplicates ? 'Reparando extrato...' : 'Reparar Integridade'}</span>
           </Button>
 
+          {/* REPROCESSAR EXTRATO (PROTEÇÃO TEMPORÁRIA PAUSADA) */}
           <Button
             variant="outline"
             size="sm"
             onClick={handleReprocessInter}
-            disabled={reprocessingInter || syncingInter || repairingDuplicates}
-            className="border-white/10 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800 text-xs gap-1.5 h-8"
-            title="Reprocessa e corrige datas e direções (Crédito/Débito) das movimentações já importadas sem duplicar"
+            disabled={true}
+            className="border-white/5 bg-zinc-900/30 text-zinc-500 cursor-not-allowed text-xs gap-1.5 h-8 opacity-60"
+            title="Atualização temporariamente pausada para validação de integridade do extrato."
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${reprocessingInter ? 'animate-spin text-zinc-300' : 'text-zinc-400'}`} />
-            <span>{reprocessingInter ? 'Reprocessando...' : 'Reprocessar Extrato'}</span>
+            <RefreshCw className="w-3.5 h-3.5 text-zinc-500" />
+            <span>Reprocessar Extrato</span>
           </Button>
 
+          {/* SINCRONIZAR INTER PJ (PROTEÇÃO TEMPORÁRIA PAUSADA) */}
           <Button
             variant="outline"
             size="sm"
             onClick={handleSyncInter}
-            disabled={syncingInter || reprocessingInter}
-            className="border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20 text-xs gap-1.5 h-8"
+            disabled={true}
+            className="border-orange-500/20 bg-orange-500/5 text-orange-400/50 cursor-not-allowed text-xs gap-1.5 h-8 opacity-60"
+            title="Atualização temporariamente pausada para validação de integridade do extrato."
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${syncingInter ? 'animate-spin text-orange-400' : 'text-orange-400'}`} />
-            <span>{syncingInter ? 'Sincronizando Inter...' : 'Sincronizar Inter PJ'}</span>
+            <RefreshCw className="w-3.5 h-3.5 text-orange-400/50" />
+            <span>Sincronizar Inter PJ</span>
           </Button>
         </div>
       </div>
@@ -1816,7 +1896,7 @@ export function CaixaMovimentacoes() {
                           </div>
                           <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] pt-0.5">
                             <Clock className="w-3 h-3 text-zinc-600" />
-                            <span>Horário indisponível nesta consulta do Banco Inter</span>
+                            <span>Horário ainda não consultado no extrato completo</span>
                           </div>
                         </div>
                       )}

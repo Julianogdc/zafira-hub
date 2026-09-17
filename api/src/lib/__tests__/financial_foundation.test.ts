@@ -4009,6 +4009,161 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(postRes.statusCode, 404, 'POST deve ser rejeitado com 404 Not Found');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 23. Horário Real do Banco Inter PJ (GET /banking/v2/extrato/completo)
+  // ---------------------------------------------------------------------------
+  await t.test('23. Extrato Completo e Horário Real do Banco Inter PJ', async (tSub) => {
+    // 23.1 Chamada GET ao extrato completo e BANK_WRITE_FORBIDDEN
+    await tSub.test('23.1 Extrato completo opera estritamente via GET e rejeita escrita', async () => {
+      const client = new InterClient();
+
+      // Tentativa de escrita bancária direta via POST deve falhar com BANK_WRITE_FORBIDDEN (405)
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource('POST', '/banking/v2/extrato/completo');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+          assert.strictEqual(err.statusCode, 405);
+          return true;
+        }
+      );
+
+      // Validação de intervalo máximo de 90 dias
+      await assert.rejects(
+        async () => {
+          await client.getCompleteStatement('2026-01-01', '2026-06-01');
+        },
+        (err: any) => {
+          assert.strictEqual(err.code, 'RANGE_EXCEEDED');
+          assert.strictEqual(err.statusCode, 400);
+          return true;
+        }
+      );
+    });
+
+    // 23.2 Prévia somente leitura sem efeitos colaterais de escrita
+    await tSub.test('23.2 Prévia somente leitura calcula contadores sem gravar nada', async () => {
+      const mockItems = [
+        {
+          idTransacao: 'tx-inter-real-1',
+          dataHoraMovimento: '2026-09-17T14:32:10.500',
+          tipoOperacao: 'C',
+          tipoTransacao: 'PIX',
+          valor: 1500,
+          titulo: 'Pix Recebido',
+        },
+        {
+          idTransacao: 'tx-inter-real-2',
+          dataHoraMovimento: '2026-09-17 12:00:00', // técnico, não deve contar como real
+          tipoOperacao: 'D',
+          tipoTransacao: 'TARIFA',
+          valor: 10,
+          titulo: 'Tarifa de Conta',
+        },
+        {
+          // Sem ID oficial e sem dataHoraMovimento
+          dataEntrada: '2026-09-17',
+          tipoOperacao: 'D',
+          tipoTransacao: 'DEBITO',
+          valor: 50,
+          titulo: 'Lançamento Básico',
+        },
+      ];
+
+      const mockClient: any = {
+        getCompleteStatement: async () => mockItems,
+      };
+
+      let writeAttempted = false;
+      const mockPrisma: any = {
+        financialTransaction: {
+          aggregate: async () => ({ _min: { occurredAt: null }, _max: { occurredAt: null } }),
+          findMany: async () => [],
+          update: async () => { writeAttempted = true; },
+          create: async () => { writeAttempted = true; },
+          delete: async () => { writeAttempted = true; },
+        },
+      };
+
+      const service = new InterService(mockClient, mockPrisma);
+      const preview = await service.previewEnrichedTimes('org-test');
+
+      assert.strictEqual(preview.totalReceived, 3);
+      assert.strictEqual(preview.withOfficialTransactionId, 2);
+      assert.strictEqual(preview.withRealTimestamp, 1);
+      assert.strictEqual(preview.withoutTimestamp, 2);
+      assert.strictEqual(preview.scopeAvailable, true);
+      assert.strictEqual(writeAttempted, false, 'Prévia nunca deve gravar no banco');
+    });
+
+    // 23.3 Aplicação estrita somente por identificador oficial sem criar nem deletar registros
+    await tSub.test('23.3 Aplicação vincula somente por ID oficial e preserva integridade', async () => {
+      const mockItems = [
+        {
+          idTransacao: 'official-id-999',
+          dataHoraMovimento: '2026-09-17T15:45:00.000Z',
+          valor: 2500,
+          titulo: 'Pix Recebido Cliente',
+        },
+        {
+          idTransacao: 'official-id-inexistente',
+          dataHoraMovimento: '2026-09-17T16:00:00.000Z',
+          valor: 100,
+          titulo: 'Não existe no banco',
+        },
+      ];
+
+      const localTx = {
+        id: 'tx-local-1',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        externalReference: 'official-id-999',
+        occurredAt: new Date('2026-09-17T12:00:00Z'),
+        datePrecision: 'DATE_ONLY',
+        amount: 2500,
+        categoryId: 'cat-honorarios',
+        clientId: 'cli-biolab',
+        rawPayload: { idTransacao: 'official-id-999', titulo: 'PIX RECEBIDO CLIENTE' },
+      };
+
+      const mockClient: any = {
+        getCompleteStatement: async () => mockItems,
+      };
+
+      let updateData: any = null;
+      let created = false;
+      let deleted = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          aggregate: async () => ({ _min: { occurredAt: null }, _max: { occurredAt: null } }),
+          findMany: async () => [localTx],
+          update: async (args: any) => {
+            updateData = args.data;
+            return { ...localTx, ...args.data };
+          },
+          create: async () => { created = true; },
+          delete: async () => { deleted = true; },
+        },
+      };
+
+      const service = new InterService(mockClient, mockPrisma);
+      const res = await service.applyEnrichedTimes('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.updatedCount, 1);
+      assert.strictEqual(res.skippedCount, 1);
+      assert.strictEqual(res.ambiguousCount, 0);
+      assert.strictEqual(created, false, 'Nenhuma transação pode ser criada');
+      assert.strictEqual(deleted, false, 'Nenhuma transação pode ser deletada');
+      assert.ok(updateData, 'Deve ter atualizado o registro correspondente');
+      assert.strictEqual(updateData.datePrecision, 'DATETIME');
+      assert.strictEqual(updateData.occurredAt.toISOString(), '2026-09-17T15:45:00.000Z');
+      assert.strictEqual(updateData.rawPayload.interTransactionId, 'official-id-999');
+    });
+  });
 });
 
 
