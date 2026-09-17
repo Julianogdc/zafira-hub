@@ -98,37 +98,30 @@ export class InterService {
       };
     }
 
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const thirtyDaysAgoStr = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+
+    const startDate = options?.startDate || thirtyDaysAgoStr;
+    const endDate = options?.endDate || todayStr;
+
     try {
-      // 2. Consulta saldo atual (se autorizado pelo escopo contratado)
-      const now = new Date();
-      let disponivel = Number(account.currentBalance);
+      // 2. Consulta extrato bancário PRIMEIRO.
+      // Se houver qualquer falha de autenticação OAuth ou rede, NENHUMA mutação em financialAccount ocorre.
+      const items = await this.client.getStatement(startDate, endDate);
+
+      // 3. Consulta saldo atual (opcional, se autorizado pelo escopo contratado)
+      let disponivel: number | undefined;
       try {
         const balances = await this.client.getBalances();
-        if (typeof balances.disponivel === 'number') {
+        if (typeof balances?.disponivel === 'number') {
           disponivel = balances.disponivel;
         }
       } catch (balErr: any) {
-        // Escopo padrão mínimo 'extrato.read' não inclui 'saldo.read' sem autorização específica no Internet Banking
+        // Escopo padrão mínimo 'extrato.read' não inclui 'saldo.read' sem autorização específica
         console.warn('[InterService] Consulta de saldo ignorada ou não autorizada no escopo atual:', balErr?.message || balErr);
       }
 
-      await this.prisma.financialAccount.update({
-        where: { id: account.id },
-        data: {
-          currentBalance: disponivel,
-          balanceAsOf: now,
-          lastSyncedAt: now,
-        },
-      });
-
-      // 3. Consulta extrato bancário
-      const todayStr = now.toISOString().slice(0, 10);
-      const thirtyDaysAgoStr = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-
-      const startDate = options?.startDate || thirtyDaysAgoStr;
-      const endDate = options?.endDate || todayStr;
-
-      const items = await this.client.getStatement(startDate, endDate);
       let syncedTransactions = 0;
 
       for (const item of items) {
@@ -195,37 +188,50 @@ export class InterService {
       const recService = new FinancialReconciliationService(this.prisma);
       const reconcileRes = await recService.reconcileTransfers(organizationId);
 
+      // 5. Atualiza a conta no banco SOMENTE AGORA após sucesso comprovado da sincronização
+      const updateData: any = {
+        lastSyncedAt: now,
+      };
+      if (typeof disponivel === 'number') {
+        updateData.currentBalance = disponivel;
+        updateData.balanceAsOf = now;
+      }
+
+      const updatedAccount = await this.prisma.financialAccount.update({
+        where: { id: account.id },
+        data: updateData,
+      });
+
       return {
         success: true,
         account: {
-          id: account.id,
-          name: account.name,
-          balance: disponivel,
-          balanceAsOf: now.toISOString(),
+          id: updatedAccount.id,
+          name: updatedAccount.name,
+          balance: Number(updatedAccount.currentBalance),
+          balanceAsOf: updatedAccount.balanceAsOf ? updatedAccount.balanceAsOf.toISOString() : null,
         },
         syncedTransactions,
         syncedCount: syncedTransactions,
         autoMatchedTransfers: reconcileRes.autoMatched,
         reviewTransfers: reconcileRes.reviewCount,
-        timestamp: new Date().toISOString(),
+        timestamp: now.toISOString(),
       };
     } catch (err: any) {
-      if (err instanceof InterIntegrationError && err.code === 'INTER_NOT_CONFIGURED') {
-        return {
-          success: false,
-          code: 'INTER_NOT_CONFIGURED',
-          message: err.message,
-          account: {
-            id: account.id,
-            name: account.name,
-            balance: Number(account.currentBalance),
-            balanceAsOf: account.balanceAsOf ? account.balanceAsOf.toISOString() : null,
-          },
-          syncedTransactions: 0,
-          timestamp: new Date().toISOString(),
-        };
-      }
-      throw err;
+      console.error('[InterService] Falha na sincronização do Banco Inter:', err?.message || err);
+      // NUNCA atualiza lastSyncedAt nem força saldo zero em caso de falha
+      return {
+        success: false,
+        code: err.code || 'INTER_SYNC_FAILED',
+        message: err.message || 'Falha ao sincronizar com Banco Inter PJ.',
+        account: {
+          id: account.id,
+          name: account.name,
+          balance: Number(account.currentBalance),
+          balanceAsOf: account.balanceAsOf ? account.balanceAsOf.toISOString() : null,
+        },
+        syncedTransactions: 0,
+        timestamp: new Date().toISOString(),
+      };
     }
   }
 }

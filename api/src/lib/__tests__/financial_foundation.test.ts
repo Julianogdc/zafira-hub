@@ -379,6 +379,182 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   });
 
   // ---------------------------------------------------------------------------
+  // 2.2 Conformidade do formato OAuth e prevenção estrita de falso saldo zero
+  // ---------------------------------------------------------------------------
+  await t.test('2.2 Conformidade OAuth (urlencoded + Accept json) e proteção contra falso saldo zero', async (tSub) => {
+    const originalFetch = globalThis.fetch;
+    tSub.afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    // 1. Validar que o pedido OAuth envia exatamente os 4 campos no corpo urlencoded e Accept: application/json
+    await tSub.test('1. Requisição OAuth serializa os quatro campos urlencoded e envia Accept: application/json', async () => {
+      let capturedUrl = '';
+      let capturedMethod = '';
+      let capturedHeaders: any = null;
+      let capturedBody = '';
+
+      globalThis.fetch = (async (url: any, opts: any) => {
+        capturedUrl = String(url);
+        capturedMethod = opts.method;
+        capturedHeaders = opts.headers;
+        capturedBody = opts.body;
+
+        return new Response(
+          JSON.stringify({
+            access_token: 'valid-mock-token-abc',
+            expires_in: 3600,
+            token_type: 'Bearer',
+            scope: 'extrato.read',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }) as any;
+
+      const client = new InterClient({
+        clientId: 'my-inter-client-id',
+        clientSecret: 'my-inter-client-secret',
+        crtBase64: Buffer.from('FAKE_CRT').toString('base64'),
+        keyBase64: Buffer.from('FAKE_KEY').toString('base64'),
+        oauthScope: 'extrato.read',
+      });
+
+      const token = await client.getAccessToken();
+      assert.strictEqual(token, 'valid-mock-token-abc');
+      assert.ok(capturedUrl.endsWith('/oauth/v2/token'));
+      assert.strictEqual(capturedMethod, 'POST');
+      assert.strictEqual(capturedHeaders['Content-Type'], 'application/x-www-form-urlencoded');
+      assert.strictEqual(capturedHeaders['Accept'], 'application/json');
+
+      // Verifica os 4 campos no formulário urlencoded
+      const params = new URLSearchParams(capturedBody);
+      assert.strictEqual(params.get('client_id'), 'my-inter-client-id');
+      assert.strictEqual(params.get('client_secret'), 'my-inter-client-secret');
+      assert.strictEqual(params.get('grant_type'), 'client_credentials');
+      assert.strictEqual(params.get('scope'), 'extrato.read');
+    });
+
+    // 2. Falha de sincronização NÃO cria saldo zero nem grava carimbo lastSyncedAt no banco
+    await tSub.test('2. Falha de sincronização não grava lastSyncedAt, não altera saldo para 0 e preserva registros', async () => {
+      let updateAccountCalled = false;
+      let existingTransactionsDeleted = false;
+
+      const mockPrisma: any = {
+        financialAccount: {
+          findFirst: async () => ({
+            id: 'acc-inter-99',
+            organizationId: 'org-test',
+            provider: 'INTER',
+            name: 'Conta Inter PJ',
+            currentBalance: 8500.50, // Saldo anterior preservado
+            balanceAsOf: new Date('2026-09-10'),
+            lastSyncedAt: new Date('2026-09-10'),
+          }),
+          update: async () => {
+            updateAccountCalled = true;
+            throw new Error('update não deveria ter sido chamado em caso de falha de extrato');
+          },
+        },
+        financialTransaction: {
+          delete: () => { existingTransactionsDeleted = true; },
+          deleteMany: () => { existingTransactionsDeleted = true; },
+          upsert: async () => ({}),
+        },
+      };
+
+      // Mock de cliente onde getStatement falha (ex: OAuth 400 ou erro de rede)
+      const failingClient: any = {
+        isConfigured: () => true,
+        getStatement: async () => {
+          throw new Error('Falha simulada na autenticação OAuth ou rede');
+        },
+        getBalances: async () => {
+          throw new Error('Não autorizado');
+        },
+      };
+
+      const service = new InterService(failingClient, mockPrisma);
+      const result = await service.syncAccountAndStatement('org-test');
+
+      assert.strictEqual(result.success, false);
+      assert.strictEqual(updateAccountCalled, false, 'Não deve gravar lastSyncedAt nem zerar saldo no banco');
+      assert.strictEqual(existingTransactionsDeleted, false, 'Não deve apagar transações existentes');
+      assert.strictEqual(result.syncedTransactions, 0);
+      assert.strictEqual(result.account?.balance, 8500.50, 'Saldo original deve permanecer inalterado');
+    });
+
+    // 3. Sucesso na sincronização atualiza lastSyncedAt e insere extrato normalmente
+    await tSub.test('3. Sucesso na sincronização atualiza lastSyncedAt e registra transações do extrato', async () => {
+      let updatedData: any = null;
+      const upsertedTransactions: any[] = [];
+
+      const mockPrisma: any = {
+        financialAccount: {
+          findFirst: async () => ({
+            id: 'acc-inter-ok',
+            organizationId: 'org-test',
+            provider: 'INTER',
+            name: 'Conta Inter PJ',
+            currentBalance: 0,
+            balanceAsOf: null,
+            lastSyncedAt: null,
+          }),
+          findMany: async () => [
+            { id: 'acc-inter-ok', provider: 'INTER', isActive: true },
+          ],
+          update: async (args: any) => {
+            updatedData = args.data;
+            return { id: 'acc-inter-ok', ...args.data };
+          },
+        },
+        financialTransaction: {
+          upsert: async (args: any) => {
+            upsertedTransactions.push(args.create);
+            return args.create;
+          },
+          findMany: async () => [],
+        },
+        financialCategory: {
+          findMany: async () => [{ id: 'cat-1', name: 'Geral', type: 'INCOME' }],
+          create: async (args: any) => ({ id: 'cat-1', ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        financialTransfer: {
+          create: async () => ({ id: 'tr-1' }),
+        },
+      };
+
+      const successClient: any = {
+        isConfigured: () => true,
+        getStatement: async () => [
+          {
+            dataEntrada: '2026-09-17',
+            tipoOperacao: 'C',
+            tipoTransacao: 'PIX',
+            valor: 1500.0,
+            titulo: 'Pagamento Cliente Teste',
+            idTransacao: 'tx-inter-12345',
+          },
+        ],
+        getBalances: async () => ({ disponivel: 1500.0 }),
+      };
+
+      const service = new InterService(successClient, mockPrisma);
+      const result = await service.syncAccountAndStatement('org-test');
+
+      assert.strictEqual(result.success, true);
+      assert.strictEqual(result.syncedTransactions, 1);
+      assert.ok(updatedData, 'Deve ter atualizado financialAccount');
+      assert.ok(updatedData.lastSyncedAt instanceof Date, 'lastSyncedAt deve ser atualizado para Date');
+      assert.strictEqual(updatedData.currentBalance, 1500.0);
+      assert.strictEqual(upsertedTransactions.length, 1);
+      assert.strictEqual(upsertedTransactions[0].externalId, 'tx-inter-12345');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // 3. Isolamento multitenant estrito por organizationId no FinancialService
   // ---------------------------------------------------------------------------
   await t.test('3. FinancialService filtra estritamente por organizationId', async () => {

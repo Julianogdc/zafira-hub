@@ -272,6 +272,7 @@ export class InterClient {
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
+          Accept: 'application/json',
         },
         body: bodyParams.toString(),
         // @ts-ignore - dispatcher/agent no node fetch
@@ -287,17 +288,24 @@ export class InterClient {
 
         try {
           const rawText = await response.text();
-          if (rawText && rawText.trim().startsWith('{')) {
-            const body = JSON.parse(rawText);
-            const sanitize = (val: unknown) => {
-              if (typeof val !== 'string' && typeof val !== 'number') return undefined;
-              const s = String(val).trim();
-              return s ? s.slice(0, 300) : undefined;
-            };
-            diagError = sanitize(body?.error);
-            diagDescription = sanitize(body?.error_description);
-            diagCode = sanitize(body?.code);
-            diagMessage = sanitize(body?.message);
+          if (rawText) {
+            let body: any = null;
+            try {
+              body = JSON.parse(rawText.trim());
+            } catch {
+              // Resposta não-JSON
+            }
+            if (body && typeof body === 'object') {
+              const sanitize = (val: unknown) => {
+                if (typeof val !== 'string' && typeof val !== 'number') return undefined;
+                const s = String(val).trim();
+                return s ? s.slice(0, 300) : undefined;
+              };
+              diagError = sanitize(body.error);
+              diagDescription = sanitize(body.error_description);
+              diagCode = sanitize(body.code);
+              diagMessage = sanitize(body.message);
+            }
           }
         } catch {
           // Corpo não-JSON ou erro de leitura: o corpo bruto NUNCA é registrado

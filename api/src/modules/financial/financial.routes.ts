@@ -290,6 +290,10 @@ export async function financialRoutes(app: FastifyInstance) {
     const organizationId = getOrganizationId(req);
     const body = (req.body as { startDate?: string; endDate?: string } | undefined) || {};
     const result = await interService.syncAccountAndStatement(organizationId, body);
+    if (!result.success) {
+      const statusCode = result.code === 'INTER_NOT_CONFIGURED' ? 400 : 502;
+      return reply.status(statusCode).send(result);
+    }
     return reply.send(result);
   };
   app.post('/integrations/inter/sync', handleSyncInter);
