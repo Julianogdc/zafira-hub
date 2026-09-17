@@ -280,6 +280,11 @@ enum FinancialCategorizationSource {
   PENDING
 }
 
+enum FinancialDatePrecision {
+  DATE_ONLY
+  DATETIME
+}
+
 enum FinancialTransferStatus {
   UNMATCHED
   REVIEW
@@ -382,6 +387,7 @@ model FinancialTransaction {
   accountId                String
   externalId               String
   occurredAt               DateTime
+  datePrecision            FinancialDatePrecision        @default(DATE_ONLY)
   direction                FinancialTransactionDirection
   kind                     FinancialTransactionKind
   amount                   Decimal                       @db.Decimal(14, 2)

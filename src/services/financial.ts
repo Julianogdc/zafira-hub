@@ -94,6 +94,7 @@ export interface FinancialTransactionItem {
   transferStatus?: FinancialTransferStatus | null;
   pairedTransactionId?: string | null;
   isConciliated?: boolean;
+  datePrecision?: 'DATE_ONLY' | 'DATETIME';
   rawPayload?: any;
 }
 

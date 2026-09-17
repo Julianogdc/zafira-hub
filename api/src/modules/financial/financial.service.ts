@@ -286,6 +286,7 @@ export class FinancialService {
         counterpartyName: t.counterpartyName,
         counterpartyDocument: t.counterpartyDocument,
         externalReference: t.externalReference,
+        datePrecision: (t as any).datePrecision || 'DATE_ONLY',
         categoryId: t.categoryId,
         category: t.category,
         clientId: (t as any).clientId || null,
@@ -295,6 +296,7 @@ export class FinancialService {
         categorizationSource: t.categorizationSource,
         categorizationConfidence: t.categorizationConfidence ? Number(t.categorizationConfidence) : null,
         transfer: t.sourceTransfer || t.destTransfer || null,
+        rawPayload: t.rawPayload,
       })),
       pagination: {
         page,

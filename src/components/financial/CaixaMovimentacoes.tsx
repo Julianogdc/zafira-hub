@@ -185,29 +185,50 @@ export function CaixaMovimentacoes() {
   };
 
   // Extração rigorosa de horário bancário (nunca inventa se o banco não forneceu)
-  const getInterTime = (tx: FinancialTransactionItem | null): string => {
-    if (!tx) return 'Horário não informado pelo banco';
+  const getInterTime = (tx: FinancialTransactionItem | null): string | null => {
+    if (!tx) return null;
+
+    // Se o metadado persistido for explicitamente DATE_ONLY, nunca exibe horário
+    if (tx.datePrecision === 'DATE_ONLY') {
+      return null;
+    }
+
     const raw = tx.rawPayload;
-    if (raw) {
-      const rawTime =
-        raw.dataHoraMovimento ||
-        raw.hora ||
-        raw.horario ||
-        raw.horaMovimento ||
-        raw.dataHoraTransacao;
-      if (typeof rawTime === 'string') {
-        const timeMatch = rawTime.match(/(\d{2}:\d{2}(?::\d{2})?)/);
-        if (timeMatch) return timeMatch[1];
+    if (raw && typeof raw === 'object') {
+      // 1. Hora explícita
+      if (typeof raw.hora === 'string' && raw.hora.trim() && raw.hora.includes(':')) {
+        const m = raw.hora.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+        if (m) return m[1];
+      }
+      if (typeof raw.horaLancamento === 'string' && raw.horaLancamento.trim() && raw.horaLancamento.includes(':')) {
+        const m = raw.horaLancamento.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+        if (m) return m[1];
+      }
+
+      // 2. dataHoraMovimento / dataHoraTransacao
+      const rawDateTime = raw.dataHoraMovimento || raw.dataHoraTransacao || raw.dataHora;
+      if (typeof rawDateTime === 'string') {
+        const trimmed = rawDateTime.trim();
+        const match = trimmed.match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+        if (match) {
+          return match[1];
+        }
       }
     }
-    const dateStr = tx.occurredAt || tx.transactedAt;
-    if (dateStr && typeof dateStr === 'string' && dateStr.includes('T')) {
-      const timePart = dateStr.split('T')[1]?.slice(0, 8);
-      if (timePart && timePart !== '00:00:00') {
-        return timePart;
+
+    // Se marcado como DATETIME e tiver horário real no timestamp diferente de 12:00 e 00:00
+    if (tx.datePrecision === 'DATETIME') {
+      const dateStr = tx.occurredAt || tx.transactedAt;
+      if (dateStr && typeof dateStr === 'string' && dateStr.includes('T')) {
+        const timePart = dateStr.split('T')[1]?.slice(0, 5);
+        if (timePart && timePart !== '12:00' && timePart !== '00:00') {
+          return timePart;
+        }
       }
     }
-    return 'Horário não informado pelo banco';
+
+    // REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou
+    return null;
   };
 
   // Carrega Visão Geral e Categorias
@@ -1753,22 +1774,29 @@ export function CaixaMovimentacoes() {
                       </SheetTitle>
                     </div>
 
-                    {/* Metadados temporais com horário bancário explícito */}
-                    <div className="flex items-center flex-wrap gap-x-4 gap-y-1.5 text-xs text-zinc-400 pt-1 border-t border-white/5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-zinc-500">Data bancária:</span>
-                        <span className="font-mono text-zinc-200">
-                          {formatDate(selectedTx.occurredAt || selectedTx.transactedAt)}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <Clock className={`w-3.5 h-3.5 ${hasTime ? 'text-emerald-400' : 'text-zinc-600'}`} />
-                        {hasTime ? (
-                          <span className="font-mono text-zinc-200">{interTime}</span>
-                        ) : (
-                          <span className="text-zinc-500 italic">Horário não informado pelo banco</span>
-                        )}
-                      </div>
+                    {/* Metadados temporais com precisão bancária oficial */}
+                    <div className="pt-2 border-t border-white/5 space-y-1">
+                      {hasTime ? (
+                        <div className="flex items-center gap-2 text-xs">
+                          <span className="text-zinc-400">Data bancária:</span>
+                          <span className="font-medium text-zinc-200">
+                            {formatDate(selectedTx.occurredAt || selectedTx.transactedAt)} às {interTime}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="space-y-0.5 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="text-zinc-400">Data bancária:</span>
+                            <span className="font-medium text-zinc-200">
+                              {formatDate(selectedTx.occurredAt || selectedTx.transactedAt)}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-zinc-500 italic text-[11px] pt-0.5">
+                            <Clock className="w-3 h-3 text-zinc-600" />
+                            <span>Horário não informado pelo banco</span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </SheetHeader>
                 );

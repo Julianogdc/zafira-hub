@@ -7,6 +7,7 @@ import {
   normalizeInterDirection,
   normalizeInterAmount,
   generateInterExternalId,
+  extractInterDatePrecision,
 } from './inter.normalizer.js';
 
 export interface InterSyncResult {
@@ -140,6 +141,7 @@ export class InterService {
           (item as any).data;
 
         const occurredAt = normalizeInterDate(rawDate);
+        const datePrecision = extractInterDatePrecision(item);
         const direction = normalizeInterDirection(item);
         const amount = normalizeInterAmount(item.valor);
         const externalId = generateInterExternalId(item, occurredAt, direction, amount);
@@ -199,6 +201,7 @@ export class InterService {
         const updateData: any = {
           amount,
           occurredAt,
+          datePrecision,
           direction,
           description,
           counterpartyName,
@@ -230,6 +233,7 @@ export class InterService {
             accountId: account.id,
             externalId,
             occurredAt,
+            datePrecision,
             direction,
             kind,
             amount,
@@ -370,8 +374,11 @@ export class InterService {
         Boolean(tx.sourceTransfer) ||
         Boolean(tx.destTransfer);
 
+      const datePrecision = extractInterDatePrecision(raw);
+
       const updateData: any = {
         occurredAt: normalizedDate,
+        datePrecision,
         direction: normalizedDirection,
         amount: normalizedAmount,
       };

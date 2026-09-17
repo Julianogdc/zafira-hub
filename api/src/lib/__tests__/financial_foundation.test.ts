@@ -16,6 +16,8 @@ import {
   normalizeInterDate,
   normalizeInterDirection,
   normalizeInterAmount,
+  extractInterDatePrecision,
+  extractInterTime,
 } from '../../modules/integrations/inter/inter.normalizer.js';
 import { requireRole } from '../../middleware/auth.js';
 
@@ -3324,6 +3326,135 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
           return true;
         }
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 19. Precisão temporal de data e horário do Banco Inter PJ (4 testes obrigatórios)
+  // ---------------------------------------------------------------------------
+  await t.test('19. Precisão temporal de data e horário do Banco Inter PJ (4 testes obrigatórios)', async (tSub) => {
+    // 19.1 Data sem horário não exibe hora e é classificada como DATE_ONLY
+    await tSub.test('19.1 Data sem horário não exibe hora e é classificada como DATE_ONLY', async () => {
+      const payloadDateOnly = {
+        dataEntrada: '2026-09-17',
+        valor: 1500.0,
+        tipoOperacao: 'C',
+        titulo: 'Pix recebido',
+      };
+
+      const precision = extractInterDatePrecision(payloadDateOnly);
+      assert.strictEqual(precision, 'DATE_ONLY');
+
+      const extractedTime = extractInterTime(payloadDateOnly);
+      assert.strictEqual(extractedTime, null, 'Data sem horário não pode inventar hora');
+    });
+
+    // 19.2 Data com horário real exibe a hora correta e é classificada como DATETIME
+    await tSub.test('19.2 Data com horário real exibe a hora correta e é classificada como DATETIME', async () => {
+      const payloadDateTime = {
+        dataHoraMovimento: '2026-09-17 14:32:45',
+        valor: 450.0,
+        tipoOperacao: 'D',
+        titulo: 'Pix enviado',
+      };
+
+      const precision = extractInterDatePrecision(payloadDateTime);
+      assert.strictEqual(precision, 'DATETIME');
+
+      const extractedTime = extractInterTime(payloadDateTime);
+      assert.strictEqual(extractedTime, '14:32:45');
+
+      const payloadWithHoraField = {
+        dataEntrada: '2026-09-17',
+        hora: '10:15',
+        valor: 300.0,
+        tipoOperacao: 'D',
+      };
+      assert.strictEqual(extractInterDatePrecision(payloadWithHoraField), 'DATETIME');
+      assert.strictEqual(extractInterTime(payloadWithHoraField), '10:15');
+    });
+
+    // 19.3 Horário técnico de normalização (12:00 UTC) nunca aparece para o usuário como informação oficial do Inter
+    await tSub.test('19.3 Horário técnico de normalização (12:00 UTC) nunca aparece como informação oficial', async () => {
+      // String date-only normalizada pelo sistema
+      const normalizedDate = normalizeInterDate('2026-09-17');
+      assert.strictEqual(normalizedDate.toISOString(), '2026-09-17T12:00:00.000Z');
+
+      // Mas o extrator de horário sobre o payload original NÃO inventa 12:00
+      const rawPayload = { dataEntrada: '2026-09-17' };
+      assert.strictEqual(extractInterDatePrecision(rawPayload), 'DATE_ONLY');
+      assert.strictEqual(extractInterTime(rawPayload), null);
+    });
+
+    // 19.4 Reprocessamento dos registros existentes corrige a precisão sem alterar valor, categoria, cliente ou classificação manual
+    await tSub.test('19.4 Reprocessamento corrige datePrecision sem alterar valor, categoria ou cliente', async () => {
+      let state = [
+        {
+          id: 'tx-dateonly',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          datePrecision: 'DATE_ONLY',
+          amount: 500.0,
+          direction: 'CREDIT',
+          kind: 'CUSTOMER_PAYMENT',
+          categoryId: 'cat-clientes',
+          clientId: 'cli-biolab',
+          categorizationSource: 'MANUAL',
+          rawPayload: {
+            dataEntrada: '2026-09-16',
+            valor: 500.0,
+            tipoOperacao: 'C',
+          },
+        },
+        {
+          id: 'tx-datetime',
+          accountId: 'acc-1',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          datePrecision: 'DATE_ONLY', // estava DATE_ONLY, mas o raw tem hora
+          amount: 250.0,
+          direction: 'DEBIT',
+          kind: 'EXPENSE',
+          categoryId: 'cat-fornecedor',
+          clientId: null,
+          categorizationSource: 'RULE',
+          rawPayload: {
+            dataHoraMovimento: '2026-09-16 16:45:00',
+            valor: 250.0,
+            tipoOperacao: 'D',
+          },
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async (args: any) => {
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state[idx] = { ...state[idx], ...args.data };
+            return state[idx];
+          },
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+      const res = await interService.reprocessExistingTransactions();
+
+      assert.strictEqual(res.reprocessedCount, 2);
+      assert.strictEqual(res.updatedCount, 2);
+
+      // tx-dateonly permaneceu DATE_ONLY
+      const tx1 = state.find((s) => s.id === 'tx-dateonly')!;
+      assert.strictEqual(tx1.datePrecision, 'DATE_ONLY');
+      assert.strictEqual(tx1.categoryId, 'cat-clientes');
+      assert.strictEqual(tx1.clientId, 'cli-biolab');
+      assert.strictEqual(tx1.categorizationSource, 'MANUAL');
+      assert.strictEqual(tx1.amount, 500.0);
+
+      // tx-datetime foi corrigida para DATETIME devido ao rawPayload
+      const tx2 = state.find((s) => s.id === 'tx-datetime')!;
+      assert.strictEqual(tx2.datePrecision, 'DATETIME');
+      assert.strictEqual(tx2.categoryId, 'cat-fornecedor');
+      assert.strictEqual(tx2.amount, 250.0);
     });
   });
 });

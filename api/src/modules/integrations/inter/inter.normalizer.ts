@@ -1,4 +1,4 @@
-import { FinancialTransactionDirection } from '@prisma/client';
+import { FinancialTransactionDirection, FinancialDatePrecision } from '@prisma/client';
 
 /**
  * Normalizador robusto de datas do extrato do Banco Inter PJ.
@@ -283,38 +283,71 @@ export function maskDocument(rawDoc?: string | null): string {
 }
 
 /**
+ * Identifica rigorosamente a precisão temporal do lançamento do Banco Inter PJ:
+ * - dataHoraMovimento contendo hora real => DATETIME
+ * - hora ou horario presente e preenchido => DATETIME
+ * - dataMovimento, dataEntrada ou formato somente data (ex: YYYY-MM-DD) => DATE_ONLY
+ * - Horário técnico "12:00:00" nunca é considerado horário real do Inter se a string original for date-only.
+ */
+export function extractInterDatePrecision(item: any): FinancialDatePrecision {
+  if (!item || typeof item !== 'object') return 'DATE_ONLY';
+
+  // 1. Campo explícito de hora preenchido
+  if (typeof item.hora === 'string' && item.hora.trim() && item.hora.includes(':')) {
+    return 'DATETIME';
+  }
+  if (typeof item.horaLancamento === 'string' && item.horaLancamento.trim() && item.horaLancamento.includes(':')) {
+    return 'DATETIME';
+  }
+
+  // 2. Campo dataHoraMovimento / dataHoraTransacao / dataHora
+  const rawDateTime = item.dataHoraMovimento || item.dataHoraTransacao || item.dataHora;
+  if (typeof rawDateTime === 'string') {
+    const trimmed = rawDateTime.trim();
+    // Exige separador de espaço ou T seguido de dígitos de hora
+    const match = trimmed.match(/[ T](\d{2}):(\d{2})/);
+    if (match) {
+      return 'DATETIME';
+    }
+  }
+
+  // 3. Demais casos (dataEntrada, dataMovimento, data, strings YYYY-MM-DD)
+  return 'DATE_ONLY';
+}
+
+/**
  * Extrai o horário informado pelo banco se existir de forma comprovável.
- * Se o banco não tiver informado horário (ex: date-only ou meia-noite padrão), retorna null.
+ * Se o banco não tiver informado horário (ex: date-only ou normalizado), retorna null.
  * REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou.
  */
 export function extractInterTime(rawPayload: any): string | null {
   if (!rawPayload || typeof rawPayload !== 'object') return null;
 
-  const rawCandidate = String(
-    rawPayload.dataHoraMovimento ||
-    rawPayload.dataHora ||
-    rawPayload.horaLancamento ||
-    rawPayload.hora ||
-    ''
-  ).trim();
-
-  if (!rawCandidate) return null;
-
-  // Procura padrão HH:mm ou HH:mm:ss
-  const timeMatch = rawCandidate.match(/(?:[ T]|^)(\d{2}):(\d{2})(?::(\d{2}))?/);
-  if (!timeMatch) return null;
-
-  const hours = parseInt(timeMatch[1], 10);
-  const minutes = parseInt(timeMatch[2], 10);
-
-  // Se for exatamente 00:00 ou 12:00 gerado artificialmente por date-only:
-  // Verifica se o campo original era apenas data sem hora
-  if (rawCandidate.length <= 10 && !rawCandidate.includes(':')) {
+  const precision = extractInterDatePrecision(rawPayload);
+  if (precision !== 'DATETIME') {
     return null;
   }
 
-  if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  // Campo explícito de hora
+  if (typeof rawPayload.hora === 'string' && rawPayload.hora.trim()) {
+    const m = rawPayload.hora.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+    if (m) return m[1];
+  }
+  if (typeof rawPayload.horaLancamento === 'string' && rawPayload.horaLancamento.trim()) {
+    const m = rawPayload.horaLancamento.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+    if (m) return m[1];
+  }
+
+  const rawCandidate = String(
+    rawPayload.dataHoraMovimento ||
+    rawPayload.dataHoraTransacao ||
+    rawPayload.dataHora ||
+    ''
+  ).trim();
+
+  const timeMatch = rawCandidate.match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+  if (timeMatch) {
+    return timeMatch[1];
   }
 
   return null;
