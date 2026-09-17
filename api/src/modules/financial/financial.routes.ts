@@ -350,6 +350,7 @@ export async function financialRoutes(app: FastifyInstance) {
     const organizationId = getOrganizationId(req);
     const body = req.body as {
       categoryId: string;
+      clientId?: string | null;
       matchField: any;
       matchType: any;
       matchValue?: string;
@@ -366,6 +367,7 @@ export async function financialRoutes(app: FastifyInstance) {
     try {
       const rule = await categoryService.createCategoryRule(organizationId, {
         categoryId: body.categoryId,
+        clientId: body.clientId,
         matchField: body.matchField,
         matchType: body.matchType,
         matchValue: matchVal,
@@ -454,8 +456,8 @@ export async function financialRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string };
 
     try {
-      const res = await categoryService.applyRuleRetroactively(organizationId, id);
-      return reply.send({ success: true, ...res });
+      const result = await categoryService.applyRuleRetroactively(organizationId, id);
+      return reply.send({ success: true, ...result });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
     }
@@ -465,13 +467,14 @@ export async function financialRoutes(app: FastifyInstance) {
 
   /**
    * PATCH /financial/transactions/:id/category
-   * Edição e categorização rápida de uma transação (criação opcional de regra)
+   * Atualiza manualmente a categoria e/ou cliente de uma transação (MEMBER, MANAGER, ADMIN)
    */
   const handleUpdateCategory = async (req: FastifyRequest, reply: FastifyReply) => {
     const organizationId = getOrganizationId(req);
     const { id } = req.params as { id: string };
     const body = req.body as {
-      categoryId: string;
+      categoryId?: string;
+      clientId?: string | null;
       createRule?: boolean;
       rulePattern?: string;
       ruleField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
@@ -479,23 +482,28 @@ export async function financialRoutes(app: FastifyInstance) {
       rulePriority?: number;
     };
 
-    if (!body || !body.categoryId) {
-      return reply.status(400).send({ error: 'categoryId é obrigatório' });
+    if (!body || (!body.categoryId && body.clientId === undefined)) {
+      return reply.status(400).send({ error: 'categoryId ou clientId é obrigatório' });
     }
 
-    const updated = await financialService.updateTransactionCategory(
-      organizationId,
-      id,
-      {
-        categoryId: body.categoryId,
-        createRule: body.createRule,
-        rulePattern: body.rulePattern,
-        ruleMatchField: body.ruleField,
-        ruleMatchType: body.ruleMatchType,
-        rulePriority: body.rulePriority,
-      }
-    );
-    return reply.send(updated);
+    try {
+      const updated = await financialService.updateTransactionCategory(
+        organizationId,
+        id,
+        {
+          categoryId: body.categoryId,
+          clientId: body.clientId,
+          createRule: body.createRule,
+          rulePattern: body.rulePattern,
+          ruleMatchField: body.ruleField,
+          ruleMatchType: body.ruleMatchType,
+          rulePriority: body.rulePriority,
+        }
+      );
+      return reply.send(updated);
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
   };
   app.patch('/financial/transactions/:id/category', handleUpdateCategory);
   app.patch('/api/financial/transactions/:id/category', handleUpdateCategory);

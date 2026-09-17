@@ -26,6 +26,8 @@ import {
   Eye,
   Sliders,
   Settings,
+  UserCheck,
+  User,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -56,6 +58,7 @@ import {
   FinancialCategoryRuleItem,
   FinancialAccountSummary,
 } from '@/services/financial';
+import { clientsService, HubClient } from '@/services/clients';
 import { toast } from 'sonner';
 
 export function CaixaMovimentacoes() {
@@ -64,6 +67,7 @@ export function CaixaMovimentacoes() {
   const [transactions, setTransactions] = useState<FinancialTransactionItem[]>([]);
   const [categories, setCategories] = useState<FinancialCategoryItem[]>([]);
   const [categoryRules, setCategoryRules] = useState<FinancialCategoryRuleItem[]>([]);
+  const [clients, setClients] = useState<HubClient[]>([]);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [totalPages, setTotalPages] = useState<number>(1);
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -87,6 +91,8 @@ export function CaixaMovimentacoes() {
   const [editModalOpen, setEditModalOpen] = useState<boolean>(false);
   const [selectedTx, setSelectedTx] = useState<FinancialTransactionItem | null>(null);
   const [newCategoryId, setNewCategoryId] = useState<string>('');
+  const [selectedClientId, setSelectedClientId] = useState<string>('');
+  const [teachFutureClientRule, setTeachFutureClientRule] = useState<boolean>(true);
   const [createRule, setCreateRule] = useState<boolean>(true);
   const [rulePattern, setRulePattern] = useState<string>('');
   const [ruleField, setRuleField] = useState<'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT'>('DESCRIPTION');
@@ -218,6 +224,12 @@ export function CaixaMovimentacoes() {
   }, [loadTransactions]);
 
   useEffect(() => {
+    clientsService.listClients()
+      .then((data) => setClients(Array.isArray(data) ? data : []))
+      .catch((err) => console.error('Erro ao carregar clientes:', err));
+  }, []);
+
+  useEffect(() => {
     if (categoriesModalOpen && activeTab === 'rules') {
       loadRules();
     }
@@ -271,34 +283,59 @@ export function CaixaMovimentacoes() {
   // Abrir Modal de Edição Rápida da Transação
   const openEditCategory = (tx: FinancialTransactionItem) => {
     setSelectedTx(tx);
-    setNewCategoryId(tx.category?.id || '');
+    const isCredit = tx.direction === 'CREDIT' || (tx.direction as string) === 'INCOME';
+
+    let initialCatId = tx.category?.id || (tx as any).categoryId || '';
+    if (!initialCatId || tx.category?.name === 'Para revisar') {
+      if (isCredit) {
+        const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
+        if (revCat) initialCatId = revCat.id;
+      }
+    }
+    setNewCategoryId(initialCatId);
+
+    // Cliente vinculado
+    setSelectedClientId(tx.clientId || tx.client?.id || '');
+    setTeachFutureClientRule(true);
+
     setRulePattern(tx.counterpartyName || tx.description || '');
-    setRuleField(tx.counterpartyName ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
-    setRuleMatchType('CONTAINS');
-    setRulePriority(20);
+    setRuleField(tx.counterpartyDocument ? 'COUNTERPARTY_DOCUMENT' : tx.counterpartyName ? 'COUNTERPARTY_NAME' : 'DESCRIPTION');
+    setRuleMatchType(tx.counterpartyDocument ? 'EXACT' : 'CONTAINS');
+    setRulePriority(25);
     setCreateRule(true);
     setEditModalOpen(true);
   };
 
-  // Salvar Categoria da Transação
+  // Salvar Categoria e Cliente da Transação
   const handleSaveCategory = async () => {
-    if (!selectedTx || !newCategoryId) return;
+    if (!selectedTx) return;
     setSavingCategory(true);
     try {
+      const isCredit = selectedTx.direction === 'CREDIT' || (selectedTx.direction as string) === 'INCOME';
+      const shouldCreateRule = (selectedClientId && teachFutureClientRule) ? true : createRule;
+
+      let catIdToSend = newCategoryId;
+      if (!catIdToSend && isCredit) {
+        const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
+        if (revCat) catIdToSend = revCat.id;
+      }
+
       await financialApi.updateTransactionCategory(selectedTx.id, {
-        categoryId: newCategoryId,
-        createRule,
-        rulePattern: createRule ? rulePattern : undefined,
-        ruleField: createRule ? ruleField : undefined,
-        ruleMatchType: createRule ? ruleMatchType : undefined,
-        rulePriority: createRule ? rulePriority : undefined,
+        categoryId: catIdToSend || undefined,
+        clientId: selectedClientId || null,
+        createRule: shouldCreateRule,
+        rulePattern: shouldCreateRule ? (rulePattern || selectedTx.counterpartyName || selectedTx.description) : undefined,
+        ruleField: shouldCreateRule ? ruleField : undefined,
+        ruleMatchType: shouldCreateRule ? ruleMatchType : undefined,
+        rulePriority: shouldCreateRule ? rulePriority : undefined,
+        ruleLinkClient: Boolean(selectedClientId),
       });
-      toast.success('Categoria atualizada com sucesso!');
+      toast.success('Classificação e cliente atualizados com sucesso!');
       setEditModalOpen(false);
       await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
     } catch (err: any) {
-      console.error('Erro ao atualizar categoria:', err);
-      toast.error(err.response?.data?.error || 'Erro ao salvar categoria.');
+      console.error('Erro ao atualizar categoria e cliente:', err);
+      toast.error(err.response?.data?.error || 'Erro ao salvar classificação.');
     } finally {
       setSavingCategory(false);
     }
@@ -419,6 +456,7 @@ export function CaixaMovimentacoes() {
     if (rule) {
       setEditingRuleId(rule.id);
       setFormRuleCatId(rule.categoryId);
+      setFormRuleClientId(rule.clientId || '');
       setFormRuleField(rule.matchField);
       setFormRuleType(rule.matchType);
       setFormRuleValue(rule.matchValueNormalized);
@@ -427,6 +465,7 @@ export function CaixaMovimentacoes() {
     } else {
       setEditingRuleId(null);
       setFormRuleCatId(categories[0]?.id || '');
+      setFormRuleClientId('');
       setFormRuleField('DESCRIPTION');
       setFormRuleType('CONTAINS');
       setFormRuleValue('');
@@ -468,6 +507,7 @@ export function CaixaMovimentacoes() {
       if (editingRuleId) {
         await financialApi.updateCategoryRule(editingRuleId, {
           categoryId: formRuleCatId,
+          clientId: formRuleClientId || null,
           matchField: formRuleField,
           matchType: formRuleType,
           matchValueNormalized: formRuleValue.trim(),
@@ -478,6 +518,7 @@ export function CaixaMovimentacoes() {
       } else {
         await financialApi.createCategoryRule({
           categoryId: formRuleCatId,
+          clientId: formRuleClientId || null,
           matchField: formRuleField,
           matchType: formRuleType,
           matchValue: formRuleValue.trim(),
@@ -853,6 +894,22 @@ export function CaixaMovimentacoes() {
                             )}
                           </div>
                         )}
+                        {/* Vínculo ou Sugestão de Cliente */}
+                        {tx.client ? (
+                          <div className="text-[11px] text-emerald-400 font-medium flex items-center gap-1 mt-1">
+                            <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>Cliente: <strong>{tx.client.name}</strong></span>
+                          </div>
+                        ) : tx.suggestedClient ? (
+                          <div
+                            className="text-[11px] text-amber-300 font-medium flex items-center gap-1 mt-1 cursor-pointer hover:underline"
+                            onClick={() => openEditCategory(tx)}
+                            title="Clique para revisar e confirmar o cliente sugerido"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                            <span>Sugestão: {tx.suggestedClient.name}</span>
+                          </div>
+                        ) : null}
                       </td>
 
                       {/* Categoria & Origem */}
@@ -1141,6 +1198,11 @@ export function CaixaMovimentacoes() {
                         <div className="text-zinc-400 flex items-center gap-1 text-[11px]">
                           <span>→ Categoria:</span>
                           <span className="text-zinc-200 font-medium">{rule.category?.name || 'Não definida'}</span>
+                          {rule.client && (
+                            <Badge variant="outline" className="ml-2 text-[10px] bg-emerald-950/40 border-emerald-500/30 text-emerald-300">
+                              Cliente: {rule.client.name}
+                            </Badge>
+                          )}
                         </div>
                       </div>
 
@@ -1424,6 +1486,44 @@ export function CaixaMovimentacoes() {
               </div>
             </div>
 
+            <div className="space-y-1">
+              <div className="flex items-center justify-between">
+                <label className="text-zinc-400">Vincular a Cliente (Opcional - para receitas)</label>
+                {formRuleClientId && (
+                  <button
+                    type="button"
+                    onClick={() => setFormRuleClientId('')}
+                    className="text-[10px] text-zinc-400 hover:text-zinc-200 underline"
+                  >
+                    Remover cliente
+                  </button>
+                )}
+              </div>
+              <Select
+                value={formRuleClientId || 'NONE'}
+                onValueChange={(val) => {
+                  const chosen = val === 'NONE' ? '' : val;
+                  setFormRuleClientId(chosen);
+                  if (chosen && (!formRuleCatId || categories.find((c) => c.id === formRuleCatId)?.name === 'Para revisar')) {
+                    const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
+                    if (revCat) setFormRuleCatId(revCat.id);
+                  }
+                }}
+              >
+                <SelectTrigger className="h-8 bg-zinc-900 border-white/10 text-xs text-zinc-200">
+                  <SelectValue placeholder="Nenhum cliente (apenas categoria)" />
+                </SelectTrigger>
+                <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200 max-h-56">
+                  <SelectItem value="NONE">Nenhum cliente</SelectItem>
+                  {clients.map((cli) => (
+                    <SelectItem key={cli.id} value={cli.id}>
+                      {cli.name} {cli.document ? `(${cli.document})` : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="pt-2 border-t border-white/5 flex items-center justify-between">
               <Button
                 type="button"
@@ -1504,8 +1604,103 @@ export function CaixaMovimentacoes() {
                 <div className="text-emerald-400 font-medium">{formatBRL(selectedTx.amount)}</div>
               </div>
 
+              {/* Banner de Sugestão de Cliente (quando nome coincidir) */}
+              {selectedTx.suggestedClient && !selectedClientId && (
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-amber-200">Sugestão de Cliente Encontrada</div>
+                      <div className="text-[11px] text-amber-300/80">
+                        Nome da contraparte coincide exatamente com <strong>{selectedTx.suggestedClient.name}</strong>
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setSelectedClientId(selectedTx.suggestedClient!.id);
+                      const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
+                      if (revCat) setNewCategoryId(revCat.id);
+                    }}
+                    className="h-7 text-xs bg-amber-500/20 text-amber-200 border border-amber-500/40 hover:bg-amber-500/30 shrink-0"
+                  >
+                    Confirmar {selectedTx.suggestedClient.name}
+                  </Button>
+                </div>
+              )}
+
+              {/* Seletor de Cliente */}
               <div className="space-y-1.5">
-                <label className="font-medium text-zinc-300">Nova Categoria</label>
+                <div className="flex items-center justify-between">
+                  <label className="font-medium text-zinc-300 flex items-center gap-1.5">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    Cliente Vinculado (Opcional)
+                  </label>
+                  {selectedClientId && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedClientId('')}
+                      className="text-[10px] text-zinc-400 hover:text-zinc-200 underline"
+                    >
+                      Remover cliente
+                    </button>
+                  )}
+                </div>
+                <Select
+                  value={selectedClientId || 'NONE'}
+                  onValueChange={(val) => {
+                    const chosenId = val === 'NONE' ? '' : val;
+                    setSelectedClientId(chosenId);
+                    if (chosenId && (!newCategoryId || categories.find((c) => c.id === newCategoryId)?.name === 'Para revisar')) {
+                      const revCat = categories.find((c) => c.name.toLowerCase().includes('receita de cliente'));
+                      if (revCat) setNewCategoryId(revCat.id);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-9 bg-zinc-900/50 border-white/10 text-xs text-zinc-200">
+                    <SelectValue placeholder="Selecione um cliente (ex: Biolab)" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200 max-h-56">
+                    <SelectItem value="NONE">Nenhum cliente (manter desvinculado)</SelectItem>
+                    {clients.map((cli) => (
+                      <SelectItem key={cli.id} value={cli.id}>
+                        {cli.name} {cli.document ? `(${cli.document})` : ''}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[10px] text-zinc-500">
+                  Separa o tipo de movimentação de quem fez o pagamento.
+                </p>
+              </div>
+
+              {/* Opção de Ensinar Próximos Recebimentos como [Cliente] */}
+              {selectedClientId && (
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-emerald-300 text-xs flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                      Reconhecer próximos recebimentos desta contraparte como{' '}
+                      <strong>{clients.find((c) => c.id === selectedClientId)?.name || 'Cliente'}</strong>
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={teachFutureClientRule}
+                      onChange={(e) => setTeachFutureClientRule(e.target.checked)}
+                      className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
+                    />
+                  </div>
+                  <p className="text-[11px] text-zinc-400">
+                    Cria regra automática vinculando este cliente e a categoria <em>Receita de clientes</em> em créditos futuros semelhantes.
+                  </p>
+                </div>
+              )}
+
+              {/* Categoria */}
+              <div className="space-y-1.5">
+                <label className="font-medium text-zinc-300">Categoria da Movimentação</label>
                 <Select value={newCategoryId} onValueChange={setNewCategoryId}>
                   <SelectTrigger className="h-9 bg-zinc-900/50 border-white/10 text-xs text-zinc-200">
                     <SelectValue placeholder="Selecione uma categoria" />
@@ -1520,70 +1715,73 @@ export function CaixaMovimentacoes() {
                 </Select>
               </div>
 
-              <div className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="font-medium text-zinc-200 flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    Criar regra para próximas movimentações semelhantes
-                  </span>
-                  <input
-                    type="checkbox"
-                    checked={createRule}
-                    onChange={(e) => setCreateRule(e.target.checked)}
-                    className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
-                  />
-                </div>
-
-                {createRule && (
-                  <div className="space-y-2 pt-2 border-t border-white/5">
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <label className="text-[11px] text-zinc-400">Campo de identificação</label>
-                        <Select
-                          value={ruleField}
-                          onValueChange={(val: any) => setRuleField(val)}
-                        >
-                          <SelectTrigger className="h-8 bg-zinc-900 border-white/10 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
-                            <SelectItem value="DESCRIPTION">Descrição da Transação</SelectItem>
-                            <SelectItem value="COUNTERPARTY_NAME">Nome da Contraparte</SelectItem>
-                            <SelectItem value="COUNTERPARTY_DOCUMENT">CPF/CNPJ</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-1">
-                        <label className="text-[11px] text-zinc-400">Tipo de comparação</label>
-                        <Select
-                          value={ruleMatchType}
-                          onValueChange={(val: any) => setRuleMatchType(val)}
-                        >
-                          <SelectTrigger className="h-8 bg-zinc-900 border-white/10 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
-                            <SelectItem value="CONTAINS">Contém o termo</SelectItem>
-                            <SelectItem value="EXACT">Exatamente igual</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-
-                    <div className="space-y-1">
-                      <label className="text-[11px] text-zinc-400">Texto ou termo da regra</label>
-                      <Input
-                        type="text"
-                        value={rulePattern}
-                        onChange={(e) => setRulePattern(e.target.value)}
-                        placeholder="Ex: PNEUTEK ou GOOGLE"
-                        className="h-8 bg-zinc-900 border-white/10 text-xs"
-                      />
-                    </div>
+              {/* Regra Manual Semelhante (se não for cliente com regra ativa) */}
+              {!selectedClientId && (
+                <div className="p-3 rounded-lg bg-zinc-900/40 border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-zinc-200 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                      Criar regra para próximas movimentações semelhantes
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={createRule}
+                      onChange={(e) => setCreateRule(e.target.checked)}
+                      className="rounded border-zinc-700 bg-zinc-900 text-emerald-500 focus:ring-emerald-500"
+                    />
                   </div>
-                )}
-              </div>
+
+                  {createRule && (
+                    <div className="space-y-2 pt-2 border-t border-white/5">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-zinc-400">Campo de identificação</label>
+                          <Select
+                            value={ruleField}
+                            onValueChange={(val: any) => setRuleField(val)}
+                          >
+                            <SelectTrigger className="h-8 bg-zinc-900 border-white/10 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                              <SelectItem value="DESCRIPTION">Descrição da Transação</SelectItem>
+                              <SelectItem value="COUNTERPARTY_NAME">Nome da Contraparte</SelectItem>
+                              <SelectItem value="COUNTERPARTY_DOCUMENT">CPF/CNPJ</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="text-[11px] text-zinc-400">Tipo de comparação</label>
+                          <Select
+                            value={ruleMatchType}
+                            onValueChange={(val: any) => setRuleMatchType(val)}
+                          >
+                            <SelectTrigger className="h-8 bg-zinc-900 border-white/10 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent className="bg-zinc-950 border-white/10 text-zinc-200">
+                              <SelectItem value="CONTAINS">Contém o termo</SelectItem>
+                              <SelectItem value="EXACT">Exatamente igual</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1">
+                        <label className="text-[11px] text-zinc-400">Texto ou termo da regra</label>
+                        <Input
+                          type="text"
+                          value={rulePattern}
+                          onChange={(e) => setRulePattern(e.target.value)}
+                          placeholder="Ex: PNEUTEK ou GOOGLE"
+                          className="h-8 bg-zinc-900 border-white/10 text-xs"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

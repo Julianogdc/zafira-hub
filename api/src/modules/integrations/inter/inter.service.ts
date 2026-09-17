@@ -155,6 +155,7 @@ export class InterService {
           description,
           counterpartyName,
           counterpartyDocument,
+          direction,
         });
 
         // Kind inicial (pode ser refinado para TRANSFER_INTERNAL na reconciliação)
@@ -180,6 +181,8 @@ export class InterService {
             counterpartyDocument,
             externalReference,
             categoryId: cat.categoryId,
+            clientId: cat.clientId || null,
+            suggestedClientId: cat.suggestedClientId || null,
             categorizationSource: cat.categorizationSource,
             categorizationConfidence: cat.categorizationConfidence,
             rawPayload: item as any,
@@ -319,18 +322,22 @@ export class InterService {
         Boolean(tx.sourceTransfer) ||
         Boolean(tx.destTransfer);
 
-      if (!isInternal) {
-        normalizedKind = normalizedDirection === 'CREDIT' ? 'CUSTOMER_PAYMENT' : 'EXPENSE';
+      const updateData: any = {
+        occurredAt: normalizedDate,
+        direction: normalizedDirection,
+        amount: normalizedAmount,
+      };
+
+      if (isInternal) {
+        updateData.kind = 'TRANSFER_INTERNAL';
+        updateData.clientId = null;
+      } else {
+        updateData.kind = normalizedDirection === 'CREDIT' ? 'CUSTOMER_PAYMENT' : 'EXPENSE';
       }
 
       await this.prisma.financialTransaction.update({
         where: { id: tx.id },
-        data: {
-          occurredAt: normalizedDate,
-          direction: normalizedDirection,
-          amount: normalizedAmount,
-          kind: normalizedKind,
-        },
+        data: updateData,
       });
 
       updatedCount += 1;

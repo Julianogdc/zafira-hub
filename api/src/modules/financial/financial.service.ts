@@ -31,6 +31,7 @@ export interface FinancialTransactionsFilters {
   direction?: FinancialTransactionDirection;
   kind?: FinancialTransactionKind;
   categoryId?: string;
+  clientId?: string;
   counterparty?: string;
   status?: string;
   search?: string;
@@ -237,6 +238,10 @@ export class FinancialService {
       }
     }
 
+    if (filters.clientId) {
+      where.clientId = filters.clientId;
+    }
+
     const total = await this.prisma.financialTransaction.count({ where });
     const transactions = await this.prisma.financialTransaction.findMany({
       where,
@@ -246,6 +251,12 @@ export class FinancialService {
         },
         category: {
           select: { id: true, name: true, type: true, color: true },
+        },
+        client: {
+          select: { id: true, name: true, document: true },
+        },
+        suggestedClient: {
+          select: { id: true, name: true },
         },
         sourceTransfer: {
           select: { id: true, status: true, matchReason: true, confirmedAt: true },
@@ -277,6 +288,10 @@ export class FinancialService {
         externalReference: t.externalReference,
         categoryId: t.categoryId,
         category: t.category,
+        clientId: (t as any).clientId || null,
+        client: (t as any).client || null,
+        suggestedClientId: (t as any).suggestedClientId || null,
+        suggestedClient: (t as any).suggestedClient || null,
         categorizationSource: t.categorizationSource,
         categorizationConfidence: t.categorizationConfidence ? Number(t.categorizationConfidence) : null,
         transfer: t.sourceTransfer || t.destTransfer || null,
@@ -291,20 +306,22 @@ export class FinancialService {
   }
 
   /**
-   * Atualização manual de categoria de uma transação.
-   * Registra categorizationSource = MANUAL e preserva description e rawPayload originais.
+   * Atualização manual de categoria e cliente de uma transação.
+   * Registra categorizationSource = MANUAL e limpa suggestedClientId.
    * Opcionalmente cria uma regra de categorização para transações futuras da organização.
    */
   async updateTransactionCategory(
     organizationId: string,
     transactionId: string,
     data: {
-      categoryId: string;
+      categoryId?: string;
+      clientId?: string | null;
       createRule?: boolean;
       ruleMatchField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
       ruleMatchType?: 'CONTAINS' | 'EXACT';
       rulePattern?: string;
       rulePriority?: number;
+      ruleLinkClient?: boolean;
     }
   ) {
     const tx = await this.prisma.financialTransaction.findUnique({
@@ -315,15 +332,34 @@ export class FinancialService {
       throw new Error('Transação financeira não encontrada.');
     }
 
+    const updatePayload: any = {
+      categorizationSource: 'MANUAL',
+      categorizationConfidence: 1.0,
+      suggestedClientId: null, // Limpa sugestão pendente após classificação manual
+    };
+
+    if (data.categoryId) {
+      updatePayload.categoryId = data.categoryId;
+    }
+
+    if (data.clientId !== undefined) {
+      if (data.clientId && this.prisma.client) {
+        const client = await this.prisma.client.findFirst({
+          where: { id: data.clientId, organizationId },
+        });
+        if (!client) throw new Error('Cliente informado não pertence a esta organização.');
+        updatePayload.clientId = data.clientId;
+      } else {
+        updatePayload.clientId = null;
+      }
+    }
+
     const updated = await this.prisma.financialTransaction.update({
       where: { id: transactionId },
-      data: {
-        categoryId: data.categoryId,
-        categorizationSource: 'MANUAL',
-        categorizationConfidence: 1.0,
-      },
+      data: updatePayload,
       include: {
         category: true,
+        client: { select: { id: true, name: true, document: true } },
       },
     });
 
@@ -337,8 +373,17 @@ export class FinancialService {
       }
 
       if (matchVal) {
+        let ruleCatId = data.categoryId || tx.categoryId;
+        if (!ruleCatId) {
+          const catMap = await this.categoryService.ensureDefaultCategories(organizationId);
+          ruleCatId = catMap.get('Receita de clientes') || catMap.get('Receita de cliente') || '';
+        }
+
+        const ruleClientId = data.clientId !== undefined ? data.clientId : (tx as any).clientId;
+
         await this.categoryService.createCategoryRule(organizationId, {
-          categoryId: data.categoryId,
+          categoryId: ruleCatId,
+          clientId: ruleClientId || null,
           matchField: matchField as any,
           matchType: data.ruleMatchType || 'CONTAINS',
           matchValue: matchVal,

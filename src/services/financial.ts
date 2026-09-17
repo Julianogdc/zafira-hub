@@ -51,6 +51,7 @@ export interface FinancialCategoryItem {
 export interface FinancialCategoryRuleItem {
   id: string;
   categoryId: string;
+  clientId?: string | null;
   matchField: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
   matchType: 'CONTAINS' | 'EXACT';
   matchValueNormalized: string;
@@ -62,6 +63,10 @@ export interface FinancialCategoryRuleItem {
     color?: string | null;
     type: string;
   };
+  client?: {
+    id: string;
+    name: string;
+  } | null;
 }
 
 export interface FinancialTransactionItem {
@@ -78,17 +83,23 @@ export interface FinancialTransactionItem {
   description: string;
   counterpartyName: string | null;
   counterpartyDocument: string | null;
+  categoryId?: string | null;
   category: FinancialCategoryItem | null;
+  clientId?: string | null;
+  client?: { id: string; name: string; document?: string | null } | null;
+  suggestedClientId?: string | null;
+  suggestedClient?: { id: string; name: string } | null;
   categorizationSource: FinancialCategorizationSource;
-  transferId: string | null;
-  transferStatus: FinancialTransferStatus | null;
-  pairedTransactionId: string | null;
-  isConciliated: boolean;
+  transferId?: string | null;
+  transferStatus?: FinancialTransferStatus | null;
+  pairedTransactionId?: string | null;
+  isConciliated?: boolean;
 }
 
 export interface FinancialTransactionsParams {
   accountId?: string;
   categoryId?: string;
+  clientId?: string;
   direction?: FinancialTransactionDirection;
   kind?: FinancialTransactionKind;
   pendingCategoryOnly?: boolean;
@@ -110,12 +121,14 @@ export interface FinancialTransactionsResponse {
 }
 
 export interface UpdateCategoryPayload {
-  categoryId: string;
+  categoryId?: string;
+  clientId?: string | null;
   createRule?: boolean;
   rulePattern?: string;
   ruleField?: 'DESCRIPTION' | 'COUNTERPARTY_NAME' | 'COUNTERPARTY_DOCUMENT';
   ruleMatchType?: 'CONTAINS' | 'EXACT';
   rulePriority?: number;
+  ruleLinkClient?: boolean;
 }
 
 export interface SyncLedgerResult {
@@ -214,6 +227,7 @@ export const financialApi = {
 
   createCategoryRule: async (data: {
     categoryId: string;
+    clientId?: string | null;
     matchField: string;
     matchType: string;
     matchValue: string;

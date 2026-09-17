@@ -673,11 +673,11 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
 
     const catService = new FinancialCategoryService(mockPrisma);
     const firstRun = await catService.ensureDefaultCategories('org-test');
-    assert.strictEqual(firstRun.size, 10);
+    assert.strictEqual(firstRun.size, 11);
     assert.strictEqual(created.length, 10);
 
     const secondRun = await catService.ensureDefaultCategories('org-test');
-    assert.strictEqual(secondRun.size, 10);
+    assert.strictEqual(secondRun.size, 11);
     assert.strictEqual(created.length, 10);
   });
 
@@ -2591,6 +2591,357 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
           return true;
         }
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 17. Receitas por Cliente no Caixa Inter PJ (6 testes obrigatórios)
+  // ---------------------------------------------------------------------------
+  await t.test('17. Receitas por Cliente no Caixa Inter PJ (6 testes obrigatórios)', async (tSub) => {
+    // 17.1 Receita categorizada com cliente vinculado: Categoria = tipo da movimentação, Cliente = pessoa/empresa
+    await tSub.test('17.1 Receita categorizada com cliente vinculado (Receita de clientes | Cliente: Biolab)', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME', isDefault: true, organizationId: 'org-1' },
+          ],
+          findFirst: async (args: any) => ({
+            id: 'cat-rec-cli',
+            name: 'Receita de clientes',
+            type: 'INCOME',
+            isDefault: true,
+            organizationId: args.where.organizationId,
+          }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findFirst: async () => null,
+          findMany: async () => [],
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Transação vinculada com categoria 'Receita de clientes' e cliente 'Biolab'
+      const tx = {
+        id: 'tx-biolab-1',
+        amount: 1800.0,
+        direction: 'CREDIT',
+        categoryId: 'cat-rec-cli',
+        category: { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME' },
+        clientId: 'cli-biolab',
+        client: { id: 'cli-biolab', name: 'Biolab', document: '12.345.678/0001-90' },
+      };
+
+      assert.strictEqual(tx.category.name, 'Receita de clientes');
+      assert.strictEqual(tx.client.name, 'Biolab');
+      assert.strictEqual(tx.amount, 1800.0);
+      assert.strictEqual(tx.direction, 'CREDIT');
+      // Garante que a categoria não é o nome do cliente
+      assert.notStrictEqual(tx.category.name, tx.client.name);
+    });
+
+    // 17.2 Identificação automática por documento exato (CPF/CNPJ) vincula cliente da mesma organização com alta confiança (0.98)
+    await tSub.test('17.2 Documento exato (CPF/CNPJ) vincula cliente automaticamente com alta confiança (0.98)', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME', isDefault: true, organizationId: 'org-doc' },
+          ],
+          findFirst: async () => ({
+            id: 'cat-rec-cli',
+            name: 'Receita de clientes',
+            type: 'INCOME',
+            isDefault: true,
+            organizationId: 'org-doc',
+          }),
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findFirst: async (args: any) => {
+            if (args.where.organizationId === 'org-doc' && args.where.document === '12345678000190') {
+              return { id: 'cli-doc-match', name: 'Biolab Farmacêutica', document: '12.345.678/0001-90', organizationId: 'org-doc' };
+            }
+            return null;
+          },
+          findMany: async (args: any) => {
+            if (args.where.organizationId === 'org-doc') {
+              return [{ id: 'cli-doc-match', name: 'Biolab Farmacêutica', document: '12.345.678/0001-90', organizationId: 'org-doc' }];
+            }
+            return [];
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Entrada com documento correspondente exato
+      const result = await catService.categorizeTransaction('org-doc', {
+        counterpartyDocument: '12.345.678/0001-90',
+        counterpartyName: 'BIOLAB FARMACEUTICA LTDA',
+        direction: 'CREDIT',
+        amount: 1800.0,
+      });
+
+      assert.strictEqual(result.clientId, 'cli-doc-match');
+      assert.strictEqual(result.suggestedClientId, null);
+      assert.strictEqual(result.categoryId, 'cat-rec-cli');
+      assert.strictEqual(result.categorizationSource, 'AUTO_RULE');
+      assert.strictEqual(result.categorizationConfidence, 0.98);
+    });
+
+    // 17.3 Nome de contraparte igualdade normalizada gera apenas sugestão (suggestedClientId), NÃO vincula automaticamente (clientId: null)
+    await tSub.test('17.3 Nome com correspondência exata normalizada gera apenas sugestão (clientId: null, suggestedClientId preenchido)', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME', isDefault: true, organizationId: 'org-name' },
+            { id: 'cat-rev', name: 'Para revisar', type: 'EXPENSE', isDefault: true, organizationId: 'org-name' },
+          ],
+          findFirst: async (args: any) => {
+            if (args.where.name === 'Receita de clientes') {
+              return { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME', isDefault: true };
+            }
+            return { id: 'cat-rev', name: 'Para revisar', type: 'EXPENSE', isDefault: true };
+          },
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findFirst: async () => null, // Sem match de documento
+          findMany: async (args: any) => {
+            if (args.where.organizationId === 'org-name') {
+              return [
+                { id: 'cli-biolab-sug', name: 'Biolab Farmacêutica' },
+              ];
+            }
+            return [];
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Entrada com nome que coincide exatamente após normalização ("biolab farmaceutica")
+      const result = await catService.categorizeTransaction('org-name', {
+        counterpartyName: 'BIOLAB FARMACÊUTICA',
+        direction: 'CREDIT',
+        amount: 2500.0,
+      });
+
+      // NÃO vincula automaticamente: clientId deve ser nulo/undefined
+      assert.strictEqual(result.clientId, null);
+      // Apresenta sugestão clara para confirmação
+      assert.strictEqual(result.suggestedClientId, 'cli-biolab-sug');
+      // Movimento permanece para revisar aguardando confirmação do usuário
+      assert.strictEqual(result.categoryId, 'cat-rev');
+      assert.strictEqual(result.categorizationSource, 'PENDING');
+      assert.strictEqual(result.categorizationConfidence, 0.5);
+    });
+
+    // 17.4 Associação manual com "Reconhecer próximos recebimentos" cria regra com clientId e categoria Receita de clientes
+    await tSub.test('17.4 Associação manual com "Reconhecer próximos recebimentos" cria regra com clientId e categoria Receita de clientes', async () => {
+      let createdRuleData: any = null;
+      let updatedTxData: any = null;
+
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rec-cli', name: 'Receita de clientes', type: 'INCOME', isDefault: true, organizationId: 'org-manual' },
+          ],
+          findFirst: async () => ({
+            id: 'cat-rec-cli',
+            name: 'Receita de clientes',
+            type: 'INCOME',
+            isDefault: true,
+          }),
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findFirst: async () => null,
+          create: async (args: any) => {
+            createdRuleData = args.data;
+            return { id: 'rule-future-client', ...args.data };
+          },
+          findMany: async () => [],
+        },
+        financialTransaction: {
+          findUnique: async () => ({
+            id: 'tx-manual-1',
+            organizationId: 'org-manual',
+            counterpartyName: 'PNEUTEK COMERCIO DE PNEUS',
+            counterpartyDocument: '11222333000144',
+            direction: 'CREDIT',
+            suggestedClientId: 'cli-pneutek',
+          }),
+          findFirst: async () => ({
+            id: 'tx-manual-1',
+            organizationId: 'org-manual',
+            counterpartyName: 'PNEUTEK COMERCIO DE PNEUS',
+            counterpartyDocument: '11222333000144',
+            direction: 'CREDIT',
+            suggestedClientId: 'cli-pneutek',
+          }),
+          update: async (args: any) => {
+            updatedTxData = args.data;
+            return { id: 'tx-manual-1', ...args.data };
+          },
+        },
+        client: {
+          findFirst: async (args: any) => {
+            if (args.where.organizationId === 'org-manual' && args.where.id === 'cli-pneutek') {
+              return { id: 'cli-pneutek', name: 'Pneutek', organizationId: 'org-manual' };
+            }
+            return null;
+          },
+        },
+      };
+
+      const financialService = new FinancialService(mockPrisma);
+
+      // Usuário revisa a movimentação, seleciona o cliente Pneutek e marca a opção de ensinar regra futura
+      await financialService.updateTransactionCategory('org-manual', 'tx-manual-1', {
+        categoryId: 'cat-rec-cli',
+        clientId: 'cli-pneutek',
+        createRule: true,
+        rulePattern: 'PNEUTEK COMERCIO DE PNEUS',
+        ruleMatchField: 'COUNTERPARTY_NAME',
+        ruleMatchType: 'CONTAINS',
+      });
+
+      // Transação foi atualizada com clientId e suggestedClientId foi limpo
+      assert.strictEqual(updatedTxData.clientId, 'cli-pneutek');
+      assert.strictEqual(updatedTxData.suggestedClientId, null);
+      assert.strictEqual(updatedTxData.categorizationSource, 'MANUAL');
+
+      // Regra automática criada foi vinculada ao clientId e categoria Receita de clientes
+      assert.ok(createdRuleData);
+      assert.strictEqual(createdRuleData.clientId, 'cli-pneutek');
+      assert.strictEqual(createdRuleData.categoryId, 'cat-rec-cli');
+      assert.strictEqual(createdRuleData.organizationId, 'org-manual');
+    });
+
+    // 17.5 Transferência Asaas -> Inter tem clientId: null, categoria TRANSFER_INTERNAL e não entra como receita operacional
+    await tSub.test('17.5 Transferência Asaas -> Inter: clientId null, TRANSFER_INTERNAL e excluída de receitas operacionais', async () => {
+      const updatedTransactions: any[] = [];
+      const mockPrisma: any = {
+        financialAccount: {
+          findMany: async () => [
+            { id: 'acc-asaas', provider: 'ASAAS', isActive: true },
+            { id: 'acc-inter', provider: 'INTER', isActive: true },
+          ],
+        },
+        financialTransaction: {
+          findMany: async (args: any) => {
+            if (args.where.accountId === 'acc-asaas') {
+              return [{
+                id: 'tx-asaas-debit',
+                organizationId: 'org-transf',
+                accountId: 'acc-asaas',
+                amount: 5000,
+                direction: 'DEBIT',
+                occurredAt: new Date('2026-09-15T10:00:00Z'),
+                description: 'TRANSFERENCIA PARA CONTA BANCARIA',
+                counterpartyName: 'BANCO INTER S.A.',
+              }];
+            }
+            if (args.where.accountId === 'acc-inter') {
+              return [{
+                id: 'tx-inter-credit',
+                organizationId: 'org-transf',
+                accountId: 'acc-inter',
+                amount: 5000,
+                direction: 'CREDIT',
+                occurredAt: new Date('2026-09-15T10:05:00Z'),
+                description: 'TED RECEBIDA ASAAS IP S.A.',
+                counterpartyName: 'ASAAS GESTAO FINANCEIRA INSTITUICAO DE PAGAMENTO S.A.',
+              }];
+            }
+            return [];
+          },
+          update: async (args: any) => {
+            updatedTransactions.push(args);
+            return { id: args.where.id, ...args.data };
+          },
+        },
+        financialTransfer: {
+          findMany: async () => [],
+          findFirst: async () => null,
+          create: async (args: any) => ({ id: 'tr-new', ...args.data }),
+        },
+      };
+
+      const reconciliation = new FinancialReconciliationService(mockPrisma);
+      const res = await reconciliation.reconcileTransfers('org-transf');
+
+      assert.strictEqual(res.autoMatched + res.reviewCount, 1);
+      // Ambas as pontas recebem kind TRANSFER_INTERNAL e clientId: null
+      assert.strictEqual(updatedTransactions.length, 2);
+      for (const updateCall of updatedTransactions) {
+        assert.strictEqual(updateCall.data.kind, 'TRANSFER_INTERNAL');
+        assert.strictEqual(updateCall.data.clientId, null);
+      }
+    });
+
+    // 17.6 Isolamento multi-tenant: jamais vincular ou sugerir cliente de outra organização
+    await tSub.test('17.6 Isolamento multi-tenant: documento idêntico em outra organização NÃO vincula nem sugere cliente', async () => {
+      const mockPrisma: any = {
+        financialCategory: {
+          findMany: async () => [
+            { id: 'cat-rec-cli-org1', name: 'Receita de clientes', type: 'INCOME', isDefault: true, organizationId: 'org-tenant-A' },
+            { id: 'cat-rev-org1', name: 'Para revisar', type: 'EXPENSE', isDefault: true, organizationId: 'org-tenant-A' },
+          ],
+          findFirst: async () => ({
+            id: 'cat-rev-org1',
+            name: 'Para revisar',
+            type: 'EXPENSE',
+            isDefault: true,
+          }),
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          // Cliente existe na org-tenant-B com o mesmo documento
+          findFirst: async (args: any) => {
+            if (args.where.organizationId === 'org-tenant-A') {
+              return null; // Não existe na organização A
+            }
+            if (args.where.organizationId === 'org-tenant-B' && args.where.document === '99888777000166') {
+              return { id: 'cli-org-b', name: 'Empresa Invasora', organizationId: 'org-tenant-B' };
+            }
+            return null;
+          },
+          findMany: async (args: any) => {
+            if (args.where.organizationId === 'org-tenant-A') {
+              return []; // Nenhum cliente na organização A com esse nome
+            }
+            return [{ id: 'cli-org-b', name: 'Empresa Invasora', organizationId: 'org-tenant-B' }];
+          },
+        },
+      };
+
+      const catService = new FinancialCategoryService(mockPrisma);
+
+      // Transação na Org A com documento que pertence à Org B
+      const result = await catService.categorizeTransaction('org-tenant-A', {
+        counterpartyDocument: '99.888.777/0001-66',
+        counterpartyName: 'EMPRESA INVASORA LTDA',
+        direction: 'CREDIT',
+        amount: 5000.0,
+      });
+
+      // Isolamento total: NÃO vincula e NÃO sugere cliente da organização B
+      assert.strictEqual(result.clientId, null);
+      assert.strictEqual(result.suggestedClientId, null);
     });
   });
 });

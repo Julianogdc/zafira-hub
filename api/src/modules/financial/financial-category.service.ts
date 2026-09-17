@@ -13,7 +13,7 @@ export interface DefaultCategoryDef {
 }
 
 export const DEFAULT_SYSTEM_CATEGORIES: DefaultCategoryDef[] = [
-  { name: 'Receita de cliente', type: 'INCOME', color: '#10b981' },
+  { name: 'Receita de clientes', type: 'INCOME', color: '#10b981' },
   { name: 'Produção / Fornecedores', type: 'EXPENSE', color: '#f59e0b' },
   { name: 'Tráfego pago', type: 'EXPENSE', color: '#6366f1' },
   { name: 'Assinaturas e softwares', type: 'EXPENSE', color: '#3b82f6' },
@@ -34,6 +34,14 @@ export function normalizeMatchText(str?: string | null): string {
     .trim();
 }
 
+export interface ClientMatchResult {
+  clientId: string | null;
+  clientConfidence: number | null;
+  clientMatchReason: 'DOCUMENT_EXACT' | 'RULE_EXACT' | null;
+  suggestedClientId: string | null;
+  suggestedClient?: { id: string; name: string } | null;
+}
+
 export class FinancialCategoryService {
   private readonly prisma: typeof defaultPrisma;
 
@@ -52,6 +60,12 @@ export class FinancialCategoryService {
     const categoryMap = new Map<string, string>();
     for (const cat of existing) {
       categoryMap.set(cat.name, cat.id);
+      if (cat.name === 'Receita de cliente' && !categoryMap.has('Receita de clientes')) {
+        categoryMap.set('Receita de clientes', cat.id);
+      }
+      if (cat.name === 'Receita de clientes' && !categoryMap.has('Receita de cliente')) {
+        categoryMap.set('Receita de cliente', cat.id);
+      }
     }
 
     for (const def of DEFAULT_SYSTEM_CATEGORIES) {
@@ -67,6 +81,9 @@ export class FinancialCategoryService {
           },
         });
         categoryMap.set(created.name, created.id);
+        if (created.name === 'Receita de clientes') {
+          categoryMap.set('Receita de cliente', created.id);
+        }
       }
     }
 
@@ -317,11 +334,93 @@ export class FinancialCategoryService {
   }
 
   /**
-   * Categoriza automaticamente uma transação com base nas regras locais da organização.
+   * Identificação segura de cliente por documento ou correspondência exata de nome.
+   * Regras de segurança inegociáveis:
+   * 1. Documento (CPF/CNPJ) idêntico de cliente da mesma organização vincula automaticamente com alta confiança (0.98).
+   * 2. Nome da contraparte com igualdade normalizada exata gera SUGESTÃO para confirmação (suggestedClientId), NÃO vincula automaticamente.
+   * 3. Semelhança parcial, apelido ou suposição não vincula.
+   * 4. Multi-tenant estrito: consulta apenas clientes pertencentes a organizationId.
+   */
+  async matchClientForTransaction(
+    organizationId: string,
+    tx: {
+      counterpartyDocument?: string | null;
+      counterpartyName?: string | null;
+    }
+  ): Promise<ClientMatchResult> {
+    if (!this.prisma.client) {
+      return {
+        clientId: null,
+        clientConfidence: null,
+        clientMatchReason: null,
+        suggestedClientId: null,
+        suggestedClient: null,
+      };
+    }
+
+    const clients = await this.prisma.client.findMany({
+      where: { organizationId },
+      select: { id: true, name: true, legalName: true, document: true },
+    });
+
+    const normDoc = (tx.counterpartyDocument || '').replace(/\D/g, '').trim();
+
+    // 1. Correspondência exata por documento (CPF ou CNPJ)
+    if (normDoc && normDoc.length >= 11) {
+      const docMatch = clients.find((c: any) => {
+        const cDoc = (c.document || '').replace(/\D/g, '').trim();
+        return cDoc && cDoc === normDoc;
+      });
+
+      if (docMatch) {
+        return {
+          clientId: docMatch.id,
+          clientConfidence: 0.98,
+          clientMatchReason: 'DOCUMENT_EXACT',
+          suggestedClientId: null,
+          suggestedClient: null,
+        };
+      }
+    }
+
+    // 2. Igualdade normalizada exata do nome
+    const normName = normalizeMatchText(tx.counterpartyName);
+    if (normName) {
+      const nameMatch = clients.find((c: any) => {
+        const cName = normalizeMatchText(c.name);
+        const cLegal = normalizeMatchText(c.legalName);
+        return cName === normName || (cLegal && cLegal === normName);
+      });
+
+      if (nameMatch) {
+        // Apenas sugestão, não vincula automaticamente
+        return {
+          clientId: null,
+          clientConfidence: null,
+          clientMatchReason: null,
+          suggestedClientId: nameMatch.id,
+          suggestedClient: { id: nameMatch.id, name: nameMatch.name },
+        };
+      }
+    }
+
+    // 3. Sem correspondência confiável
+    return {
+      clientId: null,
+      clientConfidence: null,
+      clientMatchReason: null,
+      suggestedClientId: null,
+      suggestedClient: null,
+    };
+  }
+
+  /**
+   * Categoriza automaticamente uma transação com base nas regras locais da organização e clientes.
    * Ordem oficial:
-   * 1. Informação estruturada / já classificada
-   * 2. Regra automática local ativa (maior prioridade)
-   * 3. Fallback seguro: "Para revisar" com status PENDING
+   * 1. Regra automática local ativa (maior prioridade, vincula categoria e opcionalmente cliente)
+   * 2. Identificação automática de cliente por CPF/CNPJ (vincula cliente e categoriza como "Receita de clientes")
+   * 3. Nome de contraparte idêntico (apenas sugere cliente para confirmação manual)
+   * 4. Fallback seguro: "Para revisar" com status PENDING
    */
   async categorizeTransaction(
     organizationId: string,
@@ -329,14 +428,22 @@ export class FinancialCategoryService {
       description: string;
       counterpartyName?: string | null;
       counterpartyDocument?: string | null;
+      direction?: string;
     }
   ): Promise<{
     categoryId: string;
+    clientId: string | null;
+    suggestedClientId: string | null;
+    suggestedClient?: { id: string; name: string } | null;
     categorizationSource: FinancialCategorizationSource;
     categorizationConfidence: number;
   }> {
     const categoryMap = await this.ensureDefaultCategories(organizationId);
     const toReviewCategoryId = categoryMap.get('Para revisar') || (categoryMap.values().next().value as string);
+    const clientRevenueCategoryId =
+      categoryMap.get('Receita de clientes') ||
+      categoryMap.get('Receita de cliente') ||
+      toReviewCategoryId;
 
     // Carrega regras ativas da organização ordenadas por prioridade decrescente
     const rules = await this.prisma.financialCategoryRule.findMany({
@@ -378,15 +485,51 @@ export class FinancialCategoryService {
       if (matched) {
         return {
           categoryId: rule.categoryId,
+          clientId: (rule as any).clientId || null,
+          suggestedClientId: null,
+          suggestedClient: null,
           categorizationSource: 'AUTO_RULE',
           categorizationConfidence: 0.95,
         };
       }
     }
 
-    // Nenhuma regra coincidente: direciona para "Para revisar"
+    // Se for entrada/crédito (ou sem direção explícita de débito): avalia correspondência com clientes
+    const isCredit = tx.direction === 'CREDIT' || !tx.direction;
+    if (isCredit) {
+      const clientMatch = await this.matchClientForTransaction(organizationId, tx);
+
+      if (clientMatch.clientId) {
+        // Documento idêntico: vincula automaticamente com alta confiança
+        return {
+          categoryId: clientRevenueCategoryId,
+          clientId: clientMatch.clientId,
+          suggestedClientId: null,
+          suggestedClient: null,
+          categorizationSource: 'AUTO_RULE',
+          categorizationConfidence: 0.98,
+        };
+      }
+
+      if (clientMatch.suggestedClientId) {
+        // Nome coincidente: apenas sugestão para confirmação, NÃO vincula automaticamente
+        return {
+          categoryId: toReviewCategoryId,
+          clientId: null,
+          suggestedClientId: clientMatch.suggestedClientId,
+          suggestedClient: clientMatch.suggestedClient,
+          categorizationSource: 'PENDING',
+          categorizationConfidence: 0.5,
+        };
+      }
+    }
+
+    // Nenhuma regra ou cliente coincidente: direciona para "Para revisar"
     return {
       categoryId: toReviewCategoryId,
+      clientId: null,
+      suggestedClientId: null,
+      suggestedClient: null,
       categorizationSource: 'PENDING',
       categorizationConfidence: 0.5,
     };
@@ -402,6 +545,9 @@ export class FinancialCategoryService {
         category: {
           select: { id: true, name: true, color: true, type: true, isActive: true },
         },
+        client: {
+          select: { id: true, name: true },
+        },
       },
       orderBy: [{ priority: 'desc' }, { createdAt: 'desc' }],
     });
@@ -414,6 +560,7 @@ export class FinancialCategoryService {
     organizationId: string,
     data: {
       categoryId: string;
+      clientId?: string | null;
       matchField: FinancialMatchField;
       matchType: FinancialMatchType;
       matchValue: string;
@@ -433,10 +580,20 @@ export class FinancialCategoryService {
       throw new Error('Categoria de destino não encontrada.');
     }
 
+    if (data.clientId && this.prisma.client) {
+      const client = await this.prisma.client.findFirst({
+        where: { id: data.clientId, organizationId },
+      });
+      if (!client) {
+        throw new Error('Cliente informado não pertence a esta organização.');
+      }
+    }
+
     return this.prisma.financialCategoryRule.create({
       data: {
         organizationId,
         categoryId: data.categoryId,
+        clientId: data.clientId || null,
         matchField: data.matchField,
         matchType: data.matchType,
         matchValueNormalized,
@@ -446,6 +603,9 @@ export class FinancialCategoryService {
       include: {
         category: {
           select: { id: true, name: true, color: true, type: true },
+        },
+        client: {
+          select: { id: true, name: true },
         },
       },
     });
@@ -459,6 +619,7 @@ export class FinancialCategoryService {
     ruleId: string,
     data: {
       categoryId?: string;
+      clientId?: string | null;
       matchField?: FinancialMatchField;
       matchType?: FinancialMatchType;
       matchValue?: string;
@@ -481,6 +642,17 @@ export class FinancialCategoryService {
       if (!category) throw new Error('Categoria de destino não encontrada.');
       updateData.categoryId = data.categoryId;
     }
+    if (data.clientId !== undefined) {
+      if (data.clientId && this.prisma.client) {
+        const client = await this.prisma.client.findFirst({
+          where: { id: data.clientId, organizationId },
+        });
+        if (!client) throw new Error('Cliente informado não pertence a esta organização.');
+        updateData.clientId = data.clientId;
+      } else {
+        updateData.clientId = null;
+      }
+    }
     if (data.matchField) updateData.matchField = data.matchField;
     if (data.matchType) updateData.matchType = data.matchType;
     if (data.matchValue !== undefined) {
@@ -497,6 +669,9 @@ export class FinancialCategoryService {
       include: {
         category: {
           select: { id: true, name: true, color: true, type: true },
+        },
+        client: {
+          select: { id: true, name: true },
         },
       },
     });
@@ -618,6 +793,7 @@ export class FinancialCategoryService {
           where: { id: tx.id },
           data: {
             categoryId: rule.categoryId,
+            clientId: (rule as any).clientId || undefined,
             categorizationSource: 'AUTO_RULE',
             categorizationConfidence: 0.95,
           },

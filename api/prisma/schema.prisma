@@ -122,6 +122,9 @@ model Client {
   responsibleUser User?               @relation(fields: [responsibleUserId], references: [id], onDelete: SetNull)
   integrations    ClientIntegration[]
   asaasPayments   AsaasPayment[]
+  financialTransactions  FinancialTransaction[] @relation("ClientTransactions")
+  suggestedTransactions  FinancialTransaction[] @relation("SuggestedClientTransactions")
+  financialCategoryRules FinancialCategoryRule[]
 
   @@index([organizationId])
   @@index([status])
@@ -353,6 +356,7 @@ model FinancialCategoryRule {
   id                   String              @id @default(uuid())
   organizationId       String
   categoryId           String
+  clientId             String?
   matchField           FinancialMatchField
   matchType            FinancialMatchType
   matchValueNormalized String
@@ -363,9 +367,11 @@ model FinancialCategoryRule {
 
   organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   category     FinancialCategory       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  client       Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([categoryId])
+  @@index([clientId])
   @@index([priority])
   @@map("financial_category_rules")
 }
@@ -384,17 +390,21 @@ model FinancialTransaction {
   counterpartyDocument     String?
   externalReference        String?
   categoryId               String?
+  clientId                 String?
+  suggestedClientId        String?
   categorizationSource     FinancialCategorizationSource @default(PENDING)
   categorizationConfidence Decimal?                      @db.Decimal(5, 2)
   rawPayload               Json?
   createdAt                DateTime                      @default(now())
   updatedAt                DateTime                      @updatedAt
 
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  account        FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category       FinancialCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  sourceTransfer FinancialTransfer?  @relation("SourceTransactionTransfer")
-  destTransfer   FinancialTransfer?  @relation("DestTransactionTransfer")
+  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account         FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category        FinancialCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  client          Client?             @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: SetNull)
+  suggestedClient Client?             @relation("SuggestedClientTransactions", fields: [suggestedClientId], references: [id], onDelete: SetNull)
+  sourceTransfer  FinancialTransfer?  @relation("SourceTransactionTransfer")
+  destTransfer    FinancialTransfer?  @relation("DestTransactionTransfer")
 
   @@unique([accountId, externalId])
   @@index([organizationId])
@@ -403,6 +413,8 @@ model FinancialTransaction {
   @@index([direction])
   @@index([kind])
   @@index([categoryId])
+  @@index([clientId])
+  @@index([suggestedClientId])
   @@index([categorizationSource])
   @@map("financial_transactions")
 }

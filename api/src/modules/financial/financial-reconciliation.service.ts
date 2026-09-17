@@ -121,15 +121,15 @@ export class FinancialReconciliationService {
         },
       });
 
-      // Atualiza o kind da transação para TRANSFER_INTERNAL para não contar como despesa/receita
+      // Atualiza o kind da transação para TRANSFER_INTERNAL para não contar como despesa/receita e assegura clientId nulo
       await this.prisma.financialTransaction.update({
         where: { id: debit.id },
-        data: { kind: 'TRANSFER_INTERNAL' },
+        data: { kind: 'TRANSFER_INTERNAL', clientId: null },
       });
 
       await this.prisma.financialTransaction.update({
         where: { id: bestCandidate.id },
-        data: { kind: 'TRANSFER_INTERNAL' },
+        data: { kind: 'TRANSFER_INTERNAL', clientId: null },
       });
 
       if (isAutoMatched) {
