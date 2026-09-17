@@ -76,10 +76,17 @@ export class InterService {
 
     // 1. Verificação de ambiente
     if (!this.client.isConfigured()) {
+      const missingVars = typeof (this.client as any).getMissingConfig === 'function'
+        ? (this.client as any).getMissingConfig()
+        : [];
+      const message = missingVars.length > 0
+        ? `Credenciais do Banco Inter PJ não configuradas no servidor. Variáveis ausentes: ${missingVars.join(', ')}`
+        : 'Credenciais do Banco Inter PJ não configuradas no servidor.';
+
       return {
         success: false,
         code: 'INTER_NOT_CONFIGURED',
-        message: 'Credenciais do Banco Inter PJ não configuradas no servidor.',
+        message,
         account: {
           id: account.id,
           name: account.name,

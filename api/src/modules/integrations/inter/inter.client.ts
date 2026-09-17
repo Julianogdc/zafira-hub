@@ -46,9 +46,32 @@ export interface InterStatementItem {
  * - Zero operações POST, PUT, PATCH ou DELETE em recursos bancários/financeiros.
  * - Nenhum método de pagamento, Pix, transferência, cobrança, alteração ou exclusão bancária.
  */
+export interface InterClientConfig {
+  clientId?: string;
+  clientSecret?: string;
+  crtBase64?: string;
+  keyBase64?: string;
+  pfxBase64?: string;
+  passphrase?: string;
+  baseUrl?: string;
+  oauthScope?: string;
+  timeoutMs?: number;
+}
+
+/**
+ * Cliente HTTP para a API do Banco Inter PJ.
+ * Política de segurança de rede e métodos:
+ * - Autenticação OAuth2 client_credentials via POST exclusivamente em /oauth/v2/token com mTLS.
+ * - Suporte prioritário a certificado x509 (.crt) e chave privada (.key) decodificados 100% em memória.
+ * - Recursos bancários e financeiros operam ESTRITAMENTE em modo de leitura (GET).
+ * - Zero operações POST, PUT, PATCH ou DELETE em recursos bancários/financeiros.
+ * - Nenhum método de pagamento, Pix, transferência, cobrança, alteração ou exclusão bancária.
+ */
 export class InterClient {
   private readonly clientId: string;
   private readonly clientSecret: string;
+  private readonly crtBase64: string;
+  private readonly keyBase64: string;
   private readonly pfxBase64: string;
   private readonly passphrase?: string;
   private readonly baseUrl: string;
@@ -59,22 +82,57 @@ export class InterClient {
   private tokenExpiresAt: number = 0;
 
   constructor(
-    clientId?: string,
+    clientIdOrConfig?: string | InterClientConfig,
     clientSecret?: string,
-    pfxBase64?: string,
+    crtOrPfxBase64?: string,
+    keyOrPassphrase?: string,
     passphrase?: string,
     baseUrl?: string,
     oauthScope?: string,
     timeoutMs = 15000
   ) {
-    this.clientId = (clientId || process.env.INTER_CLIENT_ID || '').trim();
-    this.clientSecret = (clientSecret || process.env.INTER_CLIENT_SECRET || '').trim();
-    this.pfxBase64 = (pfxBase64 || process.env.INTER_CERTIFICATE_PFX_BASE64 || '').trim();
-    this.passphrase = passphrase || process.env.INTER_CERTIFICATE_PASSPHRASE;
-    this.baseUrl = (baseUrl || process.env.INTER_BASE_URL || 'https://cdpj.partners.bancointer.com.br').replace(/\/+$/, '');
-    // Centralizado em INTER_OAUTH_SCOPE com padrão mínimo documentado extrato.read (sem suposição de saldo.read)
-    this.oauthScope = (oauthScope || process.env.INTER_OAUTH_SCOPE || 'extrato.read').trim();
-    this.timeoutMs = timeoutMs;
+    if (typeof clientIdOrConfig === 'object' && clientIdOrConfig !== null) {
+      const config = clientIdOrConfig;
+      this.clientId = (config.clientId || process.env.INTER_CLIENT_ID || '').trim();
+      this.clientSecret = (config.clientSecret || process.env.INTER_CLIENT_SECRET || '').trim();
+      this.crtBase64 = (config.crtBase64 || process.env.INTER_CERTIFICATE_CRT_BASE64 || '').trim();
+      this.keyBase64 = (config.keyBase64 || process.env.INTER_PRIVATE_KEY_BASE64 || '').trim();
+      this.pfxBase64 = (config.pfxBase64 || process.env.INTER_CERTIFICATE_PFX_BASE64 || '').trim();
+      this.passphrase = config.passphrase || process.env.INTER_CERTIFICATE_PASSPHRASE;
+      this.baseUrl = (config.baseUrl || process.env.INTER_BASE_URL || 'https://cdpj.partners.bancointer.com.br').replace(/\/+$/, '');
+      this.oauthScope = (config.oauthScope || process.env.INTER_OAUTH_SCOPE || 'extrato.read').trim();
+      this.timeoutMs = config.timeoutMs ?? timeoutMs;
+    } else {
+      this.clientId = (clientIdOrConfig || process.env.INTER_CLIENT_ID || '').trim();
+      this.clientSecret = (clientSecret || process.env.INTER_CLIENT_SECRET || '').trim();
+      this.crtBase64 = (process.env.INTER_CERTIFICATE_CRT_BASE64 || '').trim();
+      this.keyBase64 = (process.env.INTER_PRIVATE_KEY_BASE64 || '').trim();
+      this.pfxBase64 = (process.env.INTER_CERTIFICATE_PFX_BASE64 || '').trim();
+      this.passphrase = passphrase || process.env.INTER_CERTIFICATE_PASSPHRASE;
+
+      // Suporte posicional retrocompatível:
+      // Se crtOrPfxBase64 foi passado diretamente
+      if (crtOrPfxBase64) {
+        if (keyOrPassphrase && passphrase) {
+          // 5 argumentos: clientId, clientSecret, crtBase64, keyBase64, passphrase
+          this.crtBase64 = crtOrPfxBase64.trim();
+          this.keyBase64 = keyOrPassphrase.trim();
+          this.passphrase = passphrase;
+        } else if (keyOrPassphrase) {
+          // 4 argumentos: pode ser (crt, key) ou (pfx, passphrase)
+          // Se for formato PEM/chave ou especificado como key
+          this.crtBase64 = crtOrPfxBase64.trim();
+          this.keyBase64 = keyOrPassphrase.trim();
+        } else {
+          // 3 argumentos legados: (clientId, clientSecret, pfxBase64)
+          this.pfxBase64 = crtOrPfxBase64.trim();
+        }
+      }
+
+      this.baseUrl = (baseUrl || process.env.INTER_BASE_URL || 'https://cdpj.partners.bancointer.com.br').replace(/\/+$/, '');
+      this.oauthScope = (oauthScope || process.env.INTER_OAUTH_SCOPE || 'extrato.read').trim();
+      this.timeoutMs = timeoutMs;
+    }
   }
 
   /**
@@ -86,16 +144,51 @@ export class InterClient {
   }
 
   /**
+   * Retorna a lista de nomes das variáveis de ambiente obrigatórias que estão ausentes.
+   * Não expõe valores nem dados sensíveis.
+   */
+  getMissingConfig(): string[] {
+    const missing: string[] = [];
+    if (!this.clientId) missing.push('INTER_CLIENT_ID');
+    if (!this.clientSecret) missing.push('INTER_CLIENT_SECRET');
+
+    const hasCrtAndKey = Boolean(this.crtBase64 && this.keyBase64);
+    const hasPfx = Boolean(this.pfxBase64);
+
+    if (!hasCrtAndKey && !hasPfx) {
+      if (!this.crtBase64 && !this.keyBase64) {
+        missing.push('INTER_CERTIFICATE_CRT_BASE64', 'INTER_PRIVATE_KEY_BASE64');
+      } else if (!this.crtBase64) {
+        missing.push('INTER_CERTIFICATE_CRT_BASE64');
+      } else if (!this.keyBase64) {
+        missing.push('INTER_PRIVATE_KEY_BASE64');
+      }
+    }
+
+    return missing;
+  }
+
+  /**
    * Verifica se a integração está minimamente configurada no ambiente.
    */
   isConfigured(): boolean {
-    return Boolean(this.clientId && this.clientSecret && this.pfxBase64);
+    return this.getMissingConfig().length === 0;
+  }
+
+  /**
+   * Identifica o modo de autenticação mTLS ativo.
+   */
+  getMtlsConfigMode(): 'CRT_KEY' | 'PFX' | 'NONE' {
+    if (this.crtBase64 && this.keyBase64) return 'CRT_KEY';
+    if (this.pfxBase64) return 'PFX';
+    return 'NONE';
   }
 
   private assertConfigured() {
-    if (!this.isConfigured()) {
+    const missing = this.getMissingConfig();
+    if (missing.length > 0) {
       throw new InterIntegrationError(
-        'Integração Banco Inter não configurada no ambiente.',
+        `Integração Banco Inter não configurada no ambiente. Variáveis ausentes: ${missing.join(', ')}`,
         400,
         'INTER_NOT_CONFIGURED'
       );
@@ -103,17 +196,49 @@ export class InterClient {
   }
 
   /**
-   * Obtém agente HTTPS com suporte ao certificado PFX em memória (mTLS).
+   * Obtém agente HTTPS com suporte a CRT + KEY ou PFX em memória (mTLS).
+   * Decodificação puramente em memória (Buffers), sem gravação de arquivos em disco.
    */
   private getHttpsAgent(): https.Agent {
     this.assertConfigured();
-    const pfxBuffer = Buffer.from(this.pfxBase64, 'base64');
-    return new https.Agent({
-      pfx: pfxBuffer,
-      passphrase: this.passphrase,
-      rejectUnauthorized: true,
-      keepAlive: true,
-    });
+
+    // Caminho prioritário: CRT + KEY
+    if (this.crtBase64 && this.keyBase64) {
+      const certBuffer = Buffer.from(this.crtBase64, 'base64');
+      const keyBuffer = Buffer.from(this.keyBase64, 'base64');
+      return new https.Agent({
+        cert: certBuffer,
+        key: keyBuffer,
+        passphrase: this.passphrase,
+        rejectUnauthorized: true,
+        keepAlive: true,
+      });
+    }
+
+    // Fallback de compatibilidade: PFX
+    if (this.pfxBase64) {
+      const pfxBuffer = Buffer.from(this.pfxBase64, 'base64');
+      return new https.Agent({
+        pfx: pfxBuffer,
+        passphrase: this.passphrase,
+        rejectUnauthorized: true,
+        keepAlive: true,
+      });
+    }
+
+    throw new InterIntegrationError(
+      'Configuração de mTLS do Banco Inter ausente.',
+      400,
+      'INTER_NOT_CONFIGURED'
+    );
+  }
+
+  /**
+   * Cria e retorna o agente HTTPS mTLS para validação segura em testes automatizados.
+   * Não expõe segredos.
+   */
+  createHttpsAgentForTesting(): https.Agent {
+    return this.getHttpsAgent();
   }
 
   /**

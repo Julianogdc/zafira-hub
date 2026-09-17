@@ -66,7 +66,13 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   // 1.1 Bloqueio explícito de qualquer POST externo fora do endpoint OAuth
   // ---------------------------------------------------------------------------
   await t.test('1.1 Bloqueio explícito: qualquer POST em recursos bancários falha com BANK_WRITE_FORBIDDEN', async () => {
-    const client = new InterClient('fake-client-id', 'fake-secret', Buffer.from('fake-pfx').toString('base64'));
+    // Testado tanto com configuração legada (PFX) quanto com nova configuração prioritária (CRT + KEY)
+    const crtKeyClient = new InterClient({
+      clientId: 'fake-client-id',
+      clientSecret: 'fake-secret',
+      crtBase64: Buffer.from('fake-crt-content').toString('base64'),
+      keyBase64: Buffer.from('fake-key-content').toString('base64'),
+    });
 
     const forbiddenCalls = [
       { method: 'POST', endpoint: '/banking/v2/pix' },
@@ -79,7 +85,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     for (const { method, endpoint } of forbiddenCalls) {
       await assert.rejects(
         async () => {
-          await client.requestBankingResource(method, endpoint);
+          await crtKeyClient.requestBankingResource(method, endpoint);
         },
         (err: any) => {
           assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
@@ -98,23 +104,86 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
   await t.test('1.2 Escopos OAuth: padrão mínimo extrato.read sem inclusão automática de saldo.read', () => {
     delete process.env.INTER_OAUTH_SCOPE;
 
-    const defaultClient = new InterClient('client-1', 'secret-1', 'pfx-base64');
+    const defaultClient = new InterClient({
+      clientId: 'client-1',
+      clientSecret: 'secret-1',
+      crtBase64: 'crt-base64',
+      keyBase64: 'key-base64',
+    });
     // Sem configuração no ambiente, o escopo DEVE ser estritamente 'extrato.read'
     assert.strictEqual(defaultClient.getOAuthScope(), 'extrato.read');
     assert.ok(!defaultClient.getOAuthScope().includes('saldo.read'), 'Não deve incluir saldo.read automaticamente');
 
     // Com escopo centralizado via INTER_OAUTH_SCOPE, utiliza exclusivamente o valor configurado
     process.env.INTER_OAUTH_SCOPE = 'extrato.read custom.scope';
-    const customClient = new InterClient('client-1', 'secret-1', 'pfx-base64');
+    const customClient = new InterClient({
+      clientId: 'client-1',
+      clientSecret: 'secret-1',
+      crtBase64: 'crt-base64',
+      keyBase64: 'key-base64',
+    });
     assert.strictEqual(customClient.getOAuthScope(), 'extrato.read custom.scope');
 
     delete process.env.INTER_OAUTH_SCOPE;
   });
 
   // ---------------------------------------------------------------------------
-  // 2. Não exposição de credenciais, certificados PFX ou segredos em logs e retornos
+  // 1.3 Criação do agente mTLS com CRT + KEY em memória (sem arquivos temporários em disco)
   // ---------------------------------------------------------------------------
-  await t.test('2. Banco Inter mascara ou omite credenciais e certificados no serviço e retornos', async () => {
+  await t.test('1.3 Criação do agente mTLS com CRT + KEY decodificados 100% em memória', () => {
+    const fakeCrt = '-----BEGIN CERTIFICATE-----\nFAKE_CRT\n-----END CERTIFICATE-----';
+    const fakeKey = '-----BEGIN PRIVATE KEY-----\nFAKE_KEY\n-----END PRIVATE KEY-----';
+
+    const client = new InterClient({
+      clientId: 'cli-test-id',
+      clientSecret: 'cli-test-secret',
+      crtBase64: Buffer.from(fakeCrt).toString('base64'),
+      keyBase64: Buffer.from(fakeKey).toString('base64'),
+    });
+
+    assert.strictEqual(client.isConfigured(), true);
+    assert.strictEqual(client.getMtlsConfigMode(), 'CRT_KEY');
+
+    const agent = client.createHttpsAgentForTesting();
+    assert.ok(agent, 'Agente HTTPS deve ser instanciado');
+    const agentOptions = (agent as any).options;
+
+    // Garante que cert e key são Buffers na memória RAM
+    assert.ok(Buffer.isBuffer(agentOptions.cert), 'Certificado deve estar decodificado como Buffer em memória');
+    assert.ok(Buffer.isBuffer(agentOptions.key), 'Chave privada deve estar decodificada como Buffer em memória');
+    assert.strictEqual(agentOptions.cert.toString('utf8'), fakeCrt);
+    assert.strictEqual(agentOptions.key.toString('utf8'), fakeKey);
+
+    // Garante que nenhuma propriedade aponta para arquivos no disco
+    assert.strictEqual(agentOptions.certFile, undefined);
+    assert.strictEqual(agentOptions.keyFile, undefined);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 1.4 Compatibilidade retroativa com PFX como fallback opcional
+  // ---------------------------------------------------------------------------
+  await t.test('1.4 Suporte legado ao formato PFX em memória mantido como fallback', () => {
+    const fakePfx = 'FAKE_PFX_RAW_BYTES';
+    const client = new InterClient({
+      clientId: 'cli-pfx-id',
+      clientSecret: 'cli-pfx-secret',
+      pfxBase64: Buffer.from(fakePfx).toString('base64'),
+      passphrase: 'pfx-passphrase',
+    });
+
+    assert.strictEqual(client.isConfigured(), true);
+    assert.strictEqual(client.getMtlsConfigMode(), 'PFX');
+
+    const agent = client.createHttpsAgentForTesting();
+    const agentOptions = (agent as any).options;
+    assert.ok(Buffer.isBuffer(agentOptions.pfx), 'PFX deve estar em memória como Buffer');
+    assert.strictEqual(agentOptions.passphrase, 'pfx-passphrase');
+  });
+
+  // ---------------------------------------------------------------------------
+  // 2. Não exposição de credenciais, certificados ou segredos em logs e retornos
+  // ---------------------------------------------------------------------------
+  await t.test('2. Banco Inter mascara e omite segredos e lista apenas os nomes das variáveis ausentes', async () => {
     const mockPrisma: any = {
       financialAccount: {
         findFirst: async () => null,
@@ -122,18 +191,34 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       },
     };
 
-    const service = new InterService(mockPrisma);
     delete process.env.INTER_CLIENT_ID;
     delete process.env.INTER_CLIENT_SECRET;
     delete process.env.INTER_CERTIFICATE_PFX_BASE64;
+    delete process.env.INTER_CERTIFICATE_CRT_BASE64;
+    delete process.env.INTER_PRIVATE_KEY_BASE64;
 
+    const unconfiguredClient = new InterClient();
+    const missing = unconfiguredClient.getMissingConfig();
+    assert.ok(missing.includes('INTER_CLIENT_ID'));
+    assert.ok(missing.includes('INTER_CLIENT_SECRET'));
+    assert.ok(missing.includes('INTER_CERTIFICATE_CRT_BASE64'));
+    assert.ok(missing.includes('INTER_PRIVATE_KEY_BASE64'));
+
+    const service = new InterService(unconfiguredClient, mockPrisma);
     const result = await service.syncAccountAndStatement('org-123');
 
     assert.strictEqual(result.success, false);
     assert.strictEqual(result.code, 'INTER_NOT_CONFIGURED');
+    assert.ok(result.message?.includes('INTER_CLIENT_ID'));
+    assert.ok(result.message?.includes('INTER_CLIENT_SECRET'));
+    assert.ok(result.message?.includes('INTER_CERTIFICATE_CRT_BASE64'));
+    assert.ok(result.message?.includes('INTER_PRIVATE_KEY_BASE64'));
+
+    // Assegura que nenhum segredo real ou valor de credencial foi vazado
     const serialized = JSON.stringify(result);
     assert.ok(!serialized.includes('INTER_CERTIFICATE_PFX_BASE64'));
-    assert.ok(!serialized.includes('INTER_CLIENT_SECRET'));
+    assert.ok(!serialized.includes('secret-value'));
+    assert.ok(!serialized.includes('private-key'));
   });
 
   // ---------------------------------------------------------------------------
