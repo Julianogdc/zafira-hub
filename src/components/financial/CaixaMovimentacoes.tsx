@@ -89,6 +89,14 @@ export function CaixaMovimentacoes() {
   const [syncingInter, setSyncingInter] = useState<boolean>(false);
   const [reprocessingInter, setReprocessingInter] = useState<boolean>(false);
   const [repairingDuplicates, setRepairingDuplicates] = useState<boolean>(false);
+  const [loadingRepairPreview, setLoadingRepairPreview] = useState<boolean>(false);
+  const [repairPreviewModalOpen, setRepairPreviewModalOpen] = useState<boolean>(false);
+  const [repairPreviewData, setRepairPreviewData] = useState<{
+    scanned: number;
+    provenDuplicatesToRemove: number;
+    manualClassificationsToPreserve: number;
+    ambiguousRecordsKept: number;
+  } | null>(null);
   const [checkingTimes, setCheckingTimes] = useState<boolean>(false);
   const [applyingTimes, setApplyingTimes] = useState<boolean>(false);
   const [previewResult, setPreviewResult] = useState<{
@@ -361,8 +369,32 @@ export function CaixaMovimentacoes() {
     }
   };
 
-  // Reparar Duplicatas do Extrato Inter PJ (chama endpoint canônico POST /integrations/inter/repair-duplicates)
-  const handleRepairDuplicates = async () => {
+  // Prévia somente-leitura de reparo de duplicatas do Inter PJ
+  const handleOpenRepairPreview = async () => {
+    setLoadingRepairPreview(true);
+    try {
+      const res = await financialApi.previewRepairInterDuplicates();
+      if (res.success) {
+        setRepairPreviewData({
+          scanned: res.scanned ?? 0,
+          provenDuplicatesToRemove: res.provenDuplicatesToRemove ?? 0,
+          manualClassificationsToPreserve: res.manualClassificationsToPreserve ?? 0,
+          ambiguousRecordsKept: res.ambiguousRecordsKept ?? 0,
+        });
+        setRepairPreviewModalOpen(true);
+      } else {
+        toast.error(res.message || 'Não foi possível gerar a prévia do reparo.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao obter prévia de reparo:', err);
+      toast.error(err.response?.data?.message || 'Falha ao analisar integridade do extrato Inter.');
+    } finally {
+      setLoadingRepairPreview(false);
+    }
+  };
+
+  // Execução definitiva do reparo após confirmação explícita no modal
+  const handleExecuteConfirmedRepair = async () => {
     setRepairingDuplicates(true);
     try {
       const res = await financialApi.repairInterDuplicates();
@@ -370,20 +402,20 @@ export function CaixaMovimentacoes() {
         const removed = res.duplicatesRemoved ?? res.removedCount ?? 0;
         const merged = res.manualDataMerged ?? res.mergedCount ?? 0;
         const ambiguous = res.ambiguousDuplicatesSkipped ?? 0;
-        const remaining = res.remainingTransactions ?? 44;
 
         if (removed > 0) {
-          const ambiguousText = ambiguous > 0 ? ` (${ambiguous} duplicatas ambíguas ignoradas por segurança)` : '';
+          const ambiguousText = ambiguous > 0 ? ` (${ambiguous} registros ambíguos mantidos por segurança)` : '';
           toast.success(
-            `Extrato reparado: ${removed} duplicatas removidas, ${merged} classificações manuais preservadas. ${remaining} movimentações válidas permanecem.${ambiguousText}`
+            `Extrato reparado com sucesso: ${removed} duplicatas removidas, ${merged} classificações manuais preservadas.${ambiguousText}`
           );
         } else {
           if (ambiguous > 0) {
-            toast.info(`Extrato íntegro. Nenhuma duplicata encontrada (${ambiguous} registros ambíguos ignorados por segurança).`);
+            toast.info(`Extrato íntegro. Nenhuma duplicata encontrada (${ambiguous} registros ambíguos mantidos por segurança).`);
           } else {
-            toast.info('Extrato íntegro. Nenhuma duplicata encontrada.');
+            toast.info('Extrato íntegro. Nenhuma duplicata removida.');
           }
         }
+        setRepairPreviewModalOpen(false);
         await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
       } else {
         toast.error(res.message || 'Não foi possível reparar duplicatas.');
@@ -836,13 +868,13 @@ export function CaixaMovimentacoes() {
           <Button
             variant="outline"
             size="sm"
-            onClick={handleRepairDuplicates}
-            disabled={repairingDuplicates || syncingInter || reprocessingInter}
+            onClick={handleOpenRepairPreview}
+            disabled={loadingRepairPreview || repairingDuplicates || syncingInter || reprocessingInter}
             className="border-blue-500/30 bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 text-xs gap-1.5 h-8"
-            title="Verifica integridade e remove registros duplicados e fantasmas de R$ 0,00 preservando classificações"
+            title="Analisa integridade e remove registros duplicados e fantasmas de R$ 0,00 preservando classificações"
           >
-            <ShieldAlert className={`w-3.5 h-3.5 ${repairingDuplicates ? 'animate-spin text-blue-300' : 'text-blue-400'}`} />
-            <span>{repairingDuplicates ? 'Reparando extrato...' : 'Reparar Integridade'}</span>
+            <ShieldAlert className={`w-3.5 h-3.5 ${loadingRepairPreview || repairingDuplicates ? 'animate-spin text-blue-300' : 'text-blue-400'}`} />
+            <span>{loadingRepairPreview ? 'Analisando...' : repairingDuplicates ? 'Reparando...' : 'Reparar Integridade'}</span>
           </Button>
 
           {/* REPROCESSAR EXTRATO (PROTEÇÃO TEMPORÁRIA PAUSADA) */}
@@ -1812,6 +1844,84 @@ export function CaixaMovimentacoes() {
               className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs"
             >
               {savingRule ? 'Salvando...' : 'Salvar Regra'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MODAL DE CONFIRMAÇÃO DE REPARO DE INTEGRIDADE */}
+      <Dialog open={repairPreviewModalOpen} onOpenChange={setRepairPreviewModalOpen}>
+        <DialogContent className="max-w-md bg-zinc-950 border-white/10 text-zinc-100 p-6">
+          <DialogHeader>
+            <div className="flex items-center gap-2 mb-1">
+              <ShieldAlert className="w-5 h-5 text-blue-400" />
+              <DialogTitle className="text-base font-semibold text-white">
+                Confirmar Reparo de Integridade
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-zinc-400">
+              Prévia de integridade apurada do extrato Banco Inter PJ. Somente duplicatas artificiais comprovadas serão removidas, preservando lançamentos reais e classificações manuais.
+            </DialogDescription>
+          </DialogHeader>
+
+          {repairPreviewData ? (
+            <div className="space-y-3 py-3 text-xs">
+              <div className="grid grid-cols-2 gap-2">
+                <div className="p-3 rounded-lg bg-zinc-900/60 border border-white/5 space-y-1">
+                  <div className="text-zinc-500 text-[11px]">Registros analisados</div>
+                  <div className="text-lg font-bold text-white">{repairPreviewData.scanned}</div>
+                </div>
+                <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 space-y-1">
+                  <div className="text-red-400 text-[11px]">Duplicatas comprovadas</div>
+                  <div className="text-lg font-bold text-red-300">{repairPreviewData.provenDuplicatesToRemove}</div>
+                  <div className="text-[10px] text-red-400/80">serão removidas</div>
+                </div>
+                <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20 space-y-1">
+                  <div className="text-emerald-400 text-[11px]">Classificações manuais</div>
+                  <div className="text-lg font-bold text-emerald-300">{repairPreviewData.manualClassificationsToPreserve}</div>
+                  <div className="text-[10px] text-emerald-400/80">serão preservadas</div>
+                </div>
+                <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
+                  <div className="text-amber-400 text-[11px]">Registros ambíguos</div>
+                  <div className="text-lg font-bold text-amber-300">{repairPreviewData.ambiguousRecordsKept}</div>
+                  <div className="text-[10px] text-amber-400/80">serão mantidos por segurança</div>
+                </div>
+              </div>
+
+              {repairPreviewData.provenDuplicatesToRemove === 0 ? (
+                <div className="p-3 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs">
+                  Nenhuma duplicata comprovada encontrada. Seu extrato já está consistente!
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-md bg-zinc-900 border border-white/5 text-zinc-400 text-[11px]">
+                  Ao confirmar, as {repairPreviewData.provenDuplicatesToRemove} duplicatas de R$ 0,00 comprovadas serão excluídas e as {repairPreviewData.manualClassificationsToPreserve} classificações manuais serão transferidas para os lançamentos reais correspondentes em uma única transação atômica.
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="py-6 text-center text-zinc-500 text-xs">Carregando dados da prévia...</div>
+          )}
+
+          <DialogFooter className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setRepairPreviewModalOpen(false)}
+              disabled={repairingDuplicates}
+              className="text-xs bg-zinc-900 border-white/10"
+            >
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleExecuteConfirmedRepair}
+              disabled={repairingDuplicates || !repairPreviewData || repairPreviewData.provenDuplicatesToRemove === 0}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs gap-1.5"
+            >
+              <ShieldAlert className={`w-3.5 h-3.5 ${repairingDuplicates ? 'animate-spin' : ''}`} />
+              <span>{repairingDuplicates ? 'Executando Reparo...' : 'Confirmar e Reparar'}</span>
             </Button>
           </DialogFooter>
         </DialogContent>

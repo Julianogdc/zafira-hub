@@ -4164,6 +4164,390 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(updateData.rawPayload.interTransactionId, 'official-id-999');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 17. Resolução Definitiva de Duplicatas de R$ 0,00 e Proteção na Origem
+  // ---------------------------------------------------------------------------
+  await t.test('17. Resolução Definitiva de Duplicatas R$ 0,00 e Proteção na Origem', async (st) => {
+    // 17.1 Caso de três linhas como o print: 1 de R$ 450,00 + 2 de R$ 0,00 (remove exatamente as duas artificiais)
+    await st.test('17.1 Três linhas (1 real R$ 450 + 2 artificiais R$ 0,00): remove exatamente as 2 artificiais e preserva a real', async () => {
+      const canonical = {
+        id: 'tx-real-450',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 450,
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_450_pix_enviado',
+        categorizationSource: 'AUTO',
+        categoryId: null,
+      };
+
+      const dup1 = {
+        id: 'tx-dup-zero-manual',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 0,
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado',
+        categorizationSource: 'MANUAL',
+        categoryId: 'cat-fornecedor',
+        clientId: 'cli-pneutek',
+      };
+
+      const dup2 = {
+        id: 'tx-dup-zero-auto',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 0,
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado_v2',
+        categorizationSource: 'RULE',
+        categoryId: null,
+      };
+
+      let deletedIds: string[] = [];
+      let updatedCanonicalData: any = null;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [canonical, dup1, dup2],
+          count: async () => 1,
+        },
+        $transaction: async (fn: any) => {
+          const txProxy = {
+            financialTransaction: {
+              deleteMany: async (args: any) => {
+                deletedIds.push(...args.where.id.in);
+                return { count: args.where.id.in.length };
+              },
+              update: async (args: any) => {
+                updatedCanonicalData = args.data;
+                return { ...canonical, ...args.data };
+              },
+            },
+          };
+          return await fn(txProxy);
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 2, 'Deve remover exatamente as duas duplicatas de R$ 0,00');
+      assert.strictEqual(res.manualDataMerged, 1, 'Deve transferir a classificação manual');
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 0);
+      assert.deepStrictEqual(deletedIds.sort(), ['tx-dup-zero-auto', 'tx-dup-zero-manual'].sort());
+      assert.ok(updatedCanonicalData);
+      assert.strictEqual(updatedCanonicalData.categoryId, 'cat-fornecedor');
+      assert.strictEqual(updatedCanonicalData.clientId, 'cli-pneutek');
+      assert.strictEqual(updatedCanonicalData.categorizationSource, 'MANUAL');
+    });
+
+    // 17.2 Classificação manual no duplicado de R$ 0,00 é transferida para a linha real
+    await st.test('17.2 Classificação manual no duplicado de R$ 0,00 é transferida com fidelidade para a linha real', async () => {
+      const realTx = {
+        id: 'tx-real-300',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'CREDIT',
+        amount: 300,
+        description: 'PIX RECEBIDO CLIENTE XPTO',
+        externalId: 'inter_acc_300',
+        categorizationSource: 'AUTO',
+        categoryId: 'cat-padrao',
+        clientId: null,
+      };
+
+      const dupZero = {
+        id: 'tx-dup-zero-manual',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'CREDIT',
+        amount: 0,
+        description: 'PIX RECEBIDO CLIENTE XPTO',
+        externalId: 'inter_acc_0',
+        categorizationSource: 'MANUAL',
+        categoryId: 'cat-honorarios',
+        clientId: 'cli-xpto',
+        suggestedClientId: 'cli-xpto-sug',
+        categorizationConfidence: 1.0,
+      };
+
+      let updatedData: any = null;
+      let deletedIds: string[] = [];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [realTx, dupZero],
+          count: async () => 1,
+        },
+        $transaction: async (fn: any) => {
+          return await fn({
+            financialTransaction: {
+              deleteMany: async (args: any) => {
+                deletedIds.push(...args.where.id.in);
+                return { count: args.where.id.in.length };
+              },
+              update: async (args: any) => {
+                updatedData = args.data;
+                return { ...realTx, ...args.data };
+              },
+            },
+          });
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 1);
+      assert.strictEqual(res.manualDataMerged, 1);
+      assert.strictEqual(deletedIds[0], 'tx-dup-zero-manual');
+      assert.strictEqual(updatedData.categoryId, 'cat-honorarios');
+      assert.strictEqual(updatedData.clientId, 'cli-xpto');
+      assert.strictEqual(updatedData.suggestedClientId, 'cli-xpto-sug');
+      assert.strictEqual(updatedData.categorizationSource, 'MANUAL');
+      assert.strictEqual(updatedData.categorizationConfidence, 1.0);
+    });
+
+    // 17.3 Duas movimentações reais diferentes, mas com mesma data/direção/título, não são removidas nem mescladas
+    await st.test('17.3 Duas movimentações reais legítimas com mesma data/direção/título não são removidas nem mescladas', async () => {
+      const realA = {
+        id: 'tx-real-a',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 15,
+        description: 'TARIFA BANCARIA MENSAL',
+        externalId: 'inter_acc_tarifa_1',
+      };
+
+      const realB = {
+        id: 'tx-real-b',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 25,
+        description: 'TARIFA BANCARIA MENSAL',
+        externalId: 'inter_acc_tarifa_2',
+      };
+
+      let deleteCalled = false;
+      let updateCalled = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [realA, realB],
+          count: async () => 2,
+        },
+        $transaction: async (fn: any) => {
+          return await fn({
+            financialTransaction: {
+              deleteMany: async () => { deleteCalled = true; return { count: 0 }; },
+              update: async () => { updateCalled = true; },
+            },
+          });
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 0, 'Nenhuma movimentação real pode ser removida');
+      assert.strictEqual(deleteCalled, false);
+      assert.strictEqual(updateCalled, false);
+    });
+
+    // 17.4 Candidato ambíguo é preservado (quando houver 2 ou mais candidatos legítimos possíveis para 1 duplicata R$ 0,00)
+    await st.test('17.4 Candidato ambíguo é preservado e contado como ambiguousDuplicatesSkipped', async () => {
+      const real1 = {
+        id: 'tx-real-1',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 100,
+        description: 'TRANSFERENCIA PIX MESMO TITULO',
+        externalId: 'inter_acc_real1',
+      };
+
+      const real2 = {
+        id: 'tx-real-2',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 200,
+        description: 'TRANSFERENCIA PIX MESMO TITULO',
+        externalId: 'inter_acc_real2',
+      };
+
+      const zeroAmbiguous = {
+        id: 'tx-zero-ambiguous',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: 0,
+        description: 'TRANSFERENCIA PIX MESMO TITULO',
+        externalId: 'inter_acc_zero_ambiguous',
+      };
+
+      let deleteCalled = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [real1, real2, zeroAmbiguous],
+          count: async () => 3,
+        },
+        $transaction: async (fn: any) => {
+          return await fn({
+            financialTransaction: {
+              deleteMany: async () => { deleteCalled = true; return { count: 0 }; },
+              update: async () => {},
+            },
+          });
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 0, 'Não pode remover registro ambíguo');
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 1, 'Deve contar como ambiguousDuplicatesSkipped');
+      assert.strictEqual(deleteCalled, false);
+    });
+
+    // 17.5 Nova importação com valor ausente/inválido não cria linha R$ 0,00
+    await st.test('17.5 Nova importação com valor ausente, inválido ou <= 0 é ignorada com segurança e nunca persiste R$ 0,00', async () => {
+      const mockStatementItems = [
+        { dataEntrada: '2026-09-16', tipoOperacao: 'D', tipoTransacao: 'PIX', titulo: 'INV_1', valor: null },
+        { dataEntrada: '2026-09-16', tipoOperacao: 'D', tipoTransacao: 'PIX', titulo: 'INV_2', valor: '' },
+        { dataEntrada: '2026-09-16', tipoOperacao: 'D', tipoTransacao: 'PIX', titulo: 'INV_3', valor: 'invalido' },
+        { dataEntrada: '2026-09-16', tipoOperacao: 'D', tipoTransacao: 'PIX', titulo: 'INV_4', valor: 0 },
+        { dataEntrada: '2026-09-16', tipoOperacao: 'D', tipoTransacao: 'PIX', titulo: 'VALID_1', valor: '350.00' },
+      ];
+
+      const upsertedTransactions: any[] = [];
+
+      const mockClient: any = {
+        isConfigured: () => true,
+        getStatement: async () => mockStatementItems,
+        getBalances: async () => ({ disponivel: 1000 }),
+      };
+
+      const mockPrisma: any = {
+        financialAccount: {
+          findFirst: async () => ({ id: 'acc-inter', organizationId: 'org-test', name: 'Inter PJ', currentBalance: 1000 }),
+          findMany: async () => [{ id: 'acc-inter', organizationId: 'org-test', name: 'Inter PJ', currentBalance: 1000 }],
+          update: async (args: any) => ({ id: 'acc-inter', name: 'Inter PJ', ...args.data }),
+        },
+        financialTransaction: {
+          findUnique: async () => null,
+          findMany: async () => [],
+          upsert: async (args: any) => {
+            upsertedTransactions.push(args.create);
+            return args.create;
+          },
+        },
+        financialCategory: {
+          findMany: async () => [],
+          create: async (args: any) => ({ id: `cat-${args.data.name}`, ...args.data }),
+        },
+        financialCategoryRule: {
+          findMany: async () => [],
+        },
+        client: {
+          findMany: async () => [],
+        },
+        financialTransfer: {
+          findMany: async () => [],
+        },
+      };
+
+      const service = new InterService(mockClient, mockPrisma);
+      const syncResult = await service.sync('org-test');
+
+      assert.strictEqual(syncResult.success, true);
+      assert.strictEqual(syncResult.syncedTransactions, 1, 'Apenas a transação com valor válido deve ser sincronizada');
+      assert.strictEqual(upsertedTransactions.length, 1, 'Apenas 1 transação deve ser persistida no Prisma');
+      assert.strictEqual(upsertedTransactions[0].amount, 350);
+      assert.ok(upsertedTransactions[0].amount > 0, 'Nenhum registro pode ter valor zero ou negativo');
+    });
+
+    // 17.6 Segunda execução do reparo não altera nada (idempotência)
+    await st.test('17.6 Segunda execução do reparo é idempotente: não remove nem altera nada', async () => {
+      const alreadyCleanList = [
+        {
+          id: 'tx-real-450',
+          organizationId: 'org-test',
+          accountId: 'acc-inter',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'DEBIT',
+          amount: 450,
+          description: 'PIX ENVIADO OUTRO BANCO',
+          externalId: 'inter_acc-inter_2026-09-16_DEBIT_450_pix_enviado',
+          categorizationSource: 'MANUAL',
+          categoryId: 'cat-fornecedor',
+        },
+      ];
+
+      let transactionCalled = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => alreadyCleanList,
+          count: async () => 1,
+        },
+        $transaction: async () => {
+          transactionCalled = true;
+          return { removedCount: 0, mergedCount: 0, ambiguousCount: 0 };
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 0);
+      assert.strictEqual(res.manualDataMerged, 0);
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 0);
+      assert.strictEqual(transactionCalled, false, 'Prisma $transaction não deve ser acionado na 2ª execução idempotente');
+    });
+
+    // 17.7 BANK_WRITE_FORBIDDEN continua bloqueando escrita em recursos bancários
+    await st.test('17.7 BANK_WRITE_FORBIDDEN continua bloqueando qualquer escrita em recursos bancários', async () => {
+      const client = new InterClient({
+        clientId: 'id',
+        clientSecret: 'secret',
+        crtBase64: Buffer.from('cert').toString('base64'),
+        keyBase64: Buffer.from('key').toString('base64'),
+      });
+
+      await assert.rejects(
+        async () => {
+          await client.requestBankingResource('POST', '/banking/v2/pix');
+        },
+        (err: any) => {
+          return err.code === 'BANK_WRITE_FORBIDDEN' || err.message?.includes('BANK_WRITE_FORBIDDEN');
+        }
+      );
+    });
+  });
 });
 
 

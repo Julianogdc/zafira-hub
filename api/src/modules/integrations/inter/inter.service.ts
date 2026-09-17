@@ -144,35 +144,18 @@ export class InterService {
         const datePrecision = extractInterDatePrecision(item);
         const direction = normalizeInterDirection(item);
         const amount = normalizeInterAmount(item.valor);
+
+        // Prevenção contra criação de registros fantasmas de R$ 0,00 ou inválidos:
+        // Se o valor for nulo, indefinido, inválido ou <= 0, NÃO cria FinancialTransaction.
+        if (amount === null || amount <= 0) {
+          continue;
+        }
+
         const externalId = generateInterExternalId(item, occurredAt, direction, amount);
         const description = (item.descricao || item.titulo || 'Transação Banco Inter').trim();
         const counterpartyName = item.contraparte?.nome?.trim() || null;
         const counterpartyDocument = item.contraparte?.cpfCnpj?.replace(/\D/g, '').trim() || null;
         const externalReference = item.chavePix || item.idTransacao || null;
-
-        // Prevenção contra criação de registros fantasmas de R$ 0,00:
-        // Se amount === 0, verifica se já existe registro com valor real na mesma data e contraparte
-        if (amount === 0 && this.prisma.financialTransaction?.findFirst) {
-          const dateOnlyStr = occurredAt.toISOString().slice(0, 10);
-          const existingWithAmount = await this.prisma.financialTransaction.findFirst({
-            where: {
-              accountId: account.id,
-              occurredAt: {
-                gte: new Date(`${dateOnlyStr}T00:00:00.000Z`),
-                lte: new Date(`${dateOnlyStr}T23:59:59.999Z`),
-              },
-              amount: { gt: 0 },
-              OR: [
-                { counterpartyName: counterpartyName || undefined },
-                { description: description },
-              ],
-            },
-          });
-          if (existingWithAmount) {
-            // Já existe o registro canônico com valor real: não cria duplicata de R$ 0,00
-            continue;
-          }
-        }
 
         // Verifica se já existe o registro para preservar classificação MANUAL
         const existingTx = this.prisma.financialTransaction?.findUnique
@@ -454,9 +437,6 @@ export class InterService {
     scanned: number;
     duplicatesRemoved: number;
     manualDataMerged: number;
-    ambiguousDuplicatesSkipped: number;
-    remainingTransactions: number;
-    totalInspected: number;
     mergedCount: number;
     removedCount: number;
   }> {
@@ -478,16 +458,165 @@ export class InterService {
       orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
     });
 
-    const totalScanned = transactions.length;
+    const resolution = this.calculateDuplicateMatches(transactions);
 
-    // Separa transações válidas (amount > 0) e potenciais duplicatas de R$ 0,00
+    // Executa operações de mescla manual e exclusão
+    const updatesToRun: Array<() => Promise<any>> = [];
+    const deletesToRun: Array<() => Promise<any>> = [];
+
+    // 1. Atualizações de dados manuais para os canônicos
+    for (const [canonicalId, updateData] of resolution.canonicalUpdates.entries()) {
+      updatesToRun.push(() =>
+        this.prisma.financialTransaction.update({
+          where: { id: canonicalId },
+          data: updateData,
+        })
+      );
+    }
+
+    // 2. Transferências internas associadas
+    for (const transferOp of resolution.transferUpdates) {
+      updatesToRun.push(() =>
+        this.prisma.financialTransfer.update({
+          where: { id: transferOp.id },
+          data: transferOp.data,
+        })
+      );
+    }
+
+    // 3. Exclusão das duplicatas comprovadas
+    for (const dupId of resolution.duplicateIdsToRemove) {
+      deletesToRun.push(() =>
+        this.prisma.financialTransaction.delete({
+          where: { id: dupId },
+        })
+      );
+    }
+
+    // Execução em transação Prisma (somente se houver operações a executar - idempotência)
+    if (resolution.duplicateIdsToRemove.length > 0 || resolution.canonicalUpdates.size > 0 || resolution.transferUpdates.length > 0) {
+      if (typeof (this.prisma as any).$transaction === 'function') {
+        await (this.prisma as any).$transaction(async (txPrisma: any) => {
+          for (const [canonicalId, updateData] of resolution.canonicalUpdates.entries()) {
+            await txPrisma.financialTransaction.update({
+              where: { id: canonicalId },
+              data: updateData,
+            });
+          }
+          for (const transferOp of resolution.transferUpdates) {
+            await txPrisma.financialTransfer.update({
+              where: { id: transferOp.id },
+              data: transferOp.data,
+            });
+          }
+          if (resolution.duplicateIdsToRemove.length > 0) {
+            if (typeof txPrisma.financialTransaction?.deleteMany === 'function') {
+              await txPrisma.financialTransaction.deleteMany({
+                where: { id: { in: resolution.duplicateIdsToRemove } },
+              });
+            } else if (typeof txPrisma.financialTransaction?.delete === 'function') {
+              for (const dupId of resolution.duplicateIdsToRemove) {
+                await txPrisma.financialTransaction.delete({
+                  where: { id: dupId },
+                });
+              }
+            }
+          }
+        });
+      } else {
+        for (const op of updatesToRun) await op();
+        for (const op of deletesToRun) await op();
+      }
+    }
+
+    let remainingTransactions = Math.max(0, resolution.totalScanned - resolution.duplicateIdsToRemove.length);
+    if (typeof (this.prisma.financialTransaction as any).count === 'function') {
+      try {
+        remainingTransactions = await this.prisma.financialTransaction.count({
+          where: whereClause,
+        });
+      } catch {
+        remainingTransactions = Math.max(0, resolution.totalScanned - resolution.duplicateIdsToRemove.length);
+      }
+    }
+
+    return {
+      success: true,
+      scanned: resolution.totalScanned,
+      duplicatesRemoved: resolution.duplicateIdsToRemove.length,
+      manualDataMerged: resolution.manualDataMergedCount,
+      ambiguousDuplicatesSkipped: resolution.ambiguousDuplicatesSkipped,
+      remainingTransactions,
+      totalInspected: resolution.totalScanned,
+      mergedCount: resolution.manualDataMergedCount,
+      removedCount: resolution.duplicateIdsToRemove.length,
+    };
+  }
+
+  /**
+   * Prévia somente leitura do reparo de integridade do Banco Inter PJ.
+   * Não executa update nem delete no banco de dados.
+   * Retorna contadores agregados seguros para exibição no modal de confirmação do usuário.
+   */
+  async previewRepairInterDuplicates(organizationId?: string): Promise<{
+    success: boolean;
+    scanned: number;
+    duplicatesToRemove: number;
+    manualDataToMerge: number;
+    ambiguousDuplicatesToSkip: number;
+    expectedRemaining: number;
+    unmatchedZeroCount: number;
+    patterns: Record<string, number>;
+  }> {
+    const whereClause: any = {
+      account: { provider: 'INTER' },
+    };
+    if (organizationId) {
+      whereClause.organizationId = organizationId;
+    }
+
+    const transactions = await this.prisma.financialTransaction.findMany({
+      where: whereClause,
+      include: {
+        category: true,
+        client: true,
+        sourceTransfer: true,
+        destTransfer: true,
+      },
+      orderBy: [{ occurredAt: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    const resolution = this.calculateDuplicateMatches(transactions);
+
+    return {
+      success: true,
+      scanned: resolution.totalScanned,
+      duplicatesToRemove: resolution.duplicateIdsToRemove.length,
+      manualDataToMerge: resolution.manualDataMergedCount,
+      ambiguousDuplicatesToSkip: resolution.ambiguousDuplicatesSkipped,
+      expectedRemaining: Math.max(0, resolution.totalScanned - resolution.duplicateIdsToRemove.length),
+      unmatchedZeroCount: resolution.unmatchedZeroCount,
+      patterns: resolution.patterns,
+    };
+  }
+
+  /**
+   * Helper unificado de cálculo e matching de duplicatas (Provas A, B e C).
+   * Compartilhado entre a prévia somente leitura e o reparo definitivo.
+   */
+  private calculateDuplicateMatches(transactions: any[]): {
+    totalScanned: number;
+    duplicateIdsToRemove: string[];
+    canonicalUpdates: Map<string, any>;
+    transferUpdates: Array<{ id: string; data: any }>;
+    manualDataMergedCount: number;
+    ambiguousDuplicatesSkipped: number;
+    unmatchedZeroCount: number;
+    patterns: Record<string, number>;
+  } {
+    const totalScanned = transactions.length;
     const zeroTxs = transactions.filter((t) => Number(t.amount) === 0);
     const validTxs = transactions.filter((t) => Number(t.amount) > 0);
-
-    let duplicatesRemoved = 0;
-    let manualDataMerged = 0;
-    let ambiguousDuplicatesSkipped = 0;
-    const matchedCanonicalIds = new Set<string>();
 
     const normalizeStrict = (str?: string | null): string => {
       if (!str || typeof str !== 'string') return '';
@@ -499,120 +628,165 @@ export class InterService {
         .trim();
     };
 
-    const getOfficialId = (rawPayload: any): string => {
-      if (!rawPayload || typeof rawPayload !== 'object') return '';
-      return String(rawPayload.idTransacao || rawPayload.codigoTransacao || rawPayload.nossoNumero || '').trim();
+    const getOfficialId = (rawPayload: any, extRef?: string | null): string => {
+      if (rawPayload && typeof rawPayload === 'object') {
+        const id = String(rawPayload.idTransacao || rawPayload.codigoTransacao || rawPayload.nossoNumero || '').trim();
+        if (id) return id;
+      }
+      if (extRef && typeof extRef === 'string') {
+        const cleanRef = extRef.trim();
+        if (cleanRef && !cleanRef.startsWith('inter_')) return cleanRef;
+      }
+      return '';
     };
+
+    const extractLegacyAmount = (extId: string): number | null => {
+      if (!extId || typeof extId !== 'string') return null;
+      const match = extId.match(/^inter_\d{4}-\d{2}-\d{2}_(?:CREDIT|DEBIT)_([0-9.]+)(?:_|$)/);
+      if (match && match[1]) {
+        const val = Number(match[1]);
+        if (!isNaN(val) && val > 0) return val;
+      }
+      return null;
+    };
+
+    const patterns: Record<string, number> = {};
+    for (const z of zeroTxs) {
+      const ext = z.externalId || '';
+      let pat = 'OUTRO';
+      if (ext.startsWith('inter_') && ext.includes('_0_')) {
+        pat = 'INTER_COMPOSTO_VALOR_ZERO';
+      } else if (ext.startsWith('inter_') && !ext.includes('_0_')) {
+        pat = 'INTER_COMPOSTO_VALOR_LEGADO';
+      } else if (!ext.startsWith('inter_') && ext.trim() !== '') {
+        pat = 'ID_OFICIAL_DIRETO';
+      }
+      patterns[pat] = (patterns[pat] || 0) + 1;
+    }
+
+    let ambiguousDuplicatesSkipped = 0;
+    const confirmedMatches: Array<{ duplicate: any; canonical: any }> = [];
 
     for (const duplicate of zeroTxs) {
       const dupRaw = (duplicate.rawPayload as any) || {};
-      const dupId = getOfficialId(dupRaw);
+      const dupId = getOfficialId(dupRaw, duplicate.externalReference);
       const dupDateStr = duplicate.occurredAt.toISOString().slice(0, 10);
       const dupTitleStrict = normalizeStrict(dupRaw.titulo || duplicate.description);
+      const dupLegacyAmount = extractLegacyAmount(duplicate.externalId);
 
       let matchingCandidates: typeof validTxs = [];
 
       // PROVA A: idTransacao / codigoTransacao / nossoNumero oficial idêntico
       if (dupId) {
         matchingCandidates = validTxs.filter((c) => {
-          if (matchedCanonicalIds.has(c.id)) return false;
           if (c.accountId !== duplicate.accountId) return false;
-          const cId = getOfficialId(c.rawPayload);
+          const cId = getOfficialId(c.rawPayload, c.externalReference);
           return cId.length > 0 && cId === dupId;
         });
       }
 
-      // PROVA B: se não casou pela Prova A, busca por mesma conta, mesma data civil, mesma direção e MESMO título bancário estrito
-      if (matchingCandidates.length === 0 && dupTitleStrict.length > 0) {
+      // PROVA B: externalId legado contém o valor original e coincide com o lançamento canônico
+      if (matchingCandidates.length === 0 && dupLegacyAmount !== null && dupLegacyAmount > 0) {
         matchingCandidates = validTxs.filter((c) => {
-          if (matchedCanonicalIds.has(c.id)) return false;
           if (c.accountId !== duplicate.accountId) return false;
-
           const cDateStr = c.occurredAt.toISOString().slice(0, 10);
           if (cDateStr !== dupDateStr) return false;
           if (c.direction !== duplicate.direction) return false;
-
           const cRaw = (c.rawPayload as any) || {};
           const cTitleStrict = normalizeStrict(cRaw.titulo || c.description);
+          if (cTitleStrict !== dupTitleStrict) return false;
+          return Math.abs(Number(c.amount) - dupLegacyAmount) < 0.001;
+        });
+      }
 
-          // Igualdade estrita inequívoca: SEM correspondência parcial
+      // PROVA C: artefato com externalId contendo valor zero ou padrão conhecido
+      if (matchingCandidates.length === 0 && dupTitleStrict.length > 0) {
+        matchingCandidates = validTxs.filter((c) => {
+          if (c.accountId !== duplicate.accountId) return false;
+          const cDateStr = c.occurredAt.toISOString().slice(0, 10);
+          if (cDateStr !== dupDateStr) return false;
+          if (c.direction !== duplicate.direction) return false;
+          const cRaw = (c.rawPayload as any) || {};
+          const cTitleStrict = normalizeStrict(cRaw.titulo || c.description);
           return cTitleStrict.length > 0 && cTitleStrict === dupTitleStrict;
         });
       }
 
-      // DECISÃO BASEADA EM EVIDÊNCIAS:
+      // Decisão baseada em evidências estritas
       if (matchingCandidates.length === 1) {
-        // Exatamente UM candidato comprovado
-        const canonical = matchingCandidates[0];
-        matchedCanonicalIds.add(canonical.id);
+        confirmedMatches.push({
+          duplicate,
+          canonical: matchingCandidates[0],
+        });
+      } else if (matchingCandidates.length > 1) {
+        // Ambiguidade: 2 ou mais candidatos legítimos. NÃO exclui por segurança.
+        ambiguousDuplicatesSkipped += 1;
+      }
+    }
 
-        // Se o duplicado possui classificação manual, transfere com prioridade
-        const shouldTransferClassification =
-          duplicate.categorizationSource === 'MANUAL' ||
-          (duplicate.categoryId && !canonical.categoryId) ||
-          (duplicate.clientId && !canonical.clientId);
+    // Agrupamento por lançamento canônico para transferência segura de classificações manuais
+    const canonicalGroups = new Map<string, { canonical: any; duplicates: any[] }>();
+    for (const match of confirmedMatches) {
+      const existing = canonicalGroups.get(match.canonical.id) || {
+        canonical: match.canonical,
+        duplicates: [],
+      };
+      existing.duplicates.push(match.duplicate);
+      canonicalGroups.set(match.canonical.id, existing);
+    }
 
-        if (shouldTransferClassification) {
-          await this.prisma.financialTransaction.update({
-            where: { id: canonical.id },
-            data: {
-              categoryId: duplicate.categoryId || canonical.categoryId,
-              clientId: duplicate.clientId || canonical.clientId,
-              suggestedClientId: duplicate.suggestedClientId || canonical.suggestedClientId,
-              categorizationSource: duplicate.categorizationSource === 'MANUAL' ? 'MANUAL' : canonical.categorizationSource,
-              categorizationConfidence: duplicate.categorizationSource === 'MANUAL' ? 1.0 : canonical.categorizationConfidence,
-            },
-          });
-          manualDataMerged += 1;
-        }
+    const canonicalUpdates = new Map<string, any>();
+    const transferUpdates: Array<{ id: string; data: any }> = [];
+    let manualDataMergedCount = 0;
 
-        // Transfere transferências internas associadas
-        if (duplicate.sourceTransfer && !canonical.sourceTransfer) {
-          await this.prisma.financialTransfer.update({
-            where: { id: duplicate.sourceTransfer.id },
+    for (const [canonicalId, group] of canonicalGroups.entries()) {
+      const canonical = group.canonical;
+      const manualDup = group.duplicates.find(
+        (d) =>
+          d.categorizationSource === 'MANUAL' ||
+          (d.categoryId && !canonical.categoryId) ||
+          (d.clientId && !canonical.clientId)
+      );
+
+      if (manualDup) {
+        canonicalUpdates.set(canonicalId, {
+          categoryId: manualDup.categoryId || canonical.categoryId,
+          clientId: manualDup.clientId || canonical.clientId,
+          suggestedClientId: manualDup.suggestedClientId || canonical.suggestedClientId,
+          categorizationSource: manualDup.categorizationSource === 'MANUAL' ? 'MANUAL' : canonical.categorizationSource,
+          categorizationConfidence: manualDup.categorizationSource === 'MANUAL' ? 1.0 : canonical.categorizationConfidence,
+        });
+        manualDataMergedCount += 1;
+      }
+
+      for (const dup of group.duplicates) {
+        if (dup.sourceTransfer && !canonical.sourceTransfer) {
+          transferUpdates.push({
+            id: dup.sourceTransfer.id,
             data: { sourceTransactionId: canonical.id },
           });
         }
-        if (duplicate.destTransfer && !canonical.destTransfer) {
-          await this.prisma.financialTransfer.update({
-            where: { id: duplicate.destTransfer.id },
+        if (dup.destTransfer && !canonical.destTransfer) {
+          transferUpdates.push({
+            id: dup.destTransfer.id,
             data: { destinationTransactionId: canonical.id },
           });
         }
-
-        // Exclui a duplicata comprovada de R$ 0,00
-        await this.prisma.financialTransaction.delete({
-          where: { id: duplicate.id },
-        });
-
-        duplicatesRemoved += 1;
-      } else if (matchingCandidates.length > 1) {
-        // Ambiguidade: 2 ou mais candidatos possíveis. NÃO exclui e NÃO mescla por segurança.
-        ambiguousDuplicatesSkipped += 1;
-      }
-      // Se matchingCandidates.length === 0, não é excluída nem alterada.
-    }
-
-    let remainingTransactions = Math.max(0, totalScanned - duplicatesRemoved);
-    if (typeof (this.prisma.financialTransaction as any).count === 'function') {
-      try {
-        remainingTransactions = await this.prisma.financialTransaction.count({
-          where: whereClause,
-        });
-      } catch {
-        remainingTransactions = Math.max(0, totalScanned - duplicatesRemoved);
       }
     }
+
+    const duplicateIdsToRemove = confirmedMatches.map((m) => m.duplicate.id);
+    const unmatchedZeroCount = Math.max(0, zeroTxs.length - duplicateIdsToRemove.length - ambiguousDuplicatesSkipped);
 
     return {
-      scanned: totalScanned,
-      duplicatesRemoved,
-      manualDataMerged,
+      totalScanned,
+      duplicateIdsToRemove,
+      canonicalUpdates,
+      transferUpdates,
+      manualDataMergedCount,
       ambiguousDuplicatesSkipped,
-      remainingTransactions,
-      totalInspected: totalScanned,
-      mergedCount: manualDataMerged,
-      removedCount: duplicatesRemoved,
+      unmatchedZeroCount,
+      patterns,
     };
   }
 

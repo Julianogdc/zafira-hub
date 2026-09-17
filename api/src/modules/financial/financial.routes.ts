@@ -604,6 +604,19 @@ export async function financialRoutes(app: FastifyInstance) {
   app.post('/api/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
 
   /**
+   * GET /integrations/inter/repair-duplicates/preview (SOMENTE LEITURA)
+   * Prévia do reparo de duplicatas do Banco Inter PJ.
+   * Não grava nada no banco de dados e retorna contadores agregados seguros para confirmação explícita.
+   */
+  const handlePreviewRepairInterDuplicates = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const result = await interService.previewRepairInterDuplicates(organizationId);
+    return reply.send(result);
+  };
+  app.get('/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
+  app.get('/api/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
+
+  /**
    * GET /integrations/inter/diagnostics/date-fields (SOMENTE LEITURA - GET EXCLUSIVO)
    * Diagnóstico seguro sobre os rawPayloads das transações Inter armazenadas.
    * Não expõe dados pessoais, valores financeiros, descrições ou credenciais.

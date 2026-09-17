@@ -185,20 +185,22 @@ export function normalizeInterDirection(item: any): FinancialTransactionDirectio
 
 /**
  * Normaliza o valor da transação garantindo magnitude positiva absoluta.
+ * Retorna null se o valor for ausente, inválido ou não interpretável.
  * O sinal e a cor da transação são determinados exclusivamente pela direção (CREDIT / DEBIT).
  */
-export function normalizeInterAmount(rawAmount: unknown): number {
+export function normalizeInterAmount(rawAmount: unknown): number | null {
   if (rawAmount === null || rawAmount === undefined) {
-    return 0;
+    return null;
   }
 
   if (typeof rawAmount === 'number') {
-    return Math.abs(isNaN(rawAmount) ? 0 : rawAmount);
+    if (isNaN(rawAmount) || !isFinite(rawAmount)) return null;
+    return Math.abs(rawAmount);
   }
 
   if (typeof rawAmount === 'string') {
     let clean = rawAmount.trim();
-    if (!clean) return 0;
+    if (!clean) return null;
 
     // Se estiver no formato brasileiro '1.250,50'
     if (clean.includes(',') && clean.includes('.')) {
@@ -208,10 +210,11 @@ export function normalizeInterAmount(rawAmount: unknown): number {
     }
 
     const parsed = Number(clean);
-    return Math.abs(isNaN(parsed) ? 0 : parsed);
+    if (isNaN(parsed) || !isFinite(parsed)) return null;
+    return Math.abs(parsed);
   }
 
-  return 0;
+  return null;
 }
 
 /**

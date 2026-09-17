@@ -279,6 +279,19 @@ export const financialApi = {
     return api.post('/integrations/inter/reprocess');
   },
 
+  previewRepairInterDuplicates: async (): Promise<{
+    success: boolean;
+    scanned: number;
+    duplicatesToRemove: number;
+    manualDataToMerge: number;
+    ambiguousDuplicatesToSkip: number;
+    expectedRemaining: number;
+    unmatchedZeroCount: number;
+    patterns: Record<string, number>;
+  }> => {
+    return api.get('/integrations/inter/repair-duplicates/preview');
+  },
+
   repairInterDuplicates: async (): Promise<{
     success: boolean;
     scanned: number;
