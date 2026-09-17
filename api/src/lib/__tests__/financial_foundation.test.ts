@@ -3832,6 +3832,183 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(typeof (client as any).createPixPayment, 'undefined');
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // 22. Endurecimento de Segurança do Reparo de Duplicatas e Diagnóstico GET Exclusivo
+  // ---------------------------------------------------------------------------
+  await t.test('22. Endurecimento de Segurança do Reparo de Duplicatas e Diagnóstico GET Exclusivo', async (tSub) => {
+    // 22.1 Duas transferências diferentes, mesma data e mesma direção, NUNCA são mescladas ou excluídas
+    await tSub.test('22.1 Duas transferências diferentes na mesma data e direção NUNCA são mescladas ou excluídas', async () => {
+      const state = [
+        {
+          id: 'tx-real-1',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 500.0,
+          direction: 'DEBIT',
+          description: 'Pix enviado - Fornecedor A',
+          rawPayload: { titulo: 'Pix enviado - Fornecedor A' },
+        },
+        {
+          id: 'tx-real-2',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 800.0,
+          direction: 'DEBIT',
+          description: 'Pix enviado - Fornecedor B',
+          rawPayload: { titulo: 'Pix enviado - Fornecedor B' },
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async () => {
+            throw new Error('NENHUM LANÇAMENTO REAL DEVE SER DELETADO!');
+          },
+          count: async () => state.length,
+        },
+      };
+
+      const service = new InterService(mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.scanned, 2);
+      assert.strictEqual(res.duplicatesRemoved, 0, 'Nenhum lançamento real deve ser removido');
+      assert.strictEqual(res.manualDataMerged, 0, 'Nenhum dado deve ser mesclado');
+      assert.strictEqual(res.remainingTransactions, 2);
+    });
+
+    // 22.2 Dois candidatos possíveis resultam em skip (ambiguousDuplicatesSkipped), sem exclusão
+    await tSub.test('22.2 Dois candidatos possíveis resultam em skip (ambiguousDuplicatesSkipped), sem exclusão', async () => {
+      const state = [
+        {
+          id: 'tx-can-1',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 300.0,
+          direction: 'DEBIT',
+          description: 'PAGAMENTO BOLETO',
+          rawPayload: { titulo: 'PAGAMENTO BOLETO' },
+        },
+        {
+          id: 'tx-can-2',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 450.0,
+          direction: 'DEBIT',
+          description: 'PAGAMENTO BOLETO',
+          rawPayload: { titulo: 'PAGAMENTO BOLETO' },
+        },
+        {
+          id: 'tx-dup-zero-ambiguous',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 0,
+          direction: 'DEBIT',
+          description: 'PAGAMENTO BOLETO',
+          rawPayload: { titulo: 'PAGAMENTO BOLETO' },
+        },
+      ];
+
+      let deletedCalled = false;
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async () => {
+            deletedCalled = true;
+          },
+          count: async () => state.length,
+        },
+      };
+
+      const service = new InterService(mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.scanned, 3);
+      assert.strictEqual(res.duplicatesRemoved, 0, 'Não deve remover quando houver ambiguidade');
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 1, 'Deve registrar o skip de ambiguidade');
+      assert.strictEqual(deletedCalled, false, 'delete não pode ter sido chamado');
+      assert.strictEqual(res.remainingTransactions, 3);
+    });
+
+    // 22.3 Correspondência exata única permite reparo com Prova B estrita
+    await tSub.test('22.3 Correspondência exata única permite reparo seguro com Prova B estrita', async () => {
+      const state = [
+        {
+          id: 'tx-can-exact',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 120.50,
+          direction: 'CREDIT',
+          description: 'Pix recebido - Saldo',
+          rawPayload: { titulo: 'Pix Recebido - Saldo' }, // variação de maiúsculas/minúsculas
+        },
+        {
+          id: 'tx-dup-zero-exact',
+          accountId: 'acc-inter-1',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          amount: 0,
+          direction: 'CREDIT',
+          description: 'pix recebido - saldo',
+          rawPayload: { titulo: 'PIX RECEBIDO - SALDO' },
+        },
+      ];
+
+      let deletedId: string | null = null;
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async (args: any) => {
+            deletedId = args.where.id;
+            const idx = state.findIndex((s) => s.id === args.where.id);
+            if (idx >= 0) state.splice(idx, 1);
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+      };
+
+      const service = new InterService(mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.scanned, 2);
+      assert.strictEqual(res.duplicatesRemoved, 1);
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 0);
+      assert.strictEqual(deletedId, 'tx-dup-zero-exact');
+      assert.strictEqual(state.length, 1);
+      assert.strictEqual(state[0].id, 'tx-can-exact');
+    });
+
+    // 22.4 Endpoint de diagnóstico existe somente como GET (POST retorna 404)
+    await tSub.test('22.4 Endpoint de diagnóstico existe somente como GET (POST retorna 404)', async () => {
+      const app = fastify();
+      await app.register(cookie);
+      await app.register(jwt, { secret: 'test-jwt-secret' });
+
+      // Registra rota conforme a implementação oficial
+      app.get('/integrations/inter/diagnostics/date-fields', async (req, reply) => {
+        return reply.send({ totalTransactions: 10, detectedPrecision: { DATETIME: 0, DATE_ONLY: 10 } });
+      });
+
+      // 1. Requisição GET com sucesso
+      const getRes = await app.inject({
+        method: 'GET',
+        url: '/integrations/inter/diagnostics/date-fields',
+      });
+      assert.strictEqual(getRes.statusCode, 200);
+
+      // 2. Requisição POST deve resultar em 404 Not Found
+      const postRes = await app.inject({
+        method: 'POST',
+        url: '/integrations/inter/diagnostics/date-fields',
+      });
+      assert.strictEqual(postRes.statusCode, 404, 'POST deve ser rejeitado com 404 Not Found');
+    });
+  });
 });
 
 

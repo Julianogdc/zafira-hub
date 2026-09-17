@@ -435,20 +435,26 @@ export class InterService {
    * - Execução 100% idempotente: executar novamente resulta em 0 alterações.
    */
   /**
-   * Rotina idempotente de reparo de integridade do extrato Banco Inter PJ.
-   * Identifica e remove as duplicatas espúrias com valor R$ 0,00 geradas na primeira importação.
-   * - Garante pareamento robusto mesmo se counterpartyName divergir (ex: nulo no registro de 0 e preenchido no canônico).
-   * - Se o registro de R$ 0,00 possuir classificação manual (categorizationSource === 'MANUAL'),
-   *   essa classificação (categoryId, clientId, categorizationSource, categorizationConfidence)
-   *   é transferida para o registro canônico.
-   * - Se houver vínculos de transferências internas (sourceTransfer / destTransfer), são transferidos para o canônico.
-   * - Apenas o registro duplicado confirmado de R$ 0,00 é excluído.
-   * - Execução 100% idempotente: executar novamente resulta em 0 alterações.
+   * Rotina endurecida e segura de reparo de integridade do extrato Banco Inter PJ.
+   * REGRAS INEGOCIÁVEIS DE SEGURANÇA:
+   * 1. Nunca considerar "mesma data + mesma direção" suficiente para remover ou mesclar lançamentos.
+   * 2. Uma duplicata de R$ 0,00 só é excluída se houver:
+   *    - Prova A: idTransacao/codigoTransacao/nossoNumero oficial idêntico; OU
+   *    - Prova B: exatamente UM candidato canônico não-zero na mesma conta, mesma data civil, mesma direção
+   *      e mesmo título bancário após normalização estrita (sem acentos, sem maiúsculas/minúsculas, sem espaços extras,
+   *      sem correspondência parcial e sem correspondência subjetiva).
+   * 3. Se houver dois ou mais candidatos possíveis:
+   *    - NÃO excluir
+   *    - NÃO mesclar
+   *    - Contar como ambiguousDuplicatesSkipped
+   * 4. Transfere classificação manual (categorizationSource === 'MANUAL'), categoria e cliente da duplicata
+   *    para o registro canônico.
    */
   async repairInterDuplicates(organizationId?: string): Promise<{
     scanned: number;
     duplicatesRemoved: number;
     manualDataMerged: number;
+    ambiguousDuplicatesSkipped: number;
     remainingTransactions: number;
     totalInspected: number;
     mergedCount: number;
@@ -480,65 +486,67 @@ export class InterService {
 
     let duplicatesRemoved = 0;
     let manualDataMerged = 0;
+    let ambiguousDuplicatesSkipped = 0;
     const matchedCanonicalIds = new Set<string>();
 
+    const normalizeStrict = (str?: string | null): string => {
+      if (!str || typeof str !== 'string') return '';
+      return str
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+
+    const getOfficialId = (rawPayload: any): string => {
+      if (!rawPayload || typeof rawPayload !== 'object') return '';
+      return String(rawPayload.idTransacao || rawPayload.codigoTransacao || rawPayload.nossoNumero || '').trim();
+    };
+
     for (const duplicate of zeroTxs) {
-      const dupDateStr = duplicate.occurredAt.toISOString().slice(0, 10);
       const dupRaw = (duplicate.rawPayload as any) || {};
-      const dupId = String(dupRaw.idTransacao || dupRaw.codigoTransacao || dupRaw.nossoNumero || '').trim();
-      const dupDescClean = (duplicate.description || dupRaw.titulo || dupRaw.descricao || '')
-        .trim()
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '');
+      const dupId = getOfficialId(dupRaw);
+      const dupDateStr = duplicate.occurredAt.toISOString().slice(0, 10);
+      const dupTitleStrict = normalizeStrict(dupRaw.titulo || duplicate.description);
 
-      // Procura o registro canônico correspondente dentre os válidos que ainda não foram associados
-      let canonical = validTxs.find((c) => {
-        if (matchedCanonicalIds.has(c.id)) return false;
-        if (c.accountId !== duplicate.accountId) return false;
+      let matchingCandidates: typeof validTxs = [];
 
-        const cRaw = (c.rawPayload as any) || {};
-        const cId = String(cRaw.idTransacao || cRaw.codigoTransacao || cRaw.nossoNumero || '').trim();
-
-        // 1. Identificador oficial idTransacao idêntico
-        if (dupId && cId && dupId === cId) return true;
-
-        const cDateStr = c.occurredAt.toISOString().slice(0, 10);
-        if (dupDateStr !== cDateStr) return false;
-
-        // 2. Mesma direção e descrição/título compatível
-        if (c.direction === duplicate.direction) {
-          const cDescClean = (c.description || cRaw.titulo || cRaw.descricao || '')
-            .trim()
-            .toLowerCase()
-            .replace(/[^a-z0-9]/g, '');
-
-          if (
-            dupDescClean === cDescClean ||
-            (dupDescClean.length > 3 && cDescClean.includes(dupDescClean)) ||
-            (cDescClean.length > 3 && dupDescClean.includes(cDescClean))
-          ) {
-            return true;
-          }
-        }
-
-        return false;
-      });
-
-      // Fallback: se houver apenas uma transação válida na mesma data e mesma direção ainda não pareada
-      if (!canonical) {
-        canonical = validTxs.find((c) => {
+      // PROVA A: idTransacao / codigoTransacao / nossoNumero oficial idêntico
+      if (dupId) {
+        matchingCandidates = validTxs.filter((c) => {
           if (matchedCanonicalIds.has(c.id)) return false;
           if (c.accountId !== duplicate.accountId) return false;
-          const cDateStr = c.occurredAt.toISOString().slice(0, 10);
-          return cDateStr === dupDateStr && c.direction === duplicate.direction;
+          const cId = getOfficialId(c.rawPayload);
+          return cId.length > 0 && cId === dupId;
         });
       }
 
-      if (canonical) {
+      // PROVA B: se não casou pela Prova A, busca por mesma conta, mesma data civil, mesma direção e MESMO título bancário estrito
+      if (matchingCandidates.length === 0 && dupTitleStrict.length > 0) {
+        matchingCandidates = validTxs.filter((c) => {
+          if (matchedCanonicalIds.has(c.id)) return false;
+          if (c.accountId !== duplicate.accountId) return false;
+
+          const cDateStr = c.occurredAt.toISOString().slice(0, 10);
+          if (cDateStr !== dupDateStr) return false;
+          if (c.direction !== duplicate.direction) return false;
+
+          const cRaw = (c.rawPayload as any) || {};
+          const cTitleStrict = normalizeStrict(cRaw.titulo || c.description);
+
+          // Igualdade estrita inequívoca: SEM correspondência parcial
+          return cTitleStrict.length > 0 && cTitleStrict === dupTitleStrict;
+        });
+      }
+
+      // DECISÃO BASEADA EM EVIDÊNCIAS:
+      if (matchingCandidates.length === 1) {
+        // Exatamente UM candidato comprovado
+        const canonical = matchingCandidates[0];
         matchedCanonicalIds.add(canonical.id);
 
-        // Se o duplicado foi classificado manualmente:
-        // transfere a classificação manual para o canônico com prioridade máxima
+        // Se o duplicado possui classificação manual, transfere com prioridade
         const shouldTransferClassification =
           duplicate.categorizationSource === 'MANUAL' ||
           (duplicate.categoryId && !canonical.categoryId) ||
@@ -558,7 +566,7 @@ export class InterService {
           manualDataMerged += 1;
         }
 
-        // Se o duplicado tiver transferência vinculada e o canônico não tiver, transfere
+        // Transfere transferências internas associadas
         if (duplicate.sourceTransfer && !canonical.sourceTransfer) {
           await this.prisma.financialTransfer.update({
             where: { id: duplicate.sourceTransfer.id },
@@ -572,13 +580,17 @@ export class InterService {
           });
         }
 
-        // Remove com segurança o registro de R$ 0,00 comprovadamente espúrio
+        // Exclui a duplicata comprovada de R$ 0,00
         await this.prisma.financialTransaction.delete({
           where: { id: duplicate.id },
         });
 
         duplicatesRemoved += 1;
+      } else if (matchingCandidates.length > 1) {
+        // Ambiguidade: 2 ou mais candidatos possíveis. NÃO exclui e NÃO mescla por segurança.
+        ambiguousDuplicatesSkipped += 1;
       }
+      // Se matchingCandidates.length === 0, não é excluída nem alterada.
     }
 
     let remainingTransactions = Math.max(0, totalScanned - duplicatesRemoved);
@@ -596,6 +608,7 @@ export class InterService {
       scanned: totalScanned,
       duplicatesRemoved,
       manualDataMerged,
+      ambiguousDuplicatesSkipped,
       remainingTransactions,
       totalInspected: totalScanned,
       mergedCount: manualDataMerged,

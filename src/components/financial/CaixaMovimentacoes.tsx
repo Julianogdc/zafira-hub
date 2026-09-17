@@ -360,14 +360,20 @@ export function CaixaMovimentacoes() {
       if (res.success) {
         const removed = res.duplicatesRemoved ?? res.removedCount ?? 0;
         const merged = res.manualDataMerged ?? res.mergedCount ?? 0;
+        const ambiguous = res.ambiguousDuplicatesSkipped ?? 0;
         const remaining = res.remainingTransactions ?? 44;
 
         if (removed > 0) {
+          const ambiguousText = ambiguous > 0 ? ` (${ambiguous} duplicatas ambíguas ignoradas por segurança)` : '';
           toast.success(
-            `Extrato reparado: ${removed} duplicatas removidas, ${merged} classificações manuais preservadas. ${remaining} movimentações válidas permanecem.`
+            `Extrato reparado: ${removed} duplicatas removidas, ${merged} classificações manuais preservadas. ${remaining} movimentações válidas permanecem.${ambiguousText}`
           );
         } else {
-          toast.info('Extrato íntegro. Nenhuma duplicata encontrada.');
+          if (ambiguous > 0) {
+            toast.info(`Extrato íntegro. Nenhuma duplicata encontrada (${ambiguous} registros ambíguos ignorados por segurança).`);
+          } else {
+            toast.info('Extrato íntegro. Nenhuma duplicata encontrada.');
+          }
         }
         await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
       } else {

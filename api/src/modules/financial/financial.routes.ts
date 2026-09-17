@@ -574,8 +574,8 @@ export async function financialRoutes(app: FastifyInstance) {
    * Rotina de reparo local, segura e idempotente para duplicatas comprovadas do Banco Inter PJ.
    * - Mescla classificações manuais para o registro canônico com valor real.
    * - Preserva transferências e histórico.
-   * - Remove exclusivamente duplicatas comprovadas de R$ 0,00.
-   * - Retorna: scanned, duplicatesRemoved, manualDataMerged, remainingTransactions
+   * - Remove exclusivamente duplicatas comprovadas de R$ 0,00 (Prova A ou Prova B estrita).
+   * - Retorna: scanned, duplicatesRemoved, manualDataMerged, ambiguousDuplicatesSkipped, remainingTransactions
    */
   const handleRepairInterDuplicates = async (req: FastifyRequest, reply: FastifyReply) => {
     const organizationId = getOrganizationId(req);
@@ -585,6 +585,7 @@ export async function financialRoutes(app: FastifyInstance) {
       scanned: result.scanned,
       duplicatesRemoved: result.duplicatesRemoved,
       manualDataMerged: result.manualDataMerged,
+      ambiguousDuplicatesSkipped: result.ambiguousDuplicatesSkipped,
       remainingTransactions: result.remainingTransactions,
       // Retrocompatibilidade
       totalInspected: result.totalInspected,
@@ -603,7 +604,7 @@ export async function financialRoutes(app: FastifyInstance) {
   app.post('/api/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
 
   /**
-   * GET / POST /integrations/inter/diagnostics/date-fields
+   * GET /integrations/inter/diagnostics/date-fields (SOMENTE LEITURA - GET EXCLUSIVO)
    * Diagnóstico seguro sobre os rawPayloads das transações Inter armazenadas.
    * Não expõe dados pessoais, valores financeiros, descrições ou credenciais.
    */
@@ -613,7 +614,5 @@ export async function financialRoutes(app: FastifyInstance) {
     return reply.send(diagnostics);
   };
   app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
-  app.post('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
   app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
-  app.post('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
 }

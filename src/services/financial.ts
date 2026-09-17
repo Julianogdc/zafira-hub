@@ -284,6 +284,7 @@ export const financialApi = {
     scanned: number;
     duplicatesRemoved: number;
     manualDataMerged: number;
+    ambiguousDuplicatesSkipped: number;
     remainingTransactions: number;
     message?: string;
     totalInspected?: number;
