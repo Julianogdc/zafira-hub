@@ -265,6 +265,7 @@ export class FinancialService {
         provider: t.account.provider,
         externalId: t.externalId,
         occurredAt: t.occurredAt.toISOString(),
+        transactedAt: t.occurredAt.toISOString(),
         direction: t.direction,
         kind: t.kind,
         amount: Number(t.amount),

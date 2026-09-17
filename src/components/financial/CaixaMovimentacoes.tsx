@@ -90,16 +90,19 @@ export function CaixaMovimentacoes() {
   };
 
   // Formatação de Data
-  const formatDate = (isoString: string) => {
+  const formatDate = (rawDate: string | Date | null | undefined) => {
+    if (!rawDate) return '-';
     try {
-      const d = new Date(isoString);
+      const d = typeof rawDate === 'string' ? new Date(rawDate) : rawDate;
+      if (isNaN(d.getTime())) return '-';
       return d.toLocaleDateString('pt-BR', {
+        timeZone: 'UTC',
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
       });
     } catch {
-      return isoString;
+      return '-';
     }
   };
 
@@ -198,6 +201,26 @@ export function CaixaMovimentacoes() {
     }
   };
 
+  // Reprocessar Extrato Inter
+  const [reprocessingInter, setReprocessingInter] = useState<boolean>(false);
+  const handleReprocessInter = async () => {
+    setReprocessingInter(true);
+    try {
+      const res = await financialApi.reprocessInter();
+      if (res.success) {
+        toast.success(`Reprocessamento concluído: ${res.updatedCount} movimentações corrigidas.`);
+        await Promise.all([loadOverviewAndCategories(), loadTransactions()]);
+      } else {
+        toast.error('Não foi possível reprocessar as movimentações.');
+      }
+    } catch (err: any) {
+      console.error('Erro ao reprocessar Inter:', err);
+      toast.error(err.response?.data?.message || 'Falha no reprocessamento do Banco Inter.');
+    } finally {
+      setReprocessingInter(false);
+    }
+  };
+
   // Abrir Modal de Edição de Categoria
   const openEditCategory = (tx: FinancialTransactionItem) => {
     setSelectedTx(tx);
@@ -268,8 +291,20 @@ export function CaixaMovimentacoes() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleReprocessInter}
+            disabled={reprocessingInter || syncingInter}
+            className="border-white/10 bg-zinc-900/50 text-zinc-300 hover:bg-zinc-800 text-xs gap-1.5 h-8"
+            title="Reprocessa e corrige datas e direções (Crédito/Débito) das movimentações já importadas sem duplicar"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${reprocessingInter ? 'animate-spin text-zinc-300' : 'text-zinc-400'}`} />
+            <span>{reprocessingInter ? 'Reprocessando...' : 'Reprocessar Extrato'}</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleSyncInter}
-            disabled={syncingInter}
+            disabled={syncingInter || reprocessingInter}
             className="border-orange-500/30 bg-orange-500/10 text-orange-300 hover:bg-orange-500/20 text-xs gap-1.5 h-8"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${syncingInter ? 'animate-spin text-orange-400' : 'text-orange-400'}`} />
@@ -491,14 +526,14 @@ export function CaixaMovimentacoes() {
                 </tr>
               ) : (
                 transactions.map((tx) => {
-                  const isIncome = tx.direction === 'INCOME';
+                  const isCredit = tx.direction === 'CREDIT' || (tx.direction as string) === 'INCOME';
                   const isInternal = tx.kind === 'TRANSFER_INTERNAL';
 
                   return (
                     <tr key={tx.id} className="hover:bg-white/[0.02] transition-colors">
                       {/* Data */}
                       <td className="px-4 py-3 whitespace-nowrap text-zinc-400">
-                        {formatDate(tx.transactedAt)}
+                        {formatDate(tx.occurredAt || tx.transactedAt)}
                       </td>
 
                       {/* Conta */}
@@ -560,12 +595,12 @@ export function CaixaMovimentacoes() {
                           className={`font-semibold ${
                             isInternal
                               ? 'text-cyan-300'
-                              : isIncome
+                              : isCredit
                               ? 'text-emerald-400'
                               : 'text-red-400'
                           }`}
                         >
-                          {isInternal ? '' : isIncome ? '+ ' : '- '}
+                          {isInternal ? '' : isCredit ? '+ ' : '- '}
                           {formatBRL(tx.amount)}
                         </span>
                       </td>

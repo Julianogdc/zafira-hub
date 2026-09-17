@@ -1,8 +1,8 @@
 import { api } from '@/lib/api';
 
 export type FinancialAccountProvider = 'ASAAS' | 'INTER' | 'MANUAL';
-export type FinancialTransactionDirection = 'INCOME' | 'EXPENSE';
-export type FinancialTransactionKind = 'OPERATIONAL' | 'TRANSFER_INTERNAL' | 'FEE' | 'TAX' | 'ADJUSTMENT';
+export type FinancialTransactionDirection = 'CREDIT' | 'DEBIT' | 'INCOME' | 'EXPENSE';
+export type FinancialTransactionKind = 'OPERATIONAL' | 'CUSTOMER_PAYMENT' | 'EXPENSE' | 'TRANSFER_INTERNAL' | 'FEE' | 'TAX' | 'ADJUSTMENT';
 export type FinancialCategorizationSource = 'RULE' | 'MANUAL' | 'DEFAULT' | 'PENDING';
 export type FinancialTransferStatus = 'AUTO_MATCHED' | 'REVIEW' | 'CONFIRMED' | 'REJECTED';
 
@@ -52,7 +52,8 @@ export interface FinancialTransactionItem {
   direction: FinancialTransactionDirection;
   kind: FinancialTransactionKind;
   amount: number;
-  transactedAt: string;
+  occurredAt?: string;
+  transactedAt?: string;
   description: string;
   counterpartyName: string | null;
   counterpartyDocument: string | null;
@@ -172,5 +173,9 @@ export const financialApi = {
 
   syncInter: async (payload?: { startDate?: string; endDate?: string }): Promise<SyncInterResult> => {
     return api.post<SyncInterResult>('/integrations/inter/sync', payload || {});
+  },
+
+  reprocessInter: async (): Promise<{ success: boolean; message: string; reprocessedCount: number; updatedCount: number }> => {
+    return api.post('/integrations/inter/reprocess');
   },
 };

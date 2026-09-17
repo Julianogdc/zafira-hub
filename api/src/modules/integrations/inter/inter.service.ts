@@ -2,6 +2,11 @@ import { prisma as defaultPrisma } from '../../../lib/prisma.js';
 import { InterClient, interClient, InterIntegrationError } from './inter.client.js';
 import { FinancialCategoryService } from '../../financial/financial-category.service.js';
 import { FinancialReconciliationService } from '../../financial/financial-reconciliation.service.js';
+import {
+  normalizeInterDate,
+  normalizeInterDirection,
+  normalizeInterAmount,
+} from './inter.normalizer.js';
 
 export interface InterSyncResult {
   success: boolean;
@@ -125,10 +130,20 @@ export class InterService {
       let syncedTransactions = 0;
 
       for (const item of items) {
-        const occurredAt = new Date(item.dataEntrada);
-        const direction = item.tipoOperacao === 'C' ? 'CREDIT' : 'DEBIT';
-        const amount = Math.abs(Number(item.valor));
-        const externalId = item.idTransacao || `${item.dataEntrada}_${item.tipoOperacao}_${item.valor}_${item.titulo}`;
+        const rawDate =
+          (item as any).dataHoraMovimento ||
+          (item as any).dataEntrada ||
+          (item as any).dataMovimento ||
+          (item as any).dataInclusao ||
+          (item as any).dataLancamento ||
+          (item as any).data;
+
+        const occurredAt = normalizeInterDate(rawDate);
+        const direction = normalizeInterDirection(item);
+        const amount = normalizeInterAmount(item.valor);
+        const externalId =
+          item.idTransacao ||
+          `${occurredAt.toISOString().slice(0, 10)}_${direction}_${amount}_${item.titulo || ''}`;
         const description = (item.descricao || item.titulo || 'Transação Banco Inter').trim();
         const counterpartyName = item.contraparte?.nome?.trim() || null;
         const counterpartyDocument = item.contraparte?.cpfCnpj?.replace(/\D/g, '').trim() || null;
@@ -233,6 +248,110 @@ export class InterService {
         timestamp: new Date().toISOString(),
       };
     }
+  }
+
+  /**
+   * Reprocessa de forma idempotente todas as transações importadas do Banco Inter PJ.
+   * - Corrige data (occurredAt) usando o rawPayload armazenado ou data existente.
+   * - Corrige a direção (CREDIT / DEBIT) usando os campos estruturados oficiais do Inter.
+   * - Garante magnitude positiva absoluta para o valor.
+   * - Preserva transferências internas já conciliadas (TRANSFER_INTERNAL).
+   * - NUNCA duplica nem apaga registros existentes (mantém ID da transação).
+   * - Reexecuta conciliação de transferências com o Asaas.
+   */
+  async reprocessExistingTransactions(organizationId?: string): Promise<{
+    reprocessedCount: number;
+    updatedCount: number;
+    autoMatchedTransfers?: number;
+    reviewTransfers?: number;
+  }> {
+    const whereClause: any = {
+      account: { provider: 'INTER' },
+    };
+    if (organizationId) {
+      whereClause.organizationId = organizationId;
+    }
+
+    const transactions = await this.prisma.financialTransaction.findMany({
+      where: whereClause,
+      include: {
+        sourceTransfer: true,
+        destTransfer: true,
+      },
+    });
+
+    let updatedCount = 0;
+
+    for (const tx of transactions) {
+      const raw = (tx.rawPayload as any) || {};
+
+      // 1. Extração segura da data do rawPayload ou fallback para a data existente da transação
+      let rawDateCandidate =
+        raw.dataHoraMovimento ||
+        raw.dataEntrada ||
+        raw.dataMovimento ||
+        raw.dataInclusao ||
+        raw.dataLancamento ||
+        raw.data;
+
+      // Se não houver campo no rawPayload, utiliza a data já persistida se for válida
+      if (!rawDateCandidate && tx.occurredAt && !isNaN(new Date(tx.occurredAt).getTime())) {
+        rawDateCandidate = tx.occurredAt;
+      }
+
+      const normalizedDate = normalizeInterDate(rawDateCandidate);
+
+      // 2. Extração da direção pelos campos estruturados oficiais do Inter
+      const itemToEval = Object.keys(raw).length > 0 ? raw : {
+        tipoOperacao: (tx as any).direction === 'CREDIT' ? 'C' : 'D',
+        titulo: tx.description,
+        descricao: tx.description,
+      };
+      const normalizedDirection = normalizeInterDirection(itemToEval);
+
+      // 3. Magnitude positiva do valor
+      const normalizedAmount = normalizeInterAmount(tx.amount || raw.valor);
+
+      // 4. Kind: Preserva TRANSFER_INTERNAL se a transação estiver ligada a conciliação
+      let normalizedKind = tx.kind;
+      const isInternal =
+        tx.kind === 'TRANSFER_INTERNAL' ||
+        Boolean(tx.sourceTransfer) ||
+        Boolean(tx.destTransfer);
+
+      if (!isInternal) {
+        normalizedKind = normalizedDirection === 'CREDIT' ? 'CUSTOMER_PAYMENT' : 'EXPENSE';
+      }
+
+      await this.prisma.financialTransaction.update({
+        where: { id: tx.id },
+        data: {
+          occurredAt: normalizedDate,
+          direction: normalizedDirection,
+          amount: normalizedAmount,
+          kind: normalizedKind,
+        },
+      });
+
+      updatedCount += 1;
+    }
+
+    // Reconciliação pós-reprocessamento para cada organização envolvida
+    let autoMatched = 0;
+    let reviewCount = 0;
+    if (organizationId) {
+      const recService = new FinancialReconciliationService(this.prisma);
+      const recRes = await recService.reconcileTransfers(organizationId);
+      autoMatched = recRes.autoMatched;
+      reviewCount = recRes.reviewCount;
+    }
+
+    return {
+      reprocessedCount: transactions.length,
+      updatedCount,
+      autoMatchedTransfers: autoMatched,
+      reviewTransfers: reviewCount,
+    };
   }
 }
 

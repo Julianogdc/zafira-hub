@@ -298,4 +298,21 @@ export async function financialRoutes(app: FastifyInstance) {
   };
   app.post('/integrations/inter/sync', handleSyncInter);
   app.post('/api/integrations/inter/sync', handleSyncInter);
+
+  /**
+   * POST /integrations/inter/reprocess
+   * Reprocessa de forma idempotente todas as movimentações do Banco Inter PJ já persistidas,
+   * corrigindo datas e direções (CREDIT/DEBIT) sem duplicar nem apagar nenhum registro.
+   */
+  const handleReprocessInter = async (req: FastifyRequest, reply: FastifyReply) => {
+    const organizationId = getOrganizationId(req);
+    const result = await interService.reprocessExistingTransactions(organizationId);
+    return reply.send({
+      success: true,
+      message: 'Reprocessamento idempotente concluído com sucesso.',
+      ...result,
+    });
+  };
+  app.post('/integrations/inter/reprocess', handleReprocessInter);
+  app.post('/api/integrations/inter/reprocess', handleReprocessInter);
 }

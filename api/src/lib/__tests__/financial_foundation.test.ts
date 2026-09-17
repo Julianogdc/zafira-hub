@@ -12,6 +12,11 @@ import { AsaasClient } from '../../modules/integrations/asaas/asaas.client.js';
 import { AsaasService } from '../../modules/integrations/asaas/asaas.service.js';
 import { InterClient } from '../../modules/integrations/inter/inter.client.js';
 import { InterService } from '../../modules/integrations/inter/inter.service.js';
+import {
+  normalizeInterDate,
+  normalizeInterDirection,
+  normalizeInterAmount,
+} from '../../modules/integrations/inter/inter.normalizer.js';
 import { requireRole } from '../../middleware/auth.js';
 
 test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ ---', async (t) => {
@@ -1903,6 +1908,325 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
 
     const renderedFromObject = renderCategorySelector({ notAnArray: true });
     assert.strictEqual(renderedFromObject.length, 0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // 15. Correção obrigatória — normalização de datas e direção do extrato Banco Inter
+  // ---------------------------------------------------------------------------
+  await t.test('15. Normalização de datas e direção do extrato Inter PJ (6 testes obrigatórios)', async (tSub) => {
+    // 1. Data válida exibida corretamente em dd/MM/yyyy sem fallback silencioso para hoje
+    await tSub.test('15.1 Normalização de datas: suporta ISO, ISO com espaço, ISO date-only, padrão BR e rejeita valores inválidos sem fallback silencioso', () => {
+      // Formato ISO completo com microssegundos
+      const d1 = normalizeInterDate('2026-09-17T14:30:00.663504');
+      assert.strictEqual(d1.toISOString().slice(0, 10), '2026-09-17');
+
+      // Formato ISO com espaço entre data e hora
+      const d2 = normalizeInterDate('2026-09-17 14:30:00');
+      assert.strictEqual(d2.toISOString().slice(0, 10), '2026-09-17');
+
+      // Formato ISO date-only
+      const d3 = normalizeInterDate('2026-09-17');
+      assert.strictEqual(d3.toISOString().slice(0, 10), '2026-09-17');
+
+      // Formato brasileiro DD/MM/YYYY
+      const d4 = normalizeInterDate('17/09/2026');
+      assert.strictEqual(d4.toISOString().slice(0, 10), '2026-09-17');
+
+      // Formato brasileiro DD/MM/YYYY HH:mm:ss
+      const d5 = normalizeInterDate('17/09/2026 15:45:30');
+      assert.strictEqual(d5.toISOString().slice(0, 10), '2026-09-17');
+
+      // Formatação no frontend para dd/MM/yyyy
+      const formatPtBr = (d: Date) => d.toLocaleDateString('pt-BR', {
+        timeZone: 'UTC',
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      assert.strictEqual(formatPtBr(d1), '17/09/2026');
+      assert.strictEqual(formatPtBr(d3), '17/09/2026');
+      assert.strictEqual(formatPtBr(d4), '17/09/2026');
+
+      // REJEIÇÃO EXPLÍCITA: Nunca usa data atual silenciosa
+      const invalidInputs = [null, undefined, '', '   ', 'invalid-date-string', '32/13/2026'];
+      for (const invalid of invalidInputs) {
+        assert.throws(
+          () => normalizeInterDate(invalid),
+          (err: any) => {
+            assert.ok(err.message.includes('DATA_EXTRATO_INVALIDA'));
+            return true;
+          },
+          `Deveria rejeitar com erro explícito o valor: ${invalid}`
+        );
+      }
+    });
+
+    // 2. PIX recebido como CREDIT
+    await tSub.test('15.2 Lançamentos de PIX RECEBIDO mapeados rigorosamente como CREDIT', () => {
+      // Caso A: tipoOperacao oficial 'C'
+      const payloadA = {
+        tipoOperacao: 'C',
+        tipoTransacao: 'PIX',
+        valor: 1500.50,
+        titulo: 'PIX RECEBIDO',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadA), 'CREDIT');
+
+      // Caso B: tipoOperacao 'CREDITO' em minúsculo
+      const payloadB = {
+        tipoOperacao: 'credito',
+        tipoTransacao: 'PIX',
+        valor: '2300.00',
+        titulo: 'Transferência Pix',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadB), 'CREDIT');
+
+      // Caso C: operacao 'C' ou tipoTransacao PIX_RECEBIDO
+      const payloadC = {
+        tipoTransacao: 'PIX_RECEBIDO',
+        valor: 500,
+        titulo: 'Pix Recebido de Cliente XYZ',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadC), 'CREDIT');
+
+      // Caso D: titulo explícito 'PIX RECEBIDO' mesmo se tipoOperacao estiver ausente
+      const payloadD = {
+        valor: '450.00',
+        titulo: 'PIX RECEBIDO - FULANO DE TAL',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadD), 'CREDIT');
+    });
+
+    // 3. PIX enviado como DEBIT, pagamento de fatura, compra de cartão e débitos
+    await tSub.test('15.3 PIX enviado, faturas, compras no cartão e débitos mapeados como DEBIT', () => {
+      // Caso A: tipoOperacao oficial 'D'
+      const payloadA = {
+        tipoOperacao: 'D',
+        tipoTransacao: 'PIX',
+        valor: 120.0,
+        titulo: 'PIX ENVIADO',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadA), 'DEBIT');
+
+      // Caso B: Pagamento de fatura
+      const payloadB = {
+        tipoOperacao: 'DEBITO',
+        tipoTransacao: 'PAGAMENTO',
+        valor: '1850.30',
+        titulo: 'PAGAMENTO FATURA CARTAO',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadB), 'DEBIT');
+
+      // Caso C: Compra no cartão
+      const payloadC = {
+        tipoTransacao: 'COMPRA_CARTAO',
+        valor: '89.90',
+        titulo: 'COMPRA NO DEBITO - RESTAURANTE',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadC), 'DEBIT');
+
+      // Caso D: Tarifa bancária
+      const payloadD = {
+        tipoOperacao: 'D',
+        tipoTransacao: 'TARIFA',
+        valor: '15.00',
+        titulo: 'TARIFA MENSALIDADE',
+      };
+      assert.strictEqual(normalizeInterDirection(payloadD), 'DEBIT');
+    });
+
+    // 4. Valores e KPIs de entradas/saídas calculados corretamente
+    await tSub.test('15.4 Magnitude positiva persistida e cálculo exato de entradas vs saídas operacionais', async () => {
+      // 1. Magnitude positiva do valor
+      assert.strictEqual(normalizeInterAmount(1500.5), 1500.5);
+      assert.strictEqual(normalizeInterAmount(-1500.5), 1500.5);
+      assert.strictEqual(normalizeInterAmount('-1250,50'), 1250.5);
+      assert.strictEqual(normalizeInterAmount('1.250,50'), 1250.5);
+
+      // 2. Simulação de transações no FinancialService
+      const mockTransactions = [
+        {
+          id: 'tx-1',
+          amount: 5000.0,
+          direction: 'CREDIT',
+          kind: 'CUSTOMER_PAYMENT',
+          categorizationSource: 'RULE',
+        },
+        {
+          id: 'tx-2',
+          amount: 1200.0,
+          direction: 'DEBIT',
+          kind: 'EXPENSE',
+          categorizationSource: 'RULE',
+        },
+        {
+          id: 'tx-3',
+          amount: 800.0,
+          direction: 'DEBIT',
+          kind: 'EXPENSE',
+          categorizationSource: 'PENDING',
+        },
+        {
+          id: 'tx-4',
+          amount: 3000.0,
+          direction: 'DEBIT',
+          kind: 'TRANSFER_INTERNAL',
+          categorizationSource: 'RULE',
+        },
+      ];
+
+      const mockPrisma: any = {
+        financialAccount: {
+          findMany: async () => [
+            {
+              id: 'acc-inter-1',
+              organizationId: 'org-kpi-test',
+              provider: 'INTER',
+              name: 'Banco Inter PJ',
+              currentBalance: 3000.0,
+              balanceAsOf: new Date('2026-09-17'),
+              lastSyncedAt: new Date('2026-09-17'),
+              isActive: true,
+            },
+          ],
+        },
+        financialTransaction: {
+          findMany: async () => mockTransactions,
+        },
+      };
+
+      const financialService = new FinancialService(mockPrisma);
+      const overview = await financialService.getAccountsOverview('org-kpi-test');
+
+      // Entradas operacionais: 5000 (CREDIT)
+      assert.strictEqual(overview.operationalIncome, 5000.0);
+      assert.strictEqual(overview.periodSummary.operationalIncome, 5000.0);
+
+      // Saídas operacionais: 1200 + 800 = 2000 (DEBIT) - TRANSFER_INTERNAL é excluída
+      assert.strictEqual(overview.operationalExpense, 2000.0);
+      assert.strictEqual(overview.periodSummary.operationalExpense, 2000.0);
+
+      // Transferências internas: 3000
+      assert.strictEqual(overview.internalTransfersAmount, 3000.0);
+
+      // Pendentes de revisão: 1
+      assert.strictEqual(overview.toReviewCount, 1);
+    });
+
+    // 5. Reprocessamento idempotente sem duplicar movimentações
+    await tSub.test('15.5 Reprocessamento idempotente: corrige 44 registros existentes sem duplicar nem apagar', async () => {
+      // Cria 44 movimentações simuladas no banco de teste
+      const dbRecords: any[] = [];
+      for (let i = 1; i <= 44; i++) {
+        const isRecebido = i % 2 === 0;
+        dbRecords.push({
+          id: `tx-db-${i}`,
+          organizationId: 'org-reprocess-test',
+          accountId: 'acc-inter-reprocess',
+          externalId: `ext-id-${i}`,
+          // Anteriormente com data não normalizada e direção errada (todas como DEBIT)
+          occurredAt: new Date('2026-09-10T00:00:00Z'),
+          direction: 'DEBIT',
+          kind: 'EXPENSE',
+          amount: 100.0 * i,
+          description: isRecebido ? `PIX RECEBIDO CLIENTE ${i}` : `PIX ENVIADO FORNECEDOR ${i}`,
+          rawPayload: {
+            dataHoraMovimento: `2026-09-17 10:${String(i).padStart(2, '0')}:00`,
+            tipoOperacao: isRecebido ? 'C' : 'D',
+            tipoTransacao: 'PIX',
+            valor: `${100.0 * i}`,
+            titulo: isRecebido ? 'PIX RECEBIDO' : 'PIX ENVIADO',
+          },
+          account: { provider: 'INTER' },
+          sourceTransfer: null,
+          destTransfer: null,
+        });
+      }
+
+      let deleteCalled = false;
+      let createCalled = false;
+      const updatedList: any[] = [];
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => dbRecords,
+          update: async (args: any) => {
+            const index = dbRecords.findIndex((r) => r.id === args.where.id);
+            assert.ok(index !== -1, 'Transação deve existir no banco para ser atualizada');
+            dbRecords[index] = { ...dbRecords[index], ...args.data };
+            updatedList.push(args);
+            return dbRecords[index];
+          },
+          delete: () => { deleteCalled = true; },
+          deleteMany: () => { deleteCalled = true; },
+          create: () => { createCalled = true; },
+        },
+        financialAccount: {
+          findMany: async () => [{ id: 'acc-inter-reprocess', provider: 'INTER', isActive: true }],
+        },
+        financialTransfer: {
+          create: async () => ({ id: 'transfer-mock' }),
+        },
+      };
+
+      const interService = new InterService(mockPrisma);
+
+      // Primeira execução de reprocessamento
+      const firstRun = await interService.reprocessExistingTransactions('org-reprocess-test');
+
+      assert.strictEqual(firstRun.reprocessedCount, 44, 'Deve encontrar as 44 movimentações existentes');
+      assert.strictEqual(firstRun.updatedCount, 44, 'Deve atualizar as 44 movimentações');
+      assert.strictEqual(deleteCalled, false, 'Nenhuma transação deve ser deletada');
+      assert.strictEqual(createCalled, false, 'Nenhuma transação nova deve ser criada');
+
+      // Verifica correções nos registros
+      const creditCount = dbRecords.filter((r) => r.direction === 'CREDIT').length;
+      const debitCount = dbRecords.filter((r) => r.direction === 'DEBIT').length;
+      assert.strictEqual(creditCount, 22, 'Exatamente 22 transações de PIX RECEBIDO devem ser corrigidas para CREDIT');
+      assert.strictEqual(debitCount, 22, 'Exatamente 22 transações de PIX ENVIADO devem permanecer como DEBIT');
+
+      // Datas corrigidas para 17/09/2026
+      for (const r of dbRecords) {
+        assert.strictEqual(r.occurredAt.toISOString().slice(0, 10), '2026-09-17');
+      }
+
+      // Segunda execução: IDEMPOTÊNCIA TOTAL (não altera total de registros nem duplica)
+      const secondRun = await interService.reprocessExistingTransactions('org-reprocess-test');
+      assert.strictEqual(secondRun.reprocessedCount, 44);
+      assert.strictEqual(dbRecords.length, 44, 'O total de transações permanece estritamente 44');
+    });
+
+    // 6. Regressão BANK_WRITE_FORBIDDEN permanece 100% protegida
+    await tSub.test('15.6 Regressão: BANK_WRITE_FORBIDDEN bloqueia qualquer escrita bancária POST/PUT/DELETE', async () => {
+      const client = new InterClient({
+        clientId: 'test-client',
+        clientSecret: 'test-secret',
+        crtBase64: Buffer.from('cert').toString('base64'),
+        keyBase64: Buffer.from('key').toString('base64'),
+      });
+
+      const writeAttempts = [
+        { method: 'POST', endpoint: '/banking/v2/pix' },
+        { method: 'POST', endpoint: '/banking/v2/extrato' },
+        { method: 'PUT', endpoint: '/banking/v2/saldo' },
+        { method: 'PATCH', endpoint: '/banking/v2/movimentacoes/123' },
+        { method: 'DELETE', endpoint: '/banking/v2/cobrancas/456' },
+      ];
+
+      for (const attempt of writeAttempts) {
+        await assert.rejects(
+          async () => {
+            await client.requestBankingResource(attempt.method, attempt.endpoint);
+          },
+          (err: any) => {
+            assert.strictEqual(err.code, 'BANK_WRITE_FORBIDDEN');
+            assert.strictEqual(err.statusCode, 405);
+            return true;
+          },
+          `Tentativa de ${attempt.method} em ${attempt.endpoint} deve ser rejeitada com BANK_WRITE_FORBIDDEN`
+        );
+      }
+    });
   });
 });
 
