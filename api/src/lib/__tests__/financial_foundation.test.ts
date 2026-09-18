@@ -4872,6 +4872,120 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(res.duplicatesRemoved, 1, 'Deve remover 1 duplicata comprovada pela Prova B');
       assert.strictEqual(deletedId, 'tx-dup-zero', 'O ID deletado deve ser o do duplicado de R$ 0,00');
     });
+
+    // 17.14 Cenário real de produção: Desambiguação de débitos pelo valor no externalId legado D
+    await st.test('17.14 Desambiguação de débitos (D) reais por valor no externalId', async () => {
+      const state = [
+        {
+          id: 'tx-real-450',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'DEBIT',
+          amount: new Prisma.Decimal('-450.00'),
+          description: 'PIX ENVIADO',
+          rawPayload: { titulo: 'Pix enviado' },
+        },
+        {
+          id: 'tx-real-600',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'DEBIT',
+          amount: new Prisma.Decimal('-600.00'),
+          description: 'PIX ENVIADO',
+          rawPayload: { titulo: 'Pix enviado' },
+        },
+        {
+          id: 'tx-dup-zero',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'DEBIT', // Pode até estar null ou string vazia, o extrator vai garantir 'DEBIT' via 'D'
+          amount: new Prisma.Decimal('0.00'),
+          description: 'PIX ENVIADO',
+          externalId: '2026-09-16_D_450.0_Pix enviado',
+          rawPayload: { titulo: 'Pix enviado' },
+        },
+      ];
+
+      let deletedId: string | null = null;
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async (args: any) => {
+            deletedId = args.where.id;
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+        $transaction: async (cb: any) => {
+          return cb(mockPrisma);
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 1, 'Deve remover exatamente 1 duplicata comprovada');
+      assert.strictEqual(deletedId, 'tx-dup-zero');
+    });
+
+    // 17.15 Cenário real de produção: Desambiguação de créditos pelo valor no externalId legado C
+    await st.test('17.15 Desambiguação de créditos (C) reais por valor no externalId', async () => {
+      const state = [
+        {
+          id: 'tx-real-750',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'CREDIT',
+          amount: new Prisma.Decimal('750.00'),
+          description: 'PIX RECEBIDO',
+          rawPayload: { titulo: 'Pix recebido' },
+        },
+        {
+          id: 'tx-real-800',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'CREDIT',
+          amount: new Prisma.Decimal('800.00'),
+          description: 'PIX RECEBIDO',
+          rawPayload: { titulo: 'Pix recebido' },
+        },
+        {
+          id: 'tx-dup-zero',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'CREDIT',
+          amount: new Prisma.Decimal('0.00'),
+          description: 'PIX RECEBIDO',
+          externalId: '2026-09-16_C_750.00_Pix recebido',
+          rawPayload: { titulo: 'Pix recebido' },
+        },
+      ];
+
+      let deletedId: string | null = null;
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async (args: any) => {
+            deletedId = args.where.id;
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+        $transaction: async (cb: any) => {
+          return cb(mockPrisma);
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 1, 'Deve remover exatamente 1 duplicata comprovada');
+      assert.strictEqual(deletedId, 'tx-dup-zero');
+    });
   });
 });
 

@@ -763,9 +763,21 @@ export class InterService {
       return false;
     };
 
+    const extractLegacyDirection = (extId: string): string | null => {
+      if (!extId || typeof extId !== 'string') return null;
+      // Aceita formatos: 2026-09-16_D_450.0... ou inter_acc_2026-09-16_DEBIT_450...
+      const matchDir = extId.match(/_(CREDIT|DEBIT|C|D)_/);
+      if (matchDir && matchDir[1]) {
+        const d = matchDir[1];
+        if (d === 'C' || d === 'CREDIT') return 'CREDIT';
+        if (d === 'D' || d === 'DEBIT') return 'DEBIT';
+      }
+      return null;
+    };
+
     const extractLegacyAmount = (extId: string): Prisma.Decimal | null => {
       if (!extId || typeof extId !== 'string') return null;
-      const matchDir = extId.match(/(?:CREDIT|DEBIT)_([0-9.]+)(?:_|$)/);
+      const matchDir = extId.match(/_(?:CREDIT|DEBIT|C|D)_([0-9.]+)(?:_|$)/);
       if (matchDir && matchDir[1]) {
         const dec = toPrismaDecimal(matchDir[1]);
         if (dec && dec.gt(0)) return dec;
@@ -809,6 +821,7 @@ export class InterService {
       const dupId = getOfficialId(dupRaw, duplicate.externalReference);
       const dupDateStr = getCivilDate(duplicate);
       const dupLegacyAmount = extractLegacyAmount(duplicate.externalId);
+      const dupLegacyDirection = extractLegacyDirection(duplicate.externalId);
 
       let matchingCandidates: typeof validTxs = [];
       let matchType = '';
@@ -831,7 +844,8 @@ export class InterService {
           if (c.accountId !== duplicate.accountId) { rejectedByAccount++; return false; }
           const cDateStr = getCivilDate(c);
           if (cDateStr !== dupDateStr) { rejectedByDate++; return false; }
-          if (c.direction !== duplicate.direction) { rejectedByDirection++; return false; }
+          const effectiveDir = dupLegacyDirection || duplicate.direction;
+          if (c.direction !== effectiveDir) { rejectedByDirection++; return false; }
           if (!hasMatchingTitle(duplicate, c)) { rejectedByTitle++; return false; }
           
           // CORREÇÃO CRÍTICA: c.amount pode ser negativo (ex: -450.00 para DEBIT). Usa abs()
