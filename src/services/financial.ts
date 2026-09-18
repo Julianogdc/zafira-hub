@@ -282,6 +282,12 @@ export const financialApi = {
   previewRepairInterDuplicates: async (): Promise<{
     success: boolean;
     scanned: number;
+    zeroRecordsCount?: number;
+    provenDuplicatesToRemove?: number;
+    manualClassificationsToPreserve?: number;
+    ambiguousRecordsKept?: number;
+    canonicalCandidates?: number;
+    remainingEstimated?: number;
     duplicatesToRemove: number;
     manualDataToMerge: number;
     ambiguousDuplicatesToSkip: number;
@@ -295,6 +301,7 @@ export const financialApi = {
   repairInterDuplicates: async (): Promise<{
     success: boolean;
     scanned: number;
+    zeroRecordsCount?: number;
     duplicatesRemoved: number;
     manualDataMerged: number;
     ambiguousDuplicatesSkipped: number;

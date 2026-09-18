@@ -20,7 +20,12 @@ import {
   extractInterTime,
   formatBankDateTimeDisplay,
   formatCounterpartyDisplay,
+  toPrismaDecimal,
+  isZeroDecimal,
+  isPositiveDecimal,
+  areDecimalsEqual,
 } from '../../modules/integrations/inter/inter.normalizer.js';
+import { Prisma } from '@prisma/client';
 import { requireRole } from '../../middleware/auth.js';
 
 test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ ---', async (t) => {
@@ -4546,6 +4551,276 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
           return err.code === 'BANK_WRITE_FORBIDDEN' || err.message?.includes('BANK_WRITE_FORBIDDEN');
         }
       );
+    });
+
+    // -------------------------------------------------------------------------
+    // 17.8 Suíte Obrigatória de Comparação Monetária com Prisma.Decimal
+    // -------------------------------------------------------------------------
+    await st.test('17.8 Helper de comparação monetária compatível com Prisma.Decimal', async () => {
+      // Testes dos helpers centrais
+      const zeroDecimal = new Prisma.Decimal('0.00');
+      const zeroSingle = new Prisma.Decimal('0');
+      const positiveDecimal = new Prisma.Decimal('450.00');
+      const negativeDecimal = new Prisma.Decimal('-10.50');
+
+      assert.strictEqual(isZeroDecimal(zeroDecimal), true);
+      assert.strictEqual(isZeroDecimal(zeroSingle), true);
+      assert.strictEqual(isZeroDecimal(0), true);
+      assert.strictEqual(isZeroDecimal('0.00'), true);
+      assert.strictEqual(isZeroDecimal(positiveDecimal), false);
+
+      assert.strictEqual(isPositiveDecimal(positiveDecimal), true);
+      assert.strictEqual(isPositiveDecimal(zeroDecimal), false);
+      assert.strictEqual(isPositiveDecimal(negativeDecimal), false);
+      assert.strictEqual(isPositiveDecimal(450), true);
+
+      assert.strictEqual(areDecimalsEqual(positiveDecimal, new Prisma.Decimal('450.00')), true);
+      assert.strictEqual(areDecimalsEqual(positiveDecimal, 450), true);
+      assert.strictEqual(areDecimalsEqual(positiveDecimal, '450.00'), true);
+      assert.strictEqual(areDecimalsEqual(zeroDecimal, 0), true);
+    });
+
+    // 17.9 Prévia com Prisma.Decimal real: 1 canônico R$ 450.00 e 2 duplicatas R$ 0.00
+    await st.test('17.9 Prévia com instâncias reais de Prisma.Decimal: 1 canônico R$ 450.00 e 2 duplicatas R$ 0.00', async () => {
+      const canonicalWithDecimal = {
+        id: 'tx-real-decimal-450',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('450.00'), // Instância real Prisma.Decimal
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_450_pix_enviado',
+        categorizationSource: 'AUTO',
+        categoryId: null,
+      };
+
+      const dupManualWithDecimal = {
+        id: 'tx-dup-decimal-zero-manual',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('0.00'), // Instância real Prisma.Decimal
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado',
+        categorizationSource: 'MANUAL',
+        categoryId: 'cat-fornecedor',
+        clientId: 'cli-pneutek',
+      };
+
+      const dupAutoWithDecimal = {
+        id: 'tx-dup-decimal-zero-auto',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('0.00'), // Instância real Prisma.Decimal
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado_auto',
+        categorizationSource: 'RULE',
+        categoryId: null,
+      };
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [canonicalWithDecimal, dupManualWithDecimal, dupAutoWithDecimal],
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const preview = await service.previewRepairInterDuplicates('org-test');
+
+      assert.strictEqual(preview.success, true);
+      assert.strictEqual(preview.scanned, 3, 'Deve escanear os 3 registros');
+      assert.strictEqual(preview.zeroRecordsCount, 2, 'Deve identificar 2 registros de R$ 0,00 com Prisma.Decimal');
+      assert.strictEqual(preview.provenDuplicatesToRemove, 2, 'Deve confirmar as 2 duplicatas de R$ 0,00 para remoção');
+      assert.strictEqual(preview.manualClassificationsToPreserve, 1, 'Deve identificar 1 classificação MANUAL para preservar');
+      assert.strictEqual(preview.ambiguousRecordsKept, 0);
+    });
+
+    // 17.10 Execução do reparo com Prisma.Decimal: remove as 2 duplicatas e transfere classificação MANUAL
+    await st.test('17.10 Reparo com Prisma.Decimal: remove as 2 duplicatas comprovadas e transfere classificação MANUAL em transação', async () => {
+      const canonicalWithDecimal = {
+        id: 'tx-real-decimal-450',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('450.00'),
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_450_pix_enviado',
+        categorizationSource: 'AUTO',
+        categoryId: null,
+      };
+
+      const dupManualWithDecimal = {
+        id: 'tx-dup-decimal-zero-manual',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('0.00'),
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado',
+        categorizationSource: 'MANUAL',
+        categoryId: 'cat-fornecedor',
+        clientId: 'cli-pneutek',
+      };
+
+      const dupAutoWithDecimal = {
+        id: 'tx-dup-decimal-zero-auto',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('0.00'),
+        description: 'PIX ENVIADO OUTRO BANCO',
+        externalId: 'inter_acc-inter_2026-09-16_DEBIT_0_pix_enviado_auto',
+        categorizationSource: 'RULE',
+        categoryId: null,
+      };
+
+      let deletedIds: string[] = [];
+      let updatedData: any = null;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [canonicalWithDecimal, dupManualWithDecimal, dupAutoWithDecimal],
+          count: async () => 1,
+        },
+        $transaction: async (fn: any) => {
+          return await fn({
+            financialTransaction: {
+              deleteMany: async (args: any) => {
+                deletedIds.push(...args.where.id.in);
+                return { count: args.where.id.in.length };
+              },
+              delete: async (args: any) => {
+                deletedIds.push(args.where.id);
+                return { id: args.where.id };
+              },
+              update: async (args: any) => {
+                updatedData = args.data;
+                return { ...canonicalWithDecimal, ...args.data };
+              },
+            },
+          });
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 2, 'Deve remover exatamente as 2 duplicatas com Prisma.Decimal');
+      assert.strictEqual(res.manualDataMerged, 1, 'Deve transferir a classificação MANUAL');
+      assert.deepStrictEqual(deletedIds.sort(), ['tx-dup-decimal-zero-auto', 'tx-dup-decimal-zero-manual'].sort());
+      assert.ok(updatedData);
+      assert.strictEqual(updatedData.categoryId, 'cat-fornecedor');
+      assert.strictEqual(updatedData.clientId, 'cli-pneutek');
+      assert.strictEqual(updatedData.categorizationSource, 'MANUAL');
+      assert.strictEqual(updatedData.categorizationConfidence, 1.0);
+    });
+
+    // 17.11 Caso ambíguo com Prisma.Decimal continua preservado
+    await st.test('17.11 Caso ambíguo com Prisma.Decimal é mantido e contado como ambiguousDuplicatesSkipped', async () => {
+      const real1 = {
+        id: 'tx-real-1',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('100.00'),
+        description: 'PAGAMENTO BOLETO FORNECEDOR',
+        externalId: 'inter_acc_real1',
+      };
+
+      const real2 = {
+        id: 'tx-real-2',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('200.00'),
+        description: 'PAGAMENTO BOLETO FORNECEDOR',
+        externalId: 'inter_acc_real2',
+      };
+
+      const zeroDup = {
+        id: 'tx-zero-dup',
+        organizationId: 'org-test',
+        accountId: 'acc-inter',
+        occurredAt: new Date('2026-09-16T12:00:00Z'),
+        direction: 'DEBIT',
+        amount: new Prisma.Decimal('0.00'),
+        description: 'PAGAMENTO BOLETO FORNECEDOR',
+        externalId: 'inter_acc_zero',
+      };
+
+      let deleteExecuted = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [real1, real2, zeroDup],
+          count: async () => 3,
+        },
+        $transaction: async (fn: any) => {
+          return await fn({
+            financialTransaction: {
+              deleteMany: async () => { deleteExecuted = true; return { count: 0 }; },
+              delete: async () => { deleteExecuted = true; },
+              update: async () => {},
+            },
+          });
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 0, 'Nenhum registro ambíguo pode ser removido');
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 1);
+      assert.strictEqual(deleteExecuted, false);
+    });
+
+    // 17.12 Segunda execução com Prisma.Decimal é estritamente idempotente
+    await st.test('17.12 Segunda execução com Prisma.Decimal é 100% idempotente', async () => {
+      const cleanList = [
+        {
+          id: 'tx-clean-450',
+          organizationId: 'org-test',
+          accountId: 'acc-inter',
+          occurredAt: new Date('2026-09-16T12:00:00Z'),
+          direction: 'DEBIT',
+          amount: new Prisma.Decimal('450.00'),
+          description: 'PIX ENVIADO',
+          externalId: 'inter_acc_450',
+        },
+      ];
+
+      let transactionTriggered = false;
+
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => cleanList,
+          count: async () => 1,
+        },
+        $transaction: async () => {
+          transactionTriggered = true;
+          return { count: 0 };
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 0);
+      assert.strictEqual(res.manualDataMerged, 0);
+      assert.strictEqual(res.ambiguousDuplicatesSkipped, 0);
+      assert.strictEqual(transactionTriggered, false, 'Não deve chamar $transaction quando não há operações');
     });
   });
 });

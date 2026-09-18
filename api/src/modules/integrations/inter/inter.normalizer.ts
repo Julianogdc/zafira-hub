@@ -1,4 +1,4 @@
-import { FinancialTransactionDirection, FinancialDatePrecision } from '@prisma/client';
+import { FinancialTransactionDirection, FinancialDatePrecision, Prisma } from '@prisma/client';
 
 /**
  * Normalizador robusto de datas do extrato do Banco Inter PJ.
@@ -184,12 +184,117 @@ export function normalizeInterDirection(item: any): FinancialTransactionDirectio
 }
 
 /**
+ * Converte com segurança qualquer valor monetário (Prisma.Decimal, Decimal.js, number, string)
+ * para uma instância de Prisma.Decimal.
+ * Retorna null se o valor for nulo, indefinido, vazio ou não puder ser convertido.
+ */
+export function toPrismaDecimal(value: unknown): Prisma.Decimal | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value;
+  }
+
+  // Suporte a objetos Decimal de outras instâncias ou bibliotecas com método isZero/toNumber
+  if (typeof value === 'object') {
+    if (typeof (value as any).toNumber === 'function' || typeof (value as any).isZero === 'function') {
+      try {
+        return new Prisma.Decimal((value as any).toString());
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  if (typeof value === 'number') {
+    if (isNaN(value) || !isFinite(value)) return null;
+    return new Prisma.Decimal(value);
+  }
+
+  if (typeof value === 'string') {
+    let clean = value.trim();
+    if (!clean) return null;
+
+    if (clean.includes(',') && clean.includes('.')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else if (clean.includes(',')) {
+      clean = clean.replace(',', '.');
+    }
+
+    try {
+      const parsed = new Prisma.Decimal(clean);
+      if (isNaN(parsed.toNumber()) || !isFinite(parsed.toNumber())) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Verifica se um valor monetário é estritamente igual a R$ 0,00.
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function isZeroDecimal(value: unknown): boolean {
+  if (value === 0 || value === '0' || value === '0.00' || value === '0,00') return true;
+  const dec = toPrismaDecimal(value);
+  if (!dec) return false;
+  return dec.isZero();
+}
+
+/**
+ * Verifica se um valor monetário é estritamente positivo (> 0).
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function isPositiveDecimal(value: unknown): boolean {
+  const dec = toPrismaDecimal(value);
+  if (!dec) return false;
+  return dec.gt(0);
+}
+
+/**
+ * Compara se dois valores monetários são exatamente iguais.
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function areDecimalsEqual(a: unknown, b: unknown): boolean {
+  const decA = toPrismaDecimal(a);
+  const decB = toPrismaDecimal(b);
+  if (!decA || !decB) return false;
+  return decA.eq(decB);
+}
+
+/**
+ * Converte com segurança para number JavaScript.
+ */
+export function toSafeNumber(value: unknown): number {
+  const dec = toPrismaDecimal(value);
+  if (!dec) return 0;
+  return dec.toNumber();
+}
+
+/**
  * Normaliza o valor da transação garantindo magnitude positiva absoluta.
  * Retorna null se o valor for ausente, inválido ou não interpretável.
  * O sinal e a cor da transação são determinados exclusivamente pela direção (CREDIT / DEBIT).
  */
 export function normalizeInterAmount(rawAmount: unknown): number | null {
   if (rawAmount === null || rawAmount === undefined) {
+    return null;
+  }
+
+  // Suporte direto a Prisma.Decimal e Decimal.js
+  if (typeof rawAmount === 'object') {
+    const dec = toPrismaDecimal(rawAmount);
+    if (dec) {
+      const num = dec.toNumber();
+      if (!isNaN(num) && isFinite(num)) {
+        return Math.abs(num);
+      }
+    }
     return null;
   }
 

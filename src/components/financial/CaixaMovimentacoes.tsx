@@ -93,6 +93,7 @@ export function CaixaMovimentacoes() {
   const [repairPreviewModalOpen, setRepairPreviewModalOpen] = useState<boolean>(false);
   const [repairPreviewData, setRepairPreviewData] = useState<{
     scanned: number;
+    zeroRecordsCount: number;
     provenDuplicatesToRemove: number;
     manualClassificationsToPreserve: number;
     ambiguousRecordsKept: number;
@@ -377,9 +378,10 @@ export function CaixaMovimentacoes() {
       if (res.success) {
         setRepairPreviewData({
           scanned: res.scanned ?? 0,
-          provenDuplicatesToRemove: res.provenDuplicatesToRemove ?? 0,
-          manualClassificationsToPreserve: res.manualClassificationsToPreserve ?? 0,
-          ambiguousRecordsKept: res.ambiguousRecordsKept ?? 0,
+          zeroRecordsCount: res.zeroRecordsCount ?? 0,
+          provenDuplicatesToRemove: res.provenDuplicatesToRemove ?? res.duplicatesToRemove ?? 0,
+          manualClassificationsToPreserve: res.manualClassificationsToPreserve ?? res.manualDataToMerge ?? 0,
+          ambiguousRecordsKept: res.ambiguousRecordsKept ?? res.ambiguousDuplicatesToSkip ?? 0,
         });
         setRepairPreviewModalOpen(true);
       } else {
@@ -410,9 +412,9 @@ export function CaixaMovimentacoes() {
           );
         } else {
           if (ambiguous > 0) {
-            toast.info(`Extrato íntegro. Nenhuma duplicata encontrada (${ambiguous} registros ambíguos mantidos por segurança).`);
+            toast.info(`Nenhuma duplicata confirmada (${ambiguous} registros ambíguos mantidos por segurança).`);
           } else {
-            toast.info('Extrato íntegro. Nenhuma duplicata removida.');
+            toast.info('Nenhuma duplicata foi confirmada pelas regras de segurança atuais.');
           }
         }
         setRepairPreviewModalOpen(false);
@@ -1889,9 +1891,15 @@ export function CaixaMovimentacoes() {
               </div>
 
               {repairPreviewData.provenDuplicatesToRemove === 0 ? (
-                <div className="p-3 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs">
-                  Nenhuma duplicata comprovada encontrada. Seu extrato já está consistente!
-                </div>
+                repairPreviewData.zeroRecordsCount === 0 && repairPreviewData.ambiguousRecordsKept === 0 ? (
+                  <div className="p-3 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs">
+                    Extrato íntegro: nenhuma linha artificial de R$ 0,00 ou divergência estrutural detectada.
+                  </div>
+                ) : (
+                  <div className="p-3 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+                    Nenhuma duplicata foi confirmada pelas regras de segurança atuais.
+                  </div>
+                )
               ) : (
                 <div className="p-2.5 rounded-md bg-zinc-900 border border-white/5 text-zinc-400 text-[11px]">
                   Ao confirmar, as {repairPreviewData.provenDuplicatesToRemove} duplicatas de R$ 0,00 comprovadas serão excluídas e as {repairPreviewData.manualClassificationsToPreserve} classificações manuais serão transferidas para os lançamentos reais correspondentes em uma única transação atômica.

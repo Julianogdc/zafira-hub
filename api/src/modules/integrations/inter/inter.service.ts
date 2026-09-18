@@ -8,7 +8,13 @@ import {
   normalizeInterAmount,
   generateInterExternalId,
   extractInterDatePrecision,
+  toPrismaDecimal,
+  isZeroDecimal,
+  isPositiveDecimal,
+  areDecimalsEqual,
+  toSafeNumber,
 } from './inter.normalizer.js';
+import { Prisma } from '@prisma/client';
 
 export interface InterSyncResult {
   success: boolean;
@@ -543,6 +549,7 @@ export class InterService {
     return {
       success: true,
       scanned: resolution.totalScanned,
+      zeroRecordsCount: resolution.zeroTxsCount,
       duplicatesRemoved: resolution.duplicateIdsToRemove.length,
       manualDataMerged: resolution.manualDataMergedCount,
       ambiguousDuplicatesSkipped: resolution.ambiguousDuplicatesSkipped,
@@ -561,6 +568,12 @@ export class InterService {
   async previewRepairInterDuplicates(organizationId?: string): Promise<{
     success: boolean;
     scanned: number;
+    zeroRecordsCount: number;
+    provenDuplicatesToRemove: number;
+    manualClassificationsToPreserve: number;
+    ambiguousRecordsKept: number;
+    canonicalCandidates: number;
+    remainingEstimated: number;
     duplicatesToRemove: number;
     manualDataToMerge: number;
     ambiguousDuplicatesToSkip: number;
@@ -591,6 +604,12 @@ export class InterService {
     return {
       success: true,
       scanned: resolution.totalScanned,
+      zeroRecordsCount: resolution.zeroTxsCount,
+      provenDuplicatesToRemove: resolution.duplicateIdsToRemove.length,
+      manualClassificationsToPreserve: resolution.manualDataMergedCount,
+      ambiguousRecordsKept: resolution.ambiguousDuplicatesSkipped,
+      canonicalCandidates: resolution.canonicalCount,
+      remainingEstimated: Math.max(0, resolution.totalScanned - resolution.duplicateIdsToRemove.length),
       duplicatesToRemove: resolution.duplicateIdsToRemove.length,
       manualDataToMerge: resolution.manualDataMergedCount,
       ambiguousDuplicatesToSkip: resolution.ambiguousDuplicatesSkipped,
@@ -606,6 +625,8 @@ export class InterService {
    */
   private calculateDuplicateMatches(transactions: any[]): {
     totalScanned: number;
+    zeroTxsCount: number;
+    canonicalCount: number;
     duplicateIdsToRemove: string[];
     canonicalUpdates: Map<string, any>;
     transferUpdates: Array<{ id: string; data: any }>;
@@ -615,8 +636,9 @@ export class InterService {
     patterns: Record<string, number>;
   } {
     const totalScanned = transactions.length;
-    const zeroTxs = transactions.filter((t) => Number(t.amount) === 0);
-    const validTxs = transactions.filter((t) => Number(t.amount) > 0);
+    // Seleção robusta de linhas de R$ 0,00 e candidatos canônicos com suporte nativo a Prisma.Decimal
+    const zeroTxs = transactions.filter((t) => isZeroDecimal(t.amount));
+    const validTxs = transactions.filter((t) => isPositiveDecimal(t.amount));
 
     const normalizeStrict = (str?: string | null): string => {
       if (!str || typeof str !== 'string') return '';
@@ -640,12 +662,70 @@ export class InterService {
       return '';
     };
 
-    const extractLegacyAmount = (extId: string): number | null => {
+    const getCivilDate = (tx: any): string => {
+      const raw = (tx.rawPayload as any) || {};
+      const rawDate =
+        raw.dataHoraMovimento ||
+        raw.dataEntrada ||
+        raw.dataMovimento ||
+        raw.dataInclusao ||
+        raw.dataLancamento ||
+        raw.data;
+
+      if (typeof rawDate === 'string') {
+        const isoMatch = rawDate.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+        if (isoMatch) return isoMatch[1];
+        const brMatch = rawDate.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+        if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+      }
+
+      const occ = tx.occurredAt;
+      if (occ) {
+        if (typeof occ === 'string') {
+          const m = occ.match(/^(\d{4}-\d{2}-\d{2})/);
+          if (m) return m[1];
+        } else if (occ instanceof Date && !isNaN(occ.getTime())) {
+          return occ.toISOString().slice(0, 10);
+        }
+      }
+
+      if (typeof tx.externalId === 'string') {
+        const m = tx.externalId.match(/(\d{4}-\d{2}-\d{2})/);
+        if (m) return m[1];
+      }
+
+      return '';
+    };
+
+    const getTitlesStrict = (tx: any): string[] => {
+      const set = new Set<string>();
+      const raw = (tx.rawPayload as any) || {};
+      if (raw.titulo) set.add(normalizeStrict(raw.titulo));
+      if (raw.descricao) set.add(normalizeStrict(raw.descricao));
+      if (tx.description) set.add(normalizeStrict(tx.description));
+      return Array.from(set).filter(Boolean);
+    };
+
+    const hasMatchingTitle = (txA: any, txB: any): boolean => {
+      const titlesA = getTitlesStrict(txA);
+      const titlesB = getTitlesStrict(txB);
+      for (const tA of titlesA) {
+        if (titlesB.includes(tA)) return true;
+      }
+      return false;
+    };
+
+    const extractLegacyAmount = (extId: string): Prisma.Decimal | null => {
       if (!extId || typeof extId !== 'string') return null;
-      const match = extId.match(/^inter_\d{4}-\d{2}-\d{2}_(?:CREDIT|DEBIT)_([0-9.]+)(?:_|$)/);
-      if (match && match[1]) {
-        const val = Number(match[1]);
-        if (!isNaN(val) && val > 0) return val;
+      const matchDir = extId.match(/(?:CREDIT|DEBIT)_([0-9.]+)(?:_|$)/);
+      if (matchDir && matchDir[1]) {
+        const dec = toPrismaDecimal(matchDir[1]);
+        if (dec && dec.gt(0)) return dec;
+      }
+      const matchFallback = extId.match(/^inter_.*_([0-9.]+)(?:_|$)/);
+      if (matchFallback && matchFallback[1]) {
+        const dec = toPrismaDecimal(matchFallback[1]);
+        if (dec && dec.gt(0)) return dec;
       }
       return null;
     };
@@ -670,8 +750,7 @@ export class InterService {
     for (const duplicate of zeroTxs) {
       const dupRaw = (duplicate.rawPayload as any) || {};
       const dupId = getOfficialId(dupRaw, duplicate.externalReference);
-      const dupDateStr = duplicate.occurredAt.toISOString().slice(0, 10);
-      const dupTitleStrict = normalizeStrict(dupRaw.titulo || duplicate.description);
+      const dupDateStr = getCivilDate(duplicate);
       const dupLegacyAmount = extractLegacyAmount(duplicate.externalId);
 
       let matchingCandidates: typeof validTxs = [];
@@ -686,29 +765,25 @@ export class InterService {
       }
 
       // PROVA B: externalId legado contém o valor original e coincide com o lançamento canônico
-      if (matchingCandidates.length === 0 && dupLegacyAmount !== null && dupLegacyAmount > 0) {
+      if (matchingCandidates.length === 0 && dupLegacyAmount !== null && dupLegacyAmount.gt(0)) {
         matchingCandidates = validTxs.filter((c) => {
           if (c.accountId !== duplicate.accountId) return false;
-          const cDateStr = c.occurredAt.toISOString().slice(0, 10);
+          const cDateStr = getCivilDate(c);
           if (cDateStr !== dupDateStr) return false;
           if (c.direction !== duplicate.direction) return false;
-          const cRaw = (c.rawPayload as any) || {};
-          const cTitleStrict = normalizeStrict(cRaw.titulo || c.description);
-          if (cTitleStrict !== dupTitleStrict) return false;
-          return Math.abs(Number(c.amount) - dupLegacyAmount) < 0.001;
+          if (!hasMatchingTitle(duplicate, c)) return false;
+          return areDecimalsEqual(c.amount, dupLegacyAmount);
         });
       }
 
       // PROVA C: artefato com externalId contendo valor zero ou padrão conhecido
-      if (matchingCandidates.length === 0 && dupTitleStrict.length > 0) {
+      if (matchingCandidates.length === 0) {
         matchingCandidates = validTxs.filter((c) => {
           if (c.accountId !== duplicate.accountId) return false;
-          const cDateStr = c.occurredAt.toISOString().slice(0, 10);
+          const cDateStr = getCivilDate(c);
           if (cDateStr !== dupDateStr) return false;
           if (c.direction !== duplicate.direction) return false;
-          const cRaw = (c.rawPayload as any) || {};
-          const cTitleStrict = normalizeStrict(cRaw.titulo || c.description);
-          return cTitleStrict.length > 0 && cTitleStrict === dupTitleStrict;
+          return hasMatchingTitle(duplicate, c);
         });
       }
 
@@ -780,6 +855,8 @@ export class InterService {
 
     return {
       totalScanned,
+      zeroTxsCount: zeroTxs.length,
+      canonicalCount: validTxs.length,
       duplicateIdsToRemove,
       canonicalUpdates,
       transferUpdates,
