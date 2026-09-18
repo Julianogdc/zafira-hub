@@ -97,6 +97,18 @@ export function CaixaMovimentacoes() {
     provenDuplicatesToRemove: number;
     manualClassificationsToPreserve: number;
     ambiguousRecordsKept: number;
+    analyzedRecords?: number;
+    positiveRecordsCount?: number;
+    candidatePairsEvaluated?: number;
+    matchesByOfficialId?: number;
+    matchesByLegacyAmount?: number;
+    matchesByStrictFallback?: number;
+    rejectedByAccount?: number;
+    rejectedByDate?: number;
+    rejectedByDirection?: number;
+    rejectedByTitle?: number;
+    rejectedByAmount?: number;
+    repairAlgorithmVersion?: string;
   } | null>(null);
   const [checkingTimes, setCheckingTimes] = useState<boolean>(false);
   const [applyingTimes, setApplyingTimes] = useState<boolean>(false);
@@ -382,6 +394,19 @@ export function CaixaMovimentacoes() {
           provenDuplicatesToRemove: res.provenDuplicatesToRemove ?? res.duplicatesToRemove ?? 0,
           manualClassificationsToPreserve: res.manualClassificationsToPreserve ?? res.manualDataToMerge ?? 0,
           ambiguousRecordsKept: res.ambiguousRecordsKept ?? res.ambiguousDuplicatesToSkip ?? 0,
+          
+          analyzedRecords: res.analyzedRecords ?? 0,
+          positiveRecordsCount: res.positiveRecordsCount ?? 0,
+          candidatePairsEvaluated: res.candidatePairsEvaluated ?? 0,
+          matchesByOfficialId: res.matchesByOfficialId ?? 0,
+          matchesByLegacyAmount: res.matchesByLegacyAmount ?? 0,
+          matchesByStrictFallback: res.matchesByStrictFallback ?? 0,
+          rejectedByAccount: res.rejectedByAccount ?? 0,
+          rejectedByDate: res.rejectedByDate ?? 0,
+          rejectedByDirection: res.rejectedByDirection ?? 0,
+          rejectedByTitle: res.rejectedByTitle ?? 0,
+          rejectedByAmount: res.rejectedByAmount ?? 0,
+          repairAlgorithmVersion: res.repairAlgorithmVersion ?? '',
         });
         setRepairPreviewModalOpen(true);
       } else {
@@ -1903,6 +1928,32 @@ export function CaixaMovimentacoes() {
               ) : (
                 <div className="p-2.5 rounded-md bg-zinc-900 border border-white/5 text-zinc-400 text-[11px]">
                   Ao confirmar, as {repairPreviewData.provenDuplicatesToRemove} duplicatas de R$ 0,00 comprovadas serão excluídas e as {repairPreviewData.manualClassificationsToPreserve} classificações manuais serão transferidas para os lançamentos reais correspondentes em uma única transação atômica.
+                </div>
+              )}
+
+              {/* Diagnósticos Técnicos Discretos */}
+              {repairPreviewData.repairAlgorithmVersion && (
+                <div className="pt-2 border-t border-white/5">
+                  <div className="text-[10px] text-zinc-600 font-mono space-y-0.5">
+                    <div>v{repairPreviewData.repairAlgorithmVersion} | Diagnóstico Estrito</div>
+                    <div className="grid grid-cols-2 gap-x-4">
+                      <div>Linhas R$ 0,00 encontradas: {repairPreviewData.zeroRecordsCount}</div>
+                      <div>Candidatos reais ({'>'}0): {repairPreviewData.positiveRecordsCount}</div>
+                      <div>Pares avaliados: {repairPreviewData.candidatePairsEvaluated}</div>
+                      <div>Pares comprovados para remoção: {repairPreviewData.provenDuplicatesToRemove}</div>
+                      <div>Ambíguos preservados: {repairPreviewData.ambiguousRecordsKept}</div>
+                      <div className="col-span-2 pt-1 font-semibold">Falhas de Correspondência:</div>
+                      <div>Por Conta: {repairPreviewData.rejectedByAccount}</div>
+                      <div>Por Data: {repairPreviewData.rejectedByDate}</div>
+                      <div>Por Direção: {repairPreviewData.rejectedByDirection}</div>
+                      <div>Por Título: {repairPreviewData.rejectedByTitle}</div>
+                      <div>Por Valor: {repairPreviewData.rejectedByAmount}</div>
+                      <div className="col-span-2 pt-1 font-semibold">Match Source:</div>
+                      <div>Official ID: {repairPreviewData.matchesByOfficialId}</div>
+                      <div>Legacy Amount: {repairPreviewData.matchesByLegacyAmount}</div>
+                      <div>Strict Fallback: {repairPreviewData.matchesByStrictFallback}</div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

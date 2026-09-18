@@ -860,7 +860,7 @@ export class PostizService {
       try {
         const fullPost = await this.client.getPublicPost(postId);
         if (fullPost) {
-          const postIntegrationId = fullPost.integration?.id || fullPost.integrationId;
+          const postIntegrationId = fullPost.integration?.id || (fullPost as any).integrationId;
 
           // Se tiver vínculo confirmado com o cliente
           if (postIntegrationId && allowedIntegrationIds.has(postIntegrationId)) {

@@ -4822,6 +4822,56 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       assert.strictEqual(res.ambiguousDuplicatesSkipped, 0);
       assert.strictEqual(transactionTriggered, false, 'Não deve chamar $transaction quando não há operações');
     });
+
+    // 17.13 Teste obrigatório do padrão externalId real
+    await st.test('17.13 Extrai legacy amount e identifica Prova B com accountAmount negativo usando padrão real', async () => {
+      const state = [
+        {
+          id: 'tx-real-debit',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          direction: 'DEBIT',
+          // Simulando Prisma.Decimal com valor negativo gravado no banco real
+          amount: new Prisma.Decimal('-450.00'),
+          description: 'PIX ENVIADO',
+          rawPayload: { titulo: 'PIX ENVIADO' },
+        },
+        {
+          id: 'tx-dup-zero',
+          accountId: 'acc-real-123',
+          occurredAt: new Date('2026-09-17T12:00:00Z'),
+          direction: 'DEBIT',
+          amount: new Prisma.Decimal('0.00'),
+          description: 'PIX ENVIADO',
+          // O externalId de R$ 0,00 carrega o valor legado sem sinal
+          externalId: 'inter_acc-real-123_2026-09-17_DEBIT_450.00_hash789',
+          rawPayload: { titulo: 'PIX ENVIADO' },
+        },
+      ];
+
+      let deletedId: string | null = null;
+      const mockPrisma: any = {
+        financialTransaction: {
+          findMany: async () => [...state],
+          update: async () => ({}),
+          delete: async (args: any) => {
+            deletedId = args.where.id;
+            return { id: args.where.id };
+          },
+          count: async () => state.length,
+        },
+        $transaction: async (cb: any) => {
+          return cb(mockPrisma); // simula execução da transação no mock
+        },
+      };
+
+      const service = new InterService({} as any, mockPrisma);
+      const res = await service.repairInterDuplicates('org-test');
+
+      assert.strictEqual(res.success, true);
+      assert.strictEqual(res.duplicatesRemoved, 1, 'Deve remover 1 duplicata comprovada pela Prova B');
+      assert.strictEqual(deletedId, 'tx-dup-zero', 'O ID deletado deve ser o do duplicado de R$ 0,00');
+    });
   });
 });
 

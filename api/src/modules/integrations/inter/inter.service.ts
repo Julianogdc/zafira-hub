@@ -440,9 +440,14 @@ export class InterService {
    *    para o registro canônico.
    */
   async repairInterDuplicates(organizationId?: string): Promise<{
+    success: boolean;
     scanned: number;
+    zeroRecordsCount: number;
     duplicatesRemoved: number;
     manualDataMerged: number;
+    ambiguousDuplicatesSkipped: number;
+    remainingTransactions: number;
+    totalInspected: number;
     mergedCount: number;
     removedCount: number;
   }> {
@@ -567,6 +572,7 @@ export class InterService {
    */
   async previewRepairInterDuplicates(organizationId?: string): Promise<{
     success: boolean;
+    repairAlgorithmVersion: string;
     scanned: number;
     zeroRecordsCount: number;
     provenDuplicatesToRemove: number;
@@ -580,6 +586,19 @@ export class InterService {
     expectedRemaining: number;
     unmatchedZeroCount: number;
     patterns: Record<string, number>;
+    
+    // Novas métricas
+    analyzedRecords: number;
+    positiveRecordsCount: number;
+    candidatePairsEvaluated: number;
+    matchesByOfficialId: number;
+    matchesByLegacyAmount: number;
+    matchesByStrictFallback: number;
+    rejectedByAccount: number;
+    rejectedByDate: number;
+    rejectedByDirection: number;
+    rejectedByTitle: number;
+    rejectedByAmount: number;
   }> {
     const whereClause: any = {
       account: { provider: 'INTER' },
@@ -603,6 +622,7 @@ export class InterService {
 
     return {
       success: true,
+      repairAlgorithmVersion: 'v3-decimal-diagnostics',
       scanned: resolution.totalScanned,
       zeroRecordsCount: resolution.zeroTxsCount,
       provenDuplicatesToRemove: resolution.duplicateIdsToRemove.length,
@@ -616,6 +636,19 @@ export class InterService {
       expectedRemaining: Math.max(0, resolution.totalScanned - resolution.duplicateIdsToRemove.length),
       unmatchedZeroCount: resolution.unmatchedZeroCount,
       patterns: resolution.patterns,
+      
+      // Diagnósticos agregados detalhados
+      analyzedRecords: resolution.analyzedRecords,
+      positiveRecordsCount: resolution.positiveRecordsCount,
+      candidatePairsEvaluated: resolution.candidatePairsEvaluated,
+      matchesByOfficialId: resolution.matchesByOfficialId,
+      matchesByLegacyAmount: resolution.matchesByLegacyAmount,
+      matchesByStrictFallback: resolution.matchesByStrictFallback,
+      rejectedByAccount: resolution.rejectedByAccount,
+      rejectedByDate: resolution.rejectedByDate,
+      rejectedByDirection: resolution.rejectedByDirection,
+      rejectedByTitle: resolution.rejectedByTitle,
+      rejectedByAmount: resolution.rejectedByAmount,
     };
   }
 
@@ -634,11 +667,26 @@ export class InterService {
     ambiguousDuplicatesSkipped: number;
     unmatchedZeroCount: number;
     patterns: Record<string, number>;
+    
+    // Novas métricas de diagnóstico
+    analyzedRecords: number;
+    positiveRecordsCount: number;
+    candidatePairsEvaluated: number;
+    matchesByOfficialId: number;
+    matchesByLegacyAmount: number;
+    matchesByStrictFallback: number;
+    rejectedByAccount: number;
+    rejectedByDate: number;
+    rejectedByDirection: number;
+    rejectedByTitle: number;
+    rejectedByAmount: number;
+    provenDuplicatesToRemove: number;
   } {
     const totalScanned = transactions.length;
     // Seleção robusta de linhas de R$ 0,00 e candidatos canônicos com suporte nativo a Prisma.Decimal
     const zeroTxs = transactions.filter((t) => isZeroDecimal(t.amount));
-    const validTxs = transactions.filter((t) => isPositiveDecimal(t.amount));
+    // CORREÇÃO CRÍTICA: lançamentos reais podem ser negativos (ex: -450.00 para DEBIT no BD)
+    const validTxs = transactions.filter((t) => !isZeroDecimal(t.amount));
 
     const normalizeStrict = (str?: string | null): string => {
       if (!str || typeof str !== 'string') return '';
@@ -744,6 +792,15 @@ export class InterService {
       patterns[pat] = (patterns[pat] || 0) + 1;
     }
 
+    let candidatePairsEvaluated = 0;
+    let matchesByOfficialId = 0;
+    let matchesByLegacyAmount = 0;
+    let matchesByStrictFallback = 0;
+    let rejectedByAccount = 0;
+    let rejectedByDate = 0;
+    let rejectedByDirection = 0;
+    let rejectedByTitle = 0;
+    let rejectedByAmount = 0;
     let ambiguousDuplicatesSkipped = 0;
     const confirmedMatches: Array<{ duplicate: any; canonical: any }> = [];
 
@@ -754,37 +811,52 @@ export class InterService {
       const dupLegacyAmount = extractLegacyAmount(duplicate.externalId);
 
       let matchingCandidates: typeof validTxs = [];
+      let matchType = '';
 
       // PROVA A: idTransacao / codigoTransacao / nossoNumero oficial idêntico
       if (dupId) {
         matchingCandidates = validTxs.filter((c) => {
-          if (c.accountId !== duplicate.accountId) return false;
+          candidatePairsEvaluated++;
+          if (c.accountId !== duplicate.accountId) { rejectedByAccount++; return false; }
           const cId = getOfficialId(c.rawPayload, c.externalReference);
           return cId.length > 0 && cId === dupId;
         });
+        if (matchingCandidates.length === 1) matchType = 'OFFICIAL_ID';
       }
 
       // PROVA B: externalId legado contém o valor original e coincide com o lançamento canônico
       if (matchingCandidates.length === 0 && dupLegacyAmount !== null && dupLegacyAmount.gt(0)) {
         matchingCandidates = validTxs.filter((c) => {
-          if (c.accountId !== duplicate.accountId) return false;
+          candidatePairsEvaluated++;
+          if (c.accountId !== duplicate.accountId) { rejectedByAccount++; return false; }
           const cDateStr = getCivilDate(c);
-          if (cDateStr !== dupDateStr) return false;
-          if (c.direction !== duplicate.direction) return false;
-          if (!hasMatchingTitle(duplicate, c)) return false;
-          return areDecimalsEqual(c.amount, dupLegacyAmount);
+          if (cDateStr !== dupDateStr) { rejectedByDate++; return false; }
+          if (c.direction !== duplicate.direction) { rejectedByDirection++; return false; }
+          if (!hasMatchingTitle(duplicate, c)) { rejectedByTitle++; return false; }
+          
+          // CORREÇÃO CRÍTICA: c.amount pode ser negativo (ex: -450.00 para DEBIT). Usa abs()
+          const cAbs = toPrismaDecimal(c.amount)?.abs();
+          if (cAbs && areDecimalsEqual(cAbs, dupLegacyAmount)) {
+             return true;
+          }
+          rejectedByAmount++;
+          return false;
         });
+        if (matchingCandidates.length === 1) matchType = 'LEGACY_AMOUNT';
       }
 
       // PROVA C: artefato com externalId contendo valor zero ou padrão conhecido
       if (matchingCandidates.length === 0) {
         matchingCandidates = validTxs.filter((c) => {
-          if (c.accountId !== duplicate.accountId) return false;
+          candidatePairsEvaluated++;
+          if (c.accountId !== duplicate.accountId) { rejectedByAccount++; return false; }
           const cDateStr = getCivilDate(c);
-          if (cDateStr !== dupDateStr) return false;
-          if (c.direction !== duplicate.direction) return false;
-          return hasMatchingTitle(duplicate, c);
+          if (cDateStr !== dupDateStr) { rejectedByDate++; return false; }
+          if (c.direction !== duplicate.direction) { rejectedByDirection++; return false; }
+          if (!hasMatchingTitle(duplicate, c)) { rejectedByTitle++; return false; }
+          return true;
         });
+        if (matchingCandidates.length === 1) matchType = 'STRICT_FALLBACK';
       }
 
       // Decisão baseada em evidências estritas
@@ -793,6 +865,9 @@ export class InterService {
           duplicate,
           canonical: matchingCandidates[0],
         });
+        if (matchType === 'OFFICIAL_ID') matchesByOfficialId++;
+        if (matchType === 'LEGACY_AMOUNT') matchesByLegacyAmount++;
+        if (matchType === 'STRICT_FALLBACK') matchesByStrictFallback++;
       } else if (matchingCandidates.length > 1) {
         // Ambiguidade: 2 ou mais candidatos legítimos. NÃO exclui por segurança.
         ambiguousDuplicatesSkipped += 1;
@@ -864,6 +939,20 @@ export class InterService {
       ambiguousDuplicatesSkipped,
       unmatchedZeroCount,
       patterns,
+      
+      // Novas métricas
+      analyzedRecords: totalScanned,
+      positiveRecordsCount: validTxs.length,
+      candidatePairsEvaluated,
+      matchesByOfficialId,
+      matchesByLegacyAmount,
+      matchesByStrictFallback,
+      rejectedByAccount,
+      rejectedByDate,
+      rejectedByDirection,
+      rejectedByTitle,
+      rejectedByAmount,
+      provenDuplicatesToRemove: duplicateIdsToRemove.length,
     };
   }
 

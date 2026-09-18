@@ -144,7 +144,7 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 3. GET /clients/:clientId/integrations/postiz (Consultar contas vinculadas)
     const getClientAccountsHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -170,7 +170,7 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 3b. GET /clients/:clientId/integrations/postiz/available (Contas disponíveis para este cliente)
     const getClientAvailableAccountsHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -196,7 +196,7 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 4. POST /clients/:clientId/integrations/postiz (Vincular conta Postiz)
     const linkAccountHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -228,7 +228,7 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 5. DELETE /clients/:clientId/integrations/postiz/:externalId (Remover vínculo)
     const unlinkAccountHandler = async (
-      request: FastifyRequest<{ Params: ClientExternalIdParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -262,10 +262,7 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 6. GET /clients/:clientId/content/postiz (Buscar publicações do Postiz vinculadas ao cliente)
     const getClientContentHandler = async (
-      request: FastifyRequest<{
-        Params: ClientParams;
-        Querystring: { startDate?: string; endDate?: string };
-      }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -294,14 +291,13 @@ export function createPostizRoutes(customService?: PostizService) {
 
     // 7. GET /clients/:clientId/content/postiz/:postId (Buscar publicação específica do cliente)
     const getClientPostByIdHandler = async (
-      request: FastifyRequest<{
-        Params: ClientParams & { postId?: string };
-      }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
-        const clientId = extractClientId(request.params);
-        const postId = (request.params.postId || '').trim();
+        const params = request.params as any;
+        const clientId = extractClientId(params);
+        const postId = (params.postId || '').trim();
         const organizationId = getOrganizationId(request);
 
         const result = await service.getClientPostById(clientId, postId, organizationId);
@@ -330,12 +326,13 @@ export function createPostizRoutes(customService?: PostizService) {
     });
 
     const reschedulePostHandler = async (
-      request: FastifyRequest<{ Params: ClientParams & { postId: string } }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
-        const clientId = extractClientId(request.params);
-        const postId = (request.params.postId || '').trim();
+        const params = request.params as any;
+        const clientId = extractClientId(params);
+        const postId = (params.postId || '').trim();
         const organizationId = getOrganizationId(request);
         const body = reschedulePostSchema.parse(request.body);
 
@@ -371,25 +368,12 @@ export function createPostizRoutes(customService?: PostizService) {
     // =========================================================================
     // 8. GET /integrations/postiz/content (Visão consolidada de conteúdos da organização)
     const getAggregatedContentHandler = async (
-      request: FastifyRequest<{
-        Querystring: {
-          startDate?: string;
-          endDate?: string;
-          clientId?: string;
-          integrationId?: string;
-          status?: string;
-          format?: string;
-          search?: string;
-          page?: string;
-          limit?: string;
-          forceRefresh?: string;
-        };
-      }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
         const organizationId = getOrganizationId(request);
-        const q = request.query || {};
+        const q = (request.query || {}) as any;
 
         const page = q.page ? parseInt(q.page, 10) : 1;
         const limit = q.limit !== undefined ? parseInt(q.limit, 10) : 0;
@@ -482,11 +466,12 @@ export function createPostizRoutes(customService?: PostizService) {
     });
 
     const createPostHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
-        const clientId = extractClientId(request.params);
+        const params = request.params as any;
+        const clientId = extractClientId(params);
         const organizationId = getOrganizationId(request);
         const body = createPostSchema.parse(request.body);
 

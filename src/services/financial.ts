@@ -281,6 +281,7 @@ export const financialApi = {
 
   previewRepairInterDuplicates: async (): Promise<{
     success: boolean;
+    repairAlgorithmVersion?: string;
     scanned: number;
     zeroRecordsCount?: number;
     provenDuplicatesToRemove?: number;
@@ -294,6 +295,19 @@ export const financialApi = {
     expectedRemaining: number;
     unmatchedZeroCount: number;
     patterns: Record<string, number>;
+    
+    // Novas métricas
+    analyzedRecords?: number;
+    positiveRecordsCount?: number;
+    candidatePairsEvaluated?: number;
+    matchesByOfficialId?: number;
+    matchesByLegacyAmount?: number;
+    matchesByStrictFallback?: number;
+    rejectedByAccount?: number;
+    rejectedByDate?: number;
+    rejectedByDirection?: number;
+    rejectedByTitle?: number;
+    rejectedByAmount?: number;
   }> => {
     return api.get('/integrations/inter/repair-duplicates/preview');
   },
