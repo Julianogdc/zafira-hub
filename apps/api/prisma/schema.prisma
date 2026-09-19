@@ -52,10 +52,10 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members            OrganizationMember[]
-  clients            Client[]
-  integrations       OrganizationIntegration[]
-  oauthStates        OAuthState[]
+  members                OrganizationMember[]
+  clients                Client[]
+  integrations           OrganizationIntegration[]
+  oauthStates            OAuthState[]
   asanaSubscriptions     AsanaWebhookSubscription[]
   asaasPayments          AsaasPayment[]
   financialAccounts      FinancialAccount[]
@@ -63,6 +63,12 @@ model Organization {
   financialCategoryRules FinancialCategoryRule[]
   financialTransactions  FinancialTransaction[]
   financialTransfers     FinancialTransfer[]
+
+  permissions           OrganizationMemberPermission[]
+  teams                 Team[]
+  auditLogs             AuditLog[]
+  teamMembers           TeamMember[]
+  userClientAssignments UserClientAssignment[]
 
   @@map("organizations")
 }
@@ -82,6 +88,8 @@ model User {
   responsibleClients Client[]
   oauthStates        OAuthState[]
 
+  actorAuditLogs AuditLog[]
+
   @@map("users")
 }
 
@@ -93,10 +101,14 @@ model OrganizationMember {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization      Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissions       OrganizationMemberPermission[]
+  teams             TeamMember[]
+  clientAssignments UserClientAssignment[]
 
   @@unique([organizationId, userId])
+  @@unique([organizationId, id])
   @@index([userId])
   @@map("organization_members")
 }
@@ -118,14 +130,16 @@ model Client {
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  responsibleUser User?               @relation(fields: [responsibleUserId], references: [id], onDelete: SetNull)
-  integrations    ClientIntegration[]
-  asaasPayments   AsaasPayment[]
-  financialTransactions  FinancialTransaction[] @relation("ClientTransactions")
-  suggestedTransactions  FinancialTransaction[] @relation("SuggestedClientTransactions")
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responsibleUser        User?                   @relation(fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  integrations           ClientIntegration[]
+  asaasPayments          AsaasPayment[]
+  financialTransactions  FinancialTransaction[]  @relation("ClientTransactions")
+  suggestedTransactions  FinancialTransaction[]  @relation("SuggestedClientTransactions")
   financialCategoryRules FinancialCategoryRule[]
+  assignedMembers        UserClientAssignment[]
 
+  @@unique([organizationId, id])
   @@index([organizationId])
   @@index([status])
   @@index([responsibleUserId])
@@ -177,8 +191,8 @@ model OAuthState {
   consumedAt     DateTime?
   createdAt      DateTime            @default(now())
 
-  organization   Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user           User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([provider, nonce])
   @@index([expiresAt])
@@ -206,27 +220,27 @@ model AsanaWebhookSubscription {
 }
 
 model AsaasPayment {
-  id                 String             @id @default(uuid())
-  organizationId     String
-  clientId           String?
-  asaasCustomerId    String
-  externalId         String             @unique
-  installmentNumber  Int?
-  description        String?
-  value              Decimal            @db.Decimal(12, 2)
-  netValue           Decimal?           @db.Decimal(12, 2)
-  originalValue      Decimal?           @db.Decimal(12, 2)
-  interestValue      Decimal?           @db.Decimal(12, 2)
-  billingType        String             @default("UNDEFINED")
-  status             AsaasPaymentStatus @default(PENDING)
-  dueDate            DateTime
-  paymentDate        DateTime?
-  clientPaymentDate  DateTime?
-  invoiceUrl         String?
-  bankSlipUrl        String?
-  rawPayload         Json?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  id                String             @id @default(uuid())
+  organizationId    String
+  clientId          String?
+  asaasCustomerId   String
+  externalId        String             @unique
+  installmentNumber Int?
+  description       String?
+  value             Decimal            @db.Decimal(12, 2)
+  netValue          Decimal?           @db.Decimal(12, 2)
+  originalValue     Decimal?           @db.Decimal(12, 2)
+  interestValue     Decimal?           @db.Decimal(12, 2)
+  billingType       String             @default("UNDEFINED")
+  status            AsaasPaymentStatus @default(PENDING)
+  dueDate           DateTime
+  paymentDate       DateTime?
+  clientPaymentDate DateTime?
+  invoiceUrl        String?
+  bankSlipUrl       String?
+  rawPayload        Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
@@ -240,13 +254,13 @@ model AsaasPayment {
 }
 
 model AsaasWebhookEvent {
-  id                 String   @id @default(uuid())
-  dedupeKey          String   @unique
-  eventId            String?
-  event              String
-  paymentExternalId  String?
-  processedAt        DateTime @default(now())
-  payload            Json?
+  id                String   @id @default(uuid())
+  dedupeKey         String   @unique
+  eventId           String?
+  event             String
+  paymentExternalId String?
+  processedAt       DateTime @default(now())
+  payload           Json?
 
   @@index([paymentExternalId])
   @@index([dedupeKey])
@@ -325,10 +339,10 @@ model FinancialAccount {
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
 
-  organization    Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   transactions    FinancialTransaction[]
-  sourceTransfers FinancialTransfer[]     @relation("SourceAccountTransfers")
-  destTransfers   FinancialTransfer[]     @relation("DestAccountTransfers")
+  sourceTransfers FinancialTransfer[]    @relation("SourceAccountTransfers")
+  destTransfers   FinancialTransfer[]    @relation("DestAccountTransfers")
 
   @@unique([organizationId, provider, name])
   @@index([organizationId])
@@ -370,9 +384,9 @@ model FinancialCategoryRule {
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
-  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  category     FinancialCategory       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  client       Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     FinancialCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  client       Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
 
   @@index([organizationId])
   @@index([categoryId])
@@ -404,13 +418,13 @@ model FinancialTransaction {
   createdAt                DateTime                      @default(now())
   updatedAt                DateTime                      @updatedAt
 
-  organization    Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  account         FinancialAccount    @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  category        FinancialCategory?  @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  client          Client?             @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: SetNull)
-  suggestedClient Client?             @relation("SuggestedClientTransactions", fields: [suggestedClientId], references: [id], onDelete: SetNull)
-  sourceTransfer  FinancialTransfer?  @relation("SourceTransactionTransfer")
-  destTransfer    FinancialTransfer?  @relation("DestTransactionTransfer")
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account         FinancialAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category        FinancialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  client          Client?            @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: SetNull)
+  suggestedClient Client?            @relation("SuggestedClientTransactions", fields: [suggestedClientId], references: [id], onDelete: SetNull)
+  sourceTransfer  FinancialTransfer? @relation("SourceTransactionTransfer")
+  destTransfer    FinancialTransfer? @relation("DestTransactionTransfer")
 
   @@unique([accountId, externalId])
   @@index([organizationId])
@@ -455,3 +469,115 @@ model FinancialTransfer {
   @@map("financial_transfers")
 }
 
+model Permission {
+  code        String   @id
+  area        String
+  description String
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+  memberOverrides OrganizationMemberPermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role           Role
+  permissionCode String
+  createdAt      DateTime @default(now())
+
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([role, permissionCode])
+  @@index([permissionCode])
+  @@map("role_permissions")
+}
+
+model OrganizationMemberPermission {
+  organizationId       String
+  organizationMemberId String
+  permissionCode       String
+  allowed              Boolean
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+  permission         Permission         @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([organizationMemberId, permissionCode])
+  @@index([organizationId])
+  @@index([permissionCode])
+  @@map("organization_member_permissions")
+}
+
+model Team {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      TeamMember[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("teams")
+}
+
+model TeamMember {
+  organizationId       String
+  teamId               String
+  organizationMemberId String
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team               Team               @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([teamId, organizationMemberId])
+  @@index([organizationId])
+  @@index([organizationMemberId])
+  @@map("team_members")
+}
+
+model UserClientAssignment {
+  organizationId       String
+  organizationMemberId String
+  clientId             String
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+  client             Client             @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([organizationMemberId, clientId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("user_client_assignments")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String?
+  before         Json?
+  after          Json?
+  metadata       Json?
+  requestId      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorUser    User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
