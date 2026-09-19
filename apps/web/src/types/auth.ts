@@ -1,21 +1,14 @@
+import { AuthUser, OrganizationSummary, SessionResponse } from '@zafira/contracts';
+
 export type UserRole = 'ADMIN' | 'MANAGER' | 'MEMBER' | 'admin' | 'manager' | 'member';
 
-export interface UserOrganization {
-  id: string;
-  name: string;
-  slug: string;
-  role: 'ADMIN' | 'MANAGER' | 'MEMBER';
-}
+export interface UserOrganization extends OrganizationSummary {}
 
-export interface User {
-  id: string;
-  name: string;
-  email: string;
+export interface User extends AuthUser {
   role: string; // 'admin' | 'manager' | 'member'
   avatar?: string;
   avatarUrl?: string | null;
   organizationId?: string;
-  status?: string;
   lastSeen?: string;
   asanaAccessToken?: string;
   asanaRefreshToken?: string;
@@ -37,4 +30,3 @@ export interface AuthState {
   logout: () => Promise<void>;
   updateUser: (data: Partial<User>) => void;
 }
-

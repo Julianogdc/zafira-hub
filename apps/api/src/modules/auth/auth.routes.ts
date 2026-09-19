@@ -2,8 +2,8 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { authenticate } from '../../middleware/auth.js';
 import { AppError } from '../clients/clients.service.js';
-import { loginSchema } from './auth.schemas.js';
 import { AuthService } from './auth.service.js';
+import { LoginRequestSchema, SessionResponse } from '@zafira/contracts';
 
 export async function authRoutes(app: FastifyInstance) {
   const authService = new AuthService();
@@ -31,9 +31,9 @@ export async function authRoutes(app: FastifyInstance) {
     });
   }
 
-  // POST /auth/login (com rate-limit mais estrito: máx 10 tentativas por minuto)
+  // POST /api/v1/auth/login
   app.post(
-    '/auth/login',
+    '/api/v1/auth/login',
     {
       config: {
         rateLimit: {
@@ -44,13 +44,14 @@ export async function authRoutes(app: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const body = loginSchema.parse(request.body);
-        const user = await authService.validateUser(body);
+        const body = LoginRequestSchema.parse(request.body);
+        const { user, activeOrganizationId, sessionData } = await authService.login(body);
 
         const token = await reply.jwtSign(
           {
             sub: user.id,
             email: user.email,
+            activeOrganizationId,
           },
           {
             expiresIn: '7d',
@@ -68,19 +69,16 @@ export async function authRoutes(app: FastifyInstance) {
           maxAge: 7 * 24 * 60 * 60, // 7 dias em segundos
         });
 
-        return reply.status(200).send({
-          status: 'ok',
-          user,
-        });
+        return reply.status(200).send(sessionData);
       } catch (error) {
         return handleError(error, reply);
       }
     }
   );
 
-  // GET /auth/me
+  // GET /api/v1/auth/session
   app.get(
-    '/auth/me',
+    '/api/v1/auth/session',
     {
       preHandler: [authenticate],
     },
@@ -89,7 +87,8 @@ export async function authRoutes(app: FastifyInstance) {
         const auth = request.authContext;
 
         if (!auth) {
-          return reply.status(401).send({ error: 'unauthorized' });
+          const unauth: SessionResponse = { authenticated: false };
+          return reply.status(401).send(unauth);
         }
 
         if (auth.type === 'api_key') {
@@ -100,7 +99,7 @@ export async function authRoutes(app: FastifyInstance) {
           });
         }
 
-        const profile = await authService.getUserProfile(auth.userId);
+        const profile = await authService.resolveSession(auth.userId, (auth as any).activeOrganizationId);
         return reply.status(200).send(profile);
       } catch (error) {
         return handleError(error, reply);
@@ -108,8 +107,8 @@ export async function authRoutes(app: FastifyInstance) {
     }
   );
 
-  // POST /auth/logout
-  app.post('/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
+  // POST /api/v1/auth/logout
+  app.post('/api/v1/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
     const isProduction = process.env.NODE_ENV === 'production';
     const sameSiteConfig = (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax';
 

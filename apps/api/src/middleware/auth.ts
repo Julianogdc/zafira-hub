@@ -5,6 +5,7 @@ export interface AuthUserContext {
   type: 'user';
   userId: string;
   email: string;
+  activeOrganizationId: string | null;
   memberships: {
     organizationId: string;
     organizationSlug: string;
@@ -60,7 +61,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   if (token) {
     try {
-      const decoded = await request.server.jwt.verify<{ sub: string; email: string }>(token);
+      const decoded = await request.server.jwt.verify<{ sub: string; email: string; activeOrganizationId?: string | null }>(token);
 
       const user = await prisma.user.findUnique({
         where: { id: decoded.sub },
@@ -78,10 +79,11 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
           type: 'user',
           userId: user.id,
           email: user.email,
+          activeOrganizationId: decoded.activeOrganizationId || null,
           memberships: user.memberships.map((m) => ({
             organizationId: m.organization.id,
             organizationSlug: m.organization.slug,
-            role: m.role,
+            role: m.role as any,
           })),
         };
         return;
@@ -123,7 +125,7 @@ export function requireRole(allowedRoles: ('ADMIN' | 'MANAGER' | 'MEMBER')[]) {
 
     // Determina a organização do contexto (ativa, cabeçalho ou única membership)
     const headerOrg = request.headers['x-organization-id'] as string | undefined;
-    const explicitOrgId = (auth as any).activeOrganizationId || headerOrg;
+    const explicitOrgId = auth.activeOrganizationId || headerOrg;
 
     let targetMembership = explicitOrgId
       ? auth.memberships.find((m) => m.organizationId === explicitOrgId || m.organizationSlug === explicitOrgId)

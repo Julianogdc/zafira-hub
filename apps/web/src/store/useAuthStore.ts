@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { User, AuthState, UserOrganization } from '@/types/auth';
+import { SessionResponse } from '@zafira/contracts';
 
 interface ExtendedAuthStore extends AuthState {
   uploadAvatar: (file: File) => Promise<string | null>;
@@ -19,28 +20,30 @@ export const useAuthStore = create<ExtendedAuthStore>((set, get) => ({
   isLoading: true,
 
   /**
-   * Consulta a sessão ativa na nova API Hub 2.0 via GET /auth/me
+   * Consulta a sessão ativa na nova API Hub 2.1 via GET /api/v1/auth/session
    */
   checkSession: async () => {
     try {
       set({ loading: true, isLoading: true });
 
-      const profile = await api.get('/auth/me');
+      const response = await api.get<SessionResponse>('/api/v1/auth/session');
 
-      if (profile && profile.id) {
-        const orgs: UserOrganization[] = profile.organizations || [];
-        const currentOrg = orgs.find((o) => o.slug === 'zafira') || orgs[0] || null;
+      if (response && response.authenticated) {
+        const orgs: UserOrganization[] = response.organizations || [];
+        const currentOrg = response.activeOrganizationId 
+            ? orgs.find((o) => o.id === response.activeOrganizationId) || null 
+            : null;
         const normalizedRole = currentOrg?.role?.toLowerCase() || 'member';
 
         const user: User = {
-          id: profile.id,
-          name: profile.name,
-          email: profile.email,
+          id: response.user.id,
+          name: response.user.name,
+          email: response.user.email,
           role: normalizedRole,
-          avatar: profile.avatarUrl || undefined,
-          avatarUrl: profile.avatarUrl || null,
+          avatar: response.user.avatarUrl || undefined,
+          avatarUrl: response.user.avatarUrl || null,
           organizationId: currentOrg?.id,
-          status: profile.status || 'active',
+          status: response.user.status || 'ACTIVE',
           organizations: orgs,
         };
 
@@ -65,7 +68,6 @@ export const useAuthStore = create<ExtendedAuthStore>((set, get) => ({
         });
       }
     } catch (error) {
-      // 401 ou erro de sessão -> desloga localmente
       set({
         user: null,
         organizations: [],
@@ -79,13 +81,13 @@ export const useAuthStore = create<ExtendedAuthStore>((set, get) => ({
   },
 
   /**
-   * Autentica com email e senha na API Hub 2.0 via POST /auth/login
+   * Autentica com email e senha na API Hub 2.1 via POST /api/v1/auth/login
    */
   login: async (credentials: { email: string; password: string }) => {
     set({ loading: true, isLoading: true });
     try {
-      await api.post('/auth/login', credentials);
-      // Após o login bem-sucedido, carrega a sessão via /auth/me
+      await api.post('/api/v1/auth/login', credentials);
+      // Após o login bem-sucedido, carrega a sessão
       await get().checkSession();
       if (!get().isAuthenticated) {
         throw new Error('Não foi possível estabelecer a sessão após o login.');
@@ -97,13 +99,11 @@ export const useAuthStore = create<ExtendedAuthStore>((set, get) => ({
   },
 
   /**
-   * Encerra a sessão via POST /auth/logout
+   * Encerra a sessão via POST /api/v1/auth/logout
    */
   logout: async () => {
     try {
-      await api.post('/auth/logout').catch(() => {});
-      // Desconecta também do Supabase legado se houver sessão ativa
-      await supabase.auth.signOut().catch(() => {});
+      await api.post('/api/v1/auth/logout').catch(() => {});
     } finally {
       set({
         user: null,

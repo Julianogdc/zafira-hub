@@ -53,15 +53,24 @@ export function buildApp(): FastifyInstance {
     done(null, null);
   });
 
+  const isProduction = process.env.NODE_ENV === 'production';
+  const cookieSecret = process.env.COOKIE_SECRET;
+  const jwtSecret = process.env.JWT_SECRET;
+
+  if (isProduction) {
+    if (!cookieSecret) throw new Error('COOKIE_SECRET must be defined in production');
+    if (!jwtSecret) throw new Error('JWT_SECRET must be defined in production');
+  }
+
   // 2. Suporte a Cookies HTTP-only
   app.register(cookie, {
-    secret: process.env.COOKIE_SECRET || 'zafira_hub_cookie_secret_dev_32bytes_long',
+    secret: cookieSecret || 'zafira_hub_cookie_secret_dev_32bytes_long',
     hook: 'onRequest',
   });
 
   // 3. Suporte a JWT com extração opcional de cookie
   app.register(jwt, {
-    secret: process.env.JWT_SECRET || 'zafira_hub_jwt_secret_dev_key_32bytes_long',
+    secret: jwtSecret || 'zafira_hub_jwt_secret_dev_key_32bytes_long',
     cookie: {
       cookieName: 'token',
       signed: false,
