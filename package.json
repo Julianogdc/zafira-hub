@@ -14,6 +14,7 @@
     "build": "npm run build:web && npm run build:api",
     "test": "npm run test --workspace=@zafira/api",
     "lint": "npm run lint --workspace=@zafira/web",
+    "typecheck:contracts": "npm run typecheck --workspace=@zafira/contracts",
     "prisma:generate": "npm run prisma:generate --workspace=@zafira/api"
   },
   "packageManager": "npm@11.6.2"
