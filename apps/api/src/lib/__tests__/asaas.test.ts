@@ -683,7 +683,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
   await t.test('15. Página /financas não usa Supabase nem useFinanceStore', () => {
     const financasPagePath = path.resolve(
       process.cwd(),
-      '../src/pages/Financas.tsx'
+      '../web/src/pages/Financas.tsx'
     );
 
     assert.ok(fs.existsSync(financasPagePath), 'Arquivo Financas.tsx deve existir');
