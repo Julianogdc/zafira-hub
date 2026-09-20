@@ -32,6 +32,7 @@ export async function authRoutes(app: FastifyInstance) {
   }
 
   // POST /api/v1/auth/login
+  // CLASSE: PUBLIC_INTENTIONAL
   app.post(
     '/api/v1/auth/login',
     {
@@ -77,6 +78,7 @@ export async function authRoutes(app: FastifyInstance) {
   );
 
   // GET /api/v1/auth/session
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/v1/auth/session',
     {
@@ -108,6 +110,7 @@ export async function authRoutes(app: FastifyInstance) {
   );
 
   // POST /api/v1/auth/logout
+  // CLASSE: PUBLIC_INTENTIONAL
   app.post('/api/v1/auth/logout', async (_request: FastifyRequest, reply: FastifyReply) => {
     const isProduction = process.env.NODE_ENV === 'production';
     const sameSiteConfig = (process.env.COOKIE_SAMESITE as 'lax' | 'strict' | 'none') || 'lax';

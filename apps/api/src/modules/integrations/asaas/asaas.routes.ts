@@ -1,5 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { authenticate, requireRole } from '../../../middleware/auth.js';
+import { authenticate, requirePermission } from '../../../middleware/auth.js';
 import { prisma } from '../../../lib/prisma.js';
 import { AsaasClient, AsaasIntegrationError } from './asaas.client.js';
 import { AsaasService } from './asaas.service.js';
@@ -61,14 +61,16 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/clients/:clientId/integrations/asaas/financial-summary',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getFinancialSummaryHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/clients/:clientId/integrations/asaas/financial-summary',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getFinancialSummaryHandler
     );
 
@@ -92,14 +94,16 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/integrations/asaas/sync',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncAsaasHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/integrations/asaas/sync',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncAsaasHandler
     );
 
@@ -127,14 +131,16 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/clients/:clientId/integrations/asaas/sync',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncClientHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/clients/:clientId/integrations/asaas/sync',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncClientHandler
     );
 
@@ -183,14 +189,16 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/integrations/asaas/financial-overview',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getFinancialOverviewHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/integrations/asaas/financial-overview',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getFinancialOverviewHandler
     );
 
@@ -214,14 +222,16 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/integrations/asaas/sync-all',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncAllWalletHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/integrations/asaas/sync-all',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.sync')] },
       syncAllWalletHandler
     );
 
@@ -243,7 +253,9 @@ export function createAsaasRoutes(customService?: AsaasService) {
       }
     };
 
+    // CLASSE: MACHINE_AUTHENTICATED
     app.post('/api/webhooks/asaas', asaasWebhookHandler);
+    // CLASSE: MACHINE_AUTHENTICATED
     app.post('/webhooks/asaas', asaasWebhookHandler);
   };
 }

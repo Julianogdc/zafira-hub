@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
-import { authenticate, requireRole } from '../../../middleware/auth.js';
+import { authenticate, requirePermission } from '../../../middleware/auth.js';
 import { AsanaService, AsanaIntegrationError } from './asana.service.js';
 import { prisma } from '../../../lib/prisma.js';
 import { createAndPersistOAuthState, verifyAndConsumeOAuthState } from '../../../lib/oauthState.js';
@@ -123,10 +123,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   }
 
   // 1. GET /integrations/asana/status
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/status',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('integrations.view')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
@@ -140,10 +141,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 1.1 DELETE /integrations/asana/disconnect (ADMIN)
+  // CLASSE: HUMAN_AUTHENTICATED
   app.delete(
     '/integrations/asana/disconnect',
     {
-      preHandler: [authenticate, requireRole(['ADMIN'])],
+      preHandler: [authenticate, requirePermission('integrations.remove')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
@@ -160,10 +162,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 2. GET /integrations/asana/projects
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/projects',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('integrations.view')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
@@ -187,26 +190,29 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/users',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('integrations.view')],
     },
     getUsersHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/integrations/asana/users',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('integrations.view')],
     },
     getUsersHandler
   );
 
   // 3. GET /clients/:id/asana/projects
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/projects',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('projects.view')],
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
@@ -220,10 +226,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 4. POST /clients/:id/asana/projects (ADMIN / MANAGER)
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/projects',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('projects.manage_links')],
     },
     async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
@@ -242,10 +249,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 5. DELETE /clients/:id/asana/projects/:integrationId (ADMIN / MANAGER)
+  // CLASSE: HUMAN_AUTHENTICATED
   app.delete(
     '/clients/:id/asana/projects/:integrationId',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('projects.manage_links')],
     },
     async (
       request: FastifyRequest<{ Params: { id: string; integrationId: string } }>,
@@ -275,17 +283,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getTasksHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getTasksHandler
   );
@@ -304,17 +314,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks/:taskGid',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSingleTaskHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks/:taskGid',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSingleTaskHandler
   );
@@ -339,17 +351,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.patch(
     '/clients/:id/asana/tasks/:taskGid',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     patchSingleTaskHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.patch(
     '/api/clients/:id/asana/tasks/:taskGid',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     patchSingleTaskHandler
   );
@@ -373,17 +387,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postCreateTaskHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postCreateTaskHandler
   );
@@ -406,17 +422,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/projects/:projectGid/sections',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSectionsHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/projects/:projectGid/sections',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSectionsHandler
   );
@@ -445,17 +463,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks/:taskGid/section',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postTaskSectionHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks/:taskGid/section',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postTaskSectionHandler
   );
@@ -484,17 +504,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks/:taskGid/subtasks',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSubtasksHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks/:taskGid/subtasks',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getSubtasksHandler
   );
@@ -518,17 +540,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks/:taskGid/subtasks',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postSubtaskHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks/:taskGid/subtasks',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postSubtaskHandler
   );
@@ -555,17 +579,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks/:taskGid/stories',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getStoriesHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks/:taskGid/stories',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getStoriesHandler
   );
@@ -589,17 +615,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks/:taskGid/stories',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postStoryHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks/:taskGid/stories',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postStoryHandler
   );
@@ -622,17 +650,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks/:taskGid/attachments',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getAttachmentsHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks/:taskGid/attachments',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getAttachmentsHandler
   );
@@ -663,17 +693,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks/:taskGid/attachments',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postAttachmentHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks/:taskGid/attachments',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postAttachmentHandler
   );
@@ -689,17 +721,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/tags',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getWorkspaceTagsHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/integrations/asana/tags',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getWorkspaceTagsHandler
   );
@@ -722,17 +756,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/clients/:id/asana/tasks/:taskGid/tags',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postTagHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/clients/:id/asana/tasks/:taskGid/tags',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     postTagHandler
   );
@@ -755,17 +791,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.delete(
     '/clients/:id/asana/tasks/:taskGid/tags/:tagGid',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     deleteTagHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.delete(
     '/api/clients/:id/asana/tasks/:taskGid/tags/:tagGid',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     deleteTagHandler
   );
@@ -788,17 +826,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/clients/:id/asana/tasks/:taskGid/dependencies',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getDependenciesHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/clients/:id/asana/tasks/:taskGid/dependencies',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     getDependenciesHandler
   );
@@ -819,10 +859,11 @@ export async function asanaRoutes(app: FastifyInstance) {
   }
 
   // 7. GET /integrations/asana/oauth/authorize (Gera URL oficial de autorização do Asana com scopes explícitos e state seguro)
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/oauth/authorize',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
@@ -991,7 +1032,9 @@ export async function asanaRoutes(app: FastifyInstance) {
   };
 
   // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
+  // CLASSE: MACHINE_AUTHENTICATED
   app.get('/integrations/asana/oauth/callback', callbackHandler);
+  // CLASSE: MACHINE_AUTHENTICATED
   app.get('/api/integrations/asana/oauth/callback', callbackHandler);
 
   // 9. GET /integrations/asana/events (Canal SSE autenticado e isolado por organização)
@@ -1004,17 +1047,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/events',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     eventsHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/integrations/asana/events',
     {
-      preHandler: [authenticate],
+      preHandler: [authenticate, requirePermission('deliverables.view')],
     },
     eventsHandler
   );
@@ -1086,7 +1131,9 @@ export async function asanaRoutes(app: FastifyInstance) {
     });
   };
 
+  // CLASSE: MACHINE_AUTHENTICATED
   app.post('/integrations/asana/webhooks/:subscriptionId', webhookHandler);
+  // CLASSE: MACHINE_AUTHENTICATED
   app.post('/api/integrations/asana/webhooks/:subscriptionId', webhookHandler);
 
   // 11. GET /integrations/asana/diagnostics (Diagnóstico seguro de Webhooks, SSE e banco - ADMIN)
@@ -1100,17 +1147,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/integrations/asana/diagnostics',
     {
-      preHandler: [authenticate, requireRole(['ADMIN'])],
+      preHandler: [authenticate, requirePermission('integrations.remove')],
     },
     diagnosticsHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get(
     '/api/integrations/asana/diagnostics',
     {
-      preHandler: [authenticate, requireRole(['ADMIN'])],
+      preHandler: [authenticate, requirePermission('integrations.remove')],
     },
     diagnosticsHandler
   );
@@ -1126,17 +1175,19 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   };
 
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/integrations/asana/webhooks/sync',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     syncWebhooksHandler
   );
+  // CLASSE: HUMAN_AUTHENTICATED
   app.post(
     '/api/integrations/asana/webhooks/sync',
     {
-      preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])],
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
     },
     syncWebhooksHandler
   );

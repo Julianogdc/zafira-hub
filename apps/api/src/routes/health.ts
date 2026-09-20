@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import { prisma } from '../lib/prisma.js';
 
 export async function healthRoutes(app: FastifyInstance) {
+  // CLASSE: PUBLIC_INTENTIONAL
   app.get('/health', async () => {
     return {
       status: 'ok',
@@ -9,6 +10,7 @@ export async function healthRoutes(app: FastifyInstance) {
     };
   });
 
+  // CLASSE: PUBLIC_INTENTIONAL
   app.get('/health/database', async (_request, reply) => {
     try {
       await prisma.$queryRaw`SELECT 1`;

@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
-import { authenticate, requireRole } from '../../../middleware/auth.js';
+import { authenticate, requirePermission } from '../../../middleware/auth.js';
 import { postizService, PostizService } from './postiz.service.js';
 import { PostizIntegrationError } from './postiz.client.js';
 
@@ -100,8 +100,10 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
-    app.get('/integrations/postiz/status', { preHandler: [authenticate] }, getStatusHandler);
-    app.get('/api/integrations/postiz/status', { preHandler: [authenticate] }, getStatusHandler);
+    // CLASSE: HUMAN_AUTHENTICATED
+    app.get('/integrations/postiz/status', { preHandler: [authenticate, requirePermission('integrations.view')] }, getStatusHandler);
+    // CLASSE: HUMAN_AUTHENTICATED
+    app.get('/api/integrations/postiz/status', { preHandler: [authenticate, requirePermission('integrations.view')] }, getStatusHandler);
 
     // 2. GET /integrations/postiz/accounts
     const getAccountsHandler = async (_request: FastifyRequest, reply: FastifyReply) => {
@@ -113,8 +115,10 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
-    app.get('/integrations/postiz/accounts', { preHandler: [authenticate] }, getAccountsHandler);
-    app.get('/api/integrations/postiz/accounts', { preHandler: [authenticate] }, getAccountsHandler);
+    // CLASSE: HUMAN_AUTHENTICATED
+    app.get('/integrations/postiz/accounts', { preHandler: [authenticate, requirePermission('integrations.view')] }, getAccountsHandler);
+    // CLASSE: HUMAN_AUTHENTICATED
+    app.get('/api/integrations/postiz/accounts', { preHandler: [authenticate, requirePermission('integrations.view')] }, getAccountsHandler);
 
     // 2b. GET /integrations/postiz/available-accounts (Contas disponíveis e status de vínculo na organização)
     const getOrgAvailableAccountsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -127,14 +131,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/integrations/postiz/available-accounts',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getOrgAvailableAccountsHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/integrations/postiz/available-accounts',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getOrgAvailableAccountsHandler
     );
 
@@ -157,14 +163,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/clients/:clientId/integrations/postiz',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getClientAccountsHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/clients/:clientId/integrations/postiz',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getClientAccountsHandler
     );
 
@@ -183,14 +191,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/clients/:clientId/integrations/postiz/available',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getClientAvailableAccountsHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/clients/:clientId/integrations/postiz/available',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('integrations.view')] },
       getClientAvailableAccountsHandler
     );
 
@@ -215,14 +225,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/clients/:clientId/integrations/postiz',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.connect')] },
       linkAccountHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/clients/:clientId/integrations/postiz',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.connect')] },
       linkAccountHandler
     );
 
@@ -249,14 +261,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.delete(
       '/clients/:clientId/integrations/postiz/:externalId',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.remove')] },
       unlinkAccountHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.delete(
       '/api/clients/:clientId/integrations/postiz/:externalId',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('integrations.remove')] },
       unlinkAccountHandler
     );
 
@@ -278,14 +292,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/clients/:clientId/content/postiz',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getClientContentHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/clients/:clientId/content/postiz',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getClientContentHandler
     );
 
@@ -307,14 +323,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/clients/:clientId/content/postiz/:postId',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getClientPostByIdHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/clients/:clientId/content/postiz/:postId',
-      { preHandler: [authenticate] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getClientPostByIdHandler
     );
 
@@ -352,14 +370,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.patch(
       '/clients/:clientId/content/postiz/:postId/schedule',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.schedule')] },
       reschedulePostHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.patch(
       '/api/clients/:clientId/content/postiz/:postId/schedule',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.schedule')] },
       reschedulePostHandler
     );
 
@@ -399,14 +419,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/integrations/postiz/content',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getAggregatedContentHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.get(
       '/api/integrations/postiz/content',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.review')] },
       getAggregatedContentHandler
     );
 
@@ -437,14 +459,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/integrations/postiz/upload',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.create')] },
       uploadHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/integrations/postiz/upload',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.create')] },
       uploadHandler
     );
 
@@ -486,14 +510,16 @@ export function createPostizRoutes(customService?: PostizService) {
       }
     };
 
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/clients/:clientId/content/postiz',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.create')] },
       createPostHandler
     );
+    // CLASSE: HUMAN_AUTHENTICATED
     app.post(
       '/api/clients/:clientId/content/postiz',
-      { preHandler: [authenticate, requireRole(['ADMIN', 'MANAGER'])] },
+      { preHandler: [authenticate, requirePermission('content.create')] },
       createPostHandler
     );
   };

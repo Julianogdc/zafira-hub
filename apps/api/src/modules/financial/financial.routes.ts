@@ -614,6 +614,7 @@ export async function financialRoutes(app: FastifyInstance) {
     return reply.send(result);
   };
   app.get('/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get('/api/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
 
   /**
@@ -626,7 +627,9 @@ export async function financialRoutes(app: FastifyInstance) {
     const diagnostics = await interService.getInterDateFieldDiagnostics(organizationId);
     return reply.send(diagnostics);
   };
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
 
   /**
@@ -649,7 +652,9 @@ export async function financialRoutes(app: FastifyInstance) {
       });
     }
   };
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get('/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
+  // CLASSE: HUMAN_AUTHENTICATED
   app.get('/api/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
 
   /**

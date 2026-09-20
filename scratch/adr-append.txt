@@ -1,0 +1,7 @@
+
+## Regras Especificas e Excecoes Legitimas
+- **Session como Excecao Humana:** A rota `/api/v1/auth/session` exige autenticacao valida (pertence a classe `HUMAN_AUTHENTICATED`), mas por ser uma consulta de identidade, nao exige `Permission` de negocio especifica.
+- **Logout Publico Idempotente:** A rota `/api/v1/auth/logout` e classificada como `PUBLIC_INTENTIONAL`, pois seu proposito e puramente limpar o cookie de forma idempotente, nao alterando usuarios, organizacoes, nem acessos de terceiros.
+- **OAuth Callback Baseado em State/Nonce:** Callbacks OAuth (como o do Asana) sao fluxos tecnicos que validam autoria atraves do parametro `state` (nonce/HMAC). Por isso, sao tratados como `MACHINE_AUTHENTICATED` ou equivalentes de fluxo tecnico, e nao exigem sessao de usuario no instante do retorno.
+- **UI Nao e Autoridade:** A protecao de uma rota nunca pode depender puramente da camada de apresentacao ou interface de usuario (UI). A aplicacao de `requirePermission` valida regras estritamente no backend.
+- **Aliases Legados:** Rotas duplicadas (ex: `/integrations/...` e `/api/integrations/...`) foram protegidas simultaneamente nesta fase com o mesmo nivel de rigor, mas sua unificacao ou exclusao (resolucao de aliases legados) nao e tratada nesta etapa para nao quebrar integracoes existentes de maquina.
