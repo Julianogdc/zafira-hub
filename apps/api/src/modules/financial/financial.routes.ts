@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { prisma } from '../../lib/prisma.js';
-import { authenticate, requireRole } from '../../middleware/auth.js';
+import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { FinancialService } from './financial.service.js';
 import { FinancialCategoryService } from './financial-category.service.js';
 import { FinancialReconciliationService } from './financial-reconciliation.service.js';
@@ -105,13 +105,8 @@ export async function financialRoutes(app: FastifyInstance) {
         }
       }
 
-      // Validação de perfil (RBAC) estrita na organização resolvida
-      if (!['ADMIN', 'MANAGER'].includes(targetMembership.role)) {
-        return reply.status(403).send({
-          error: 'forbidden',
-          message: 'Permissão insuficiente na organização selecionada',
-        });
-      }
+      // Validação de tenant: pertencimento à organização já confirmado acima.
+      // Controle de permissão granular é responsabilidade de requirePermission em cada rota.
 
       (req as any).resolvedOrganizationId = targetMembership.organizationId;
     }
@@ -143,8 +138,10 @@ export async function financialRoutes(app: FastifyInstance) {
     });
     return reply.send(result);
   };
-  app.get('/financial/accounts/overview', handleGetOverview);
-  app.get('/api/financial/accounts/overview', handleGetOverview);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/financial/accounts/overview', { preHandler: [requirePermission('financial.view_summary')] }, handleGetOverview);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/api/financial/accounts/overview', { preHandler: [requirePermission('financial.view_summary')] }, handleGetOverview);
 
   /**
    * GET /financial/transactions
@@ -179,8 +176,10 @@ export async function financialRoutes(app: FastifyInstance) {
     });
     return reply.send(result);
   };
-  app.get('/financial/transactions', handleGetTransactions);
-  app.get('/api/financial/transactions', handleGetTransactions);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/financial/transactions', { preHandler: [requirePermission('financial.view_details')] }, handleGetTransactions);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/api/financial/transactions', { preHandler: [requirePermission('financial.view_details')] }, handleGetTransactions);
 
   /**
    * GET /financial/categories
@@ -194,8 +193,10 @@ export async function financialRoutes(app: FastifyInstance) {
     });
     return reply.send({ categories });
   };
-  app.get('/financial/categories', handleGetCategories);
-  app.get('/api/financial/categories', handleGetCategories);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/financial/categories', { preHandler: [requirePermission('financial.view_details')] }, handleGetCategories);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/api/financial/categories', { preHandler: [requirePermission('financial.view_details')] }, handleGetCategories);
 
   /**
    * POST /financial/categories
@@ -219,8 +220,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/categories', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategory);
-  app.post('/api/financial/categories', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/categories', { preHandler: [requirePermission('financial.edit')] }, handleCreateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/categories', { preHandler: [requirePermission('financial.edit')] }, handleCreateCategory);
 
   /**
    * PATCH /financial/categories/:id
@@ -238,8 +241,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.patch('/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryAttrs);
-  app.patch('/api/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryAttrs);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/financial/categories/:id', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategoryAttrs);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/api/financial/categories/:id', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategoryAttrs);
 
   /**
    * POST /financial/categories/:id/archive
@@ -256,8 +261,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/categories/:id/archive', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleArchiveCategory);
-  app.post('/api/financial/categories/:id/archive', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleArchiveCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/categories/:id/archive', { preHandler: [requirePermission('financial.edit')] }, handleArchiveCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/categories/:id/archive', { preHandler: [requirePermission('financial.edit')] }, handleArchiveCategory);
 
   /**
    * POST /financial/categories/:id/reactivate
@@ -274,8 +281,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/categories/:id/reactivate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleReactivateCategory);
-  app.post('/api/financial/categories/:id/reactivate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleReactivateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/categories/:id/reactivate', { preHandler: [requirePermission('financial.edit')] }, handleReactivateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/categories/:id/reactivate', { preHandler: [requirePermission('financial.edit')] }, handleReactivateCategory);
 
   /**
    * DELETE /financial/categories/:id
@@ -300,8 +309,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.delete('/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategory);
-  app.delete('/api/financial/categories/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.delete('/financial/categories/:id', { preHandler: [requirePermission('financial.edit')] }, handleDeleteCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.delete('/api/financial/categories/:id', { preHandler: [requirePermission('financial.edit')] }, handleDeleteCategory);
 
   /**
    * POST /financial/categories/:id/migrate
@@ -327,8 +338,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/categories/:id/migrate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleMigrateCategory);
-  app.post('/api/financial/categories/:id/migrate', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleMigrateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/categories/:id/migrate', { preHandler: [requirePermission('financial.edit')] }, handleMigrateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/categories/:id/migrate', { preHandler: [requirePermission('financial.edit')] }, handleMigrateCategory);
 
   /**
    * GET /financial/category-rules
@@ -339,8 +352,10 @@ export async function financialRoutes(app: FastifyInstance) {
     const rules = await categoryService.listRules(organizationId);
     return reply.send({ rules });
   };
-  app.get('/financial/category-rules', handleGetRules);
-  app.get('/api/financial/category-rules', handleGetRules);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/financial/category-rules', { preHandler: [requirePermission('financial.view_details')] }, handleGetRules);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/api/financial/category-rules', { preHandler: [requirePermission('financial.view_details')] }, handleGetRules);
 
   /**
    * POST /financial/category-rules
@@ -379,8 +394,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/category-rules', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategoryRule);
-  app.post('/api/financial/category-rules', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleCreateCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/category-rules', { preHandler: [requirePermission('financial.edit')] }, handleCreateCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/category-rules', { preHandler: [requirePermission('financial.edit')] }, handleCreateCategoryRule);
 
   /**
    * PATCH /financial/category-rules/:id
@@ -398,8 +415,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.patch('/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryRule);
-  app.patch('/api/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleUpdateCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/financial/category-rules/:id', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/api/financial/category-rules/:id', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategoryRule);
 
   /**
    * DELETE /financial/category-rules/:id
@@ -416,8 +435,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.delete('/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategoryRule);
-  app.delete('/api/financial/category-rules/:id', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleDeleteCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.delete('/financial/category-rules/:id', { preHandler: [requirePermission('financial.edit')] }, handleDeleteCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.delete('/api/financial/category-rules/:id', { preHandler: [requirePermission('financial.edit')] }, handleDeleteCategoryRule);
 
   /**
    * POST /financial/category-rules/preview
@@ -444,8 +465,10 @@ export async function financialRoutes(app: FastifyInstance) {
     });
     return reply.send(preview);
   };
-  app.post('/financial/category-rules/preview', handlePreviewCategoryRule);
-  app.post('/api/financial/category-rules/preview', handlePreviewCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/category-rules/preview', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/category-rules/preview', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewCategoryRule);
 
   /**
    * POST /financial/category-rules/:id/apply
@@ -462,8 +485,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.post('/financial/category-rules/:id/apply', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyCategoryRule);
-  app.post('/api/financial/category-rules/:id/apply', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/financial/category-rules/:id/apply', { preHandler: [requirePermission('financial.edit')] }, handleApplyCategoryRule);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/category-rules/:id/apply', { preHandler: [requirePermission('financial.edit')] }, handleApplyCategoryRule);
 
   /**
    * PATCH /financial/transactions/:id/category
@@ -505,8 +530,10 @@ export async function financialRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   };
-  app.patch('/financial/transactions/:id/category', handleUpdateCategory);
-  app.patch('/api/financial/transactions/:id/category', handleUpdateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/financial/transactions/:id/category', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategory);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/api/financial/transactions/:id/category', { preHandler: [requirePermission('financial.edit')] }, handleUpdateCategory);
 
   /**
    * PATCH /financial/transfers/:id/confirm
@@ -518,8 +545,10 @@ export async function financialRoutes(app: FastifyInstance) {
     const confirmed = await reconciliationService.confirmTransfer(organizationId, id);
     return reply.send({ success: true, transfer: confirmed });
   };
-  app.patch('/financial/transfers/:id/confirm', handleConfirmTransfer);
-  app.patch('/api/financial/transfers/:id/confirm', handleConfirmTransfer);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/financial/transfers/:id/confirm', { preHandler: [requirePermission('financial.reconcile')] }, handleConfirmTransfer);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.patch('/api/financial/transfers/:id/confirm', { preHandler: [requirePermission('financial.reconcile')] }, handleConfirmTransfer);
 
   /**
    * POST /integrations/asaas/sync-ledger
@@ -532,8 +561,10 @@ export async function financialRoutes(app: FastifyInstance) {
       message: 'O Asaas é utilizado apenas para contas a receber. O caixa é alimentado exclusivamente pelo Banco Inter PJ.',
     });
   };
-  app.post('/integrations/asaas/sync-ledger', handleSyncAsaasLedger);
-  app.post('/api/integrations/asaas/sync-ledger', handleSyncAsaasLedger);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/integrations/asaas/sync-ledger', { preHandler: [requirePermission('integrations.sync')] }, handleSyncAsaasLedger);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/integrations/asaas/sync-ledger', { preHandler: [requirePermission('integrations.sync')] }, handleSyncAsaasLedger);
 
   /**
    * POST /integrations/inter/sync
@@ -549,8 +580,10 @@ export async function financialRoutes(app: FastifyInstance) {
     }
     return reply.send(result);
   };
-  app.post('/integrations/inter/sync', handleSyncInter);
-  app.post('/api/integrations/inter/sync', handleSyncInter);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/integrations/inter/sync', { preHandler: [requirePermission('integrations.sync')] }, handleSyncInter);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/integrations/inter/sync', { preHandler: [requirePermission('integrations.sync')] }, handleSyncInter);
 
   /**
    * POST /integrations/inter/reprocess
@@ -566,8 +599,10 @@ export async function financialRoutes(app: FastifyInstance) {
       ...result,
     });
   };
-  app.post('/integrations/inter/reprocess', handleReprocessInter);
-  app.post('/api/integrations/inter/reprocess', handleReprocessInter);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/integrations/inter/reprocess', { preHandler: [requirePermission('integrations.sync')] }, handleReprocessInter);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/integrations/inter/reprocess', { preHandler: [requirePermission('integrations.sync')] }, handleReprocessInter);
 
   /**
    * POST /integrations/inter/repair-duplicates (ENDPOINT CANÔNICO)
@@ -595,13 +630,15 @@ export async function financialRoutes(app: FastifyInstance) {
     });
   };
 
-  // Endpoint canônico oficial
-  app.post('/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
-  app.post('/api/integrations/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED — Endpoint canônico oficial
+  app.post('/integrations/inter/repair-duplicates', { preHandler: [requirePermission('financial.edit')] }, handleRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/integrations/inter/repair-duplicates', { preHandler: [requirePermission('financial.edit')] }, handleRepairInterDuplicates);
 
-  // Redirecionamento/alias interno para compatibilidade
-  app.post('/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
-  app.post('/api/financial/inter/repair-duplicates', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED — Alias interno para compatibilidade
+  app.post('/financial/inter/repair-duplicates', { preHandler: [requirePermission('financial.edit')] }, handleRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/financial/inter/repair-duplicates', { preHandler: [requirePermission('financial.edit')] }, handleRepairInterDuplicates);
 
   /**
    * GET /integrations/inter/repair-duplicates/preview (SOMENTE LEITURA)
@@ -613,9 +650,10 @@ export async function financialRoutes(app: FastifyInstance) {
     const result = await interService.previewRepairInterDuplicates(organizationId);
     return reply.send(result);
   };
-  app.get('/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
   // CLASSE: HUMAN_AUTHENTICATED
-  app.get('/api/integrations/inter/repair-duplicates/preview', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewRepairInterDuplicates);
+  app.get('/integrations/inter/repair-duplicates/preview', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewRepairInterDuplicates);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.get('/api/integrations/inter/repair-duplicates/preview', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewRepairInterDuplicates);
 
   /**
    * GET /integrations/inter/diagnostics/date-fields (SOMENTE LEITURA - GET EXCLUSIVO)
@@ -628,9 +666,9 @@ export async function financialRoutes(app: FastifyInstance) {
     return reply.send(diagnostics);
   };
   // CLASSE: HUMAN_AUTHENTICATED
-  app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  app.get('/integrations/inter/diagnostics/date-fields', { preHandler: [requirePermission('financial.view_details')] }, handleGetInterDateDiagnostics);
   // CLASSE: HUMAN_AUTHENTICATED
-  app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleGetInterDateDiagnostics);
+  app.get('/api/integrations/inter/diagnostics/date-fields', { preHandler: [requirePermission('financial.view_details')] }, handleGetInterDateDiagnostics);
 
   /**
    * GET /integrations/inter/preview-enriched-times (SOMENTE LEITURA)
@@ -653,9 +691,9 @@ export async function financialRoutes(app: FastifyInstance) {
     }
   };
   // CLASSE: HUMAN_AUTHENTICATED
-  app.get('/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
+  app.get('/integrations/inter/preview-enriched-times', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewInterEnrichedTimes);
   // CLASSE: HUMAN_AUTHENTICATED
-  app.get('/api/integrations/inter/preview-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handlePreviewInterEnrichedTimes);
+  app.get('/api/integrations/inter/preview-enriched-times', { preHandler: [requirePermission('financial.view_details')] }, handlePreviewInterEnrichedTimes);
 
   /**
    * POST /integrations/inter/apply-enriched-times
@@ -677,6 +715,8 @@ export async function financialRoutes(app: FastifyInstance) {
       });
     }
   };
-  app.post('/integrations/inter/apply-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyInterEnrichedTimes);
-  app.post('/api/integrations/inter/apply-enriched-times', { preHandler: [requireRole(['ADMIN', 'MANAGER'])] }, handleApplyInterEnrichedTimes);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/integrations/inter/apply-enriched-times', { preHandler: [requirePermission('financial.edit')] }, handleApplyInterEnrichedTimes);
+  // CLASSE: HUMAN_AUTHENTICATED
+  app.post('/api/integrations/inter/apply-enriched-times', { preHandler: [requirePermission('financial.edit')] }, handleApplyInterEnrichedTimes);
 }

@@ -1274,7 +1274,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
   // ---------------------------------------------------------------------------
   await t.test('27. Cobrança com deleted: true ou PAYMENT_DELETED (PNEUTEK R$ 1.594,00) é excluída de Pendentes/Em Aberto e não infla os KPIs', async () => {
     const now = new Date();
-    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 20, 12, 0, 0);
+    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 28, 23, 59, 59);
 
     // 1. Validação unitária de mapAsaasPaymentStatus com deleted
     assert.strictEqual(
@@ -1380,8 +1380,8 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
   // ---------------------------------------------------------------------------
   await t.test('28. Sincronização atualiza cobrança existente no banco de PENDING para DELETED via deleted: true', async () => {
     const now = new Date();
-    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-20`;
-    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 20, 12, 0, 0);
+    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-28`;
+    const currentMonthDueDate = new Date(now.getFullYear(), now.getMonth(), 28, 23, 59, 59);
 
     // 1. Registro já existente no banco de dados local com status PENDING
     const localDatabase = new Map<string, any>();
@@ -1621,7 +1621,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
     const calledAsaasMethods: string[] = [];
 
     const now = new Date();
-    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-20`;
+    const currentMonthDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-28`;
     const pneutekDueDateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-25`;
 
     // 1. Estado inicial do banco local:

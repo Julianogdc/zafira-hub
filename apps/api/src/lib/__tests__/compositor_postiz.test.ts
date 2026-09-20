@@ -13,10 +13,32 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
   const originalFetch = globalThis.fetch;
   const originalEnv = { ...process.env };
 
-  t.afterEach(() => {
-    globalThis.fetch = originalFetch;
-    process.env = { ...originalEnv };
-  });
+  // Mock do prisma para authenticate e resolveAuthorizationContext
+  {
+    const _gp = globalThis as any;
+    if (_gp.prisma) {
+      _gp.prisma.user = {
+        findUnique: async () => ({
+          id: 'user_test',
+          email: 'test@zafira.com',
+          status: 'ACTIVE',
+          memberships: [{
+            organization: { id: 'org_1', slug: 'zafira' },
+            role: 'ADMIN',
+          }],
+        }),
+      };
+      _gp.prisma.organizationMember = {
+        findUnique: async () => ({
+          id: 'mem_test',
+          organizationId: 'org_1',
+          userId: 'user_test',
+          role: 'ADMIN',
+          permissions: [{ allowed: true }],
+        }),
+      };
+    }
+  }
 
   async function setupTestApp(serviceMock: any) {
     const app = fastify();
@@ -535,11 +557,12 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
 
     const app = await setupTestApp(new PostizService(mockClient, mockPrisma));
 
-    process.env.HUB_INTERNAL_API_KEY = 'test_key';
     const res = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'test_key' },
+      headers: {
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
+      },
       payload: {
         integrationId: 'int_1',
         format: 'FEED',

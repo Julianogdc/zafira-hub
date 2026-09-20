@@ -16,6 +16,40 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     process.env = { ...originalEnv };
   });
 
+  // ============================================================
+  // MOCK DO PRISMA: autentica requisicoes de teste sem banco real
+  // auth.ts e resolver.ts usam o mesmo singleton prisma.
+  // PrismaClient permite atribuicao direta de propriedades.
+  // ============================================================
+  {
+    const _gp = globalThis as any;
+    if (_gp.prisma) {
+      // Mock de user.findUnique para authenticate()
+      _gp.prisma.user = {
+        findUnique: async () => ({
+          id: 'user_test',
+          email: 'test@zafira.com',
+          status: 'ACTIVE',
+          memberships: [{
+            organization: { id: 'org_1', slug: 'zafira' },
+            role: 'ADMIN',
+          }],
+        }),
+      };
+      // Mock de organizationMember.findUnique para resolveAuthorizationContext()
+      // permissions com allowed=true ativa GRANTED_BY_OVERRIDE para qualquer permissao
+      _gp.prisma.organizationMember = {
+        findUnique: async () => ({
+          id: 'mem_test',
+          organizationId: 'org_1',
+          userId: 'user_test',
+          role: 'ADMIN',
+          permissions: [{ allowed: true }],
+        }),
+      };
+    }
+  }
+
   await t.test('1. PostizClient valida obrigatoriedade de POSTIZ_URL e POSTIZ_API_KEY', async () => {
     delete process.env.POSTIZ_URL;
     delete process.env.POSTIZ_API_KEY;
@@ -223,7 +257,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/integrations/postiz/status',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
       },
     });
     assert.strictEqual(authResponse.statusCode, 200);
@@ -256,7 +290,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/integrations/postiz/accounts',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
       },
     });
 
@@ -281,7 +315,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/integrations/postiz/status',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
       },
     });
 
@@ -297,6 +331,8 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
   // ETAPA 2: Vínculo Postiz <-> Cliente 360
   // ==========================================
 
+  const TEST_ORG_ID = 'org_1';
+
   function createMockPrisma() {
     const clients = new Map<string, any>();
     const clientIntegrations: any[] = [];
@@ -307,7 +343,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
         findUnique: async ({ where }: { where: { id: string } }) => {
           const c = clients.get(where.id);
           if (!c) return null;
-          return { organizationId: 'org_padrao', ...c };
+          return { organizationId: TEST_ORG_ID, ...c };
         },
       },
       clientIntegration: {
@@ -318,7 +354,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
               if (where?.provider && ci.provider !== where.provider) return false;
               if (where?.client?.organizationId) {
                 const client = clients.get(ci.clientId);
-                const org = client?.organizationId || 'org_padrao';
+                const org = client?.organizationId || TEST_ORG_ID;
                 if (org !== where.client.organizationId) return false;
               }
               return true;
@@ -338,7 +374,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
             if (where?.externalId && ci.externalId !== where.externalId) return false;
             if (where?.client?.organizationId) {
               const client = clients.get(ci.clientId);
-              const org = client?.organizationId || 'org_padrao';
+              const org = client?.organizationId || TEST_ORG_ID;
               if (org !== where.client.organizationId) return false;
             }
             if (where?.OR) {
@@ -451,7 +487,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resGet = await app.inject({
       method: 'GET',
       url: '/clients/cli_inexistente/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
     assert.strictEqual(resGet.statusCode, 404);
     assert.strictEqual(resGet.json().error, 'CLIENT_NOT_FOUND');
@@ -460,7 +496,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resPost = await app.inject({
       method: 'POST',
       url: '/clients/cli_inexistente/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'postiz_int_1' },
     });
     assert.strictEqual(resPost.statusCode, 404);
@@ -470,7 +506,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resDelete = await app.inject({
       method: 'DELETE',
       url: '/clients/cli_inexistente/integrations/postiz/postiz_int_1',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
     assert.strictEqual(resDelete.statusCode, 404);
     assert.strictEqual(resDelete.json().error, 'CLIENT_NOT_FOUND');
@@ -495,7 +531,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'id_fantasma_inexistente' },
     });
 
@@ -531,7 +567,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'cm6s4uyou0001i2r47pxix6z1' },
     });
 
@@ -577,7 +613,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -613,7 +649,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res1 = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'cm6s4uyou0001i2r47pxix6z1' },
     });
     assert.strictEqual(res1.statusCode, 201);
@@ -622,7 +658,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res2 = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'cm6s4uyou0001i2r47pxix6z1' },
     });
     assert.strictEqual(res2.statusCode, 409);
@@ -660,7 +696,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/clients/cli_1/integrations/postiz/cm6s4uyou0001i2r47pxix6z1',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -689,7 +725,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/clients/cli_1/integrations/postiz/id_inexistente',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 404);
@@ -733,7 +769,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'DELETE',
       url: '/clients/cli_1/integrations/postiz/cm6s4uyou0001i2r47pxix6z1',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -763,7 +799,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
       payload: { externalId: 'qualquer_id' },
     });
 
@@ -811,7 +847,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_fantasma/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
     assert.strictEqual(res.statusCode, 404);
     assert.strictEqual(res.json().error, 'CLIENT_NOT_FOUND');
@@ -838,7 +874,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_sem_postiz/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -872,7 +908,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -936,7 +972,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1019,7 +1055,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resA = await app.inject({
       method: 'GET',
       url: '/clients/cli_A/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
     assert.strictEqual(resA.statusCode, 200);
     const bodyA = resA.json();
@@ -1032,7 +1068,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resB = await app.inject({
       method: 'GET',
       url: '/clients/cli_B/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
     assert.strictEqual(resB.statusCode, 200);
     const bodyB = resB.json();
@@ -1082,7 +1118,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1119,7 +1155,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A` },
     });
 
     assert.strictEqual(res.statusCode, 502);
@@ -1179,7 +1215,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/clients/cli_1/integrations/postiz/available',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
         'x-organization-id': 'org_1',
       },
     });
@@ -1235,7 +1271,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/clients/cli_A/integrations/postiz/available',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
         'x-organization-id': 'org_1',
       },
     });
@@ -1288,7 +1324,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'POST',
       url: '/clients/cli_B/integrations/postiz',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
         'x-organization-id': 'org_1',
       },
       payload: { externalId: 'int_compartilhada' },
@@ -1319,7 +1355,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'GET',
       url: '/clients/cli_org_X/integrations/postiz',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
         'x-organization-id': 'org_Y',
       },
     });
@@ -1355,7 +1391,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
       method: 'DELETE',
       url: '/clients/cli_1/integrations/postiz/int_1',
       headers: {
-        'x-api-key': 'secret_internal_123',
+        'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`,
         'x-organization-id': 'org_1',
       },
     });
@@ -1396,7 +1432,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resBefore = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
     assert.strictEqual(resBefore.json().total, 0);
 
@@ -1404,7 +1440,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resLink = await app.inject({
       method: 'POST',
       url: '/clients/cli_1/integrations/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
       payload: { externalId: 'int_novo_1' },
     });
     assert.strictEqual(resLink.statusCode, 201);
@@ -1413,7 +1449,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const resAfter = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
     assert.strictEqual(resAfter.statusCode, 200);
     const bodyAfter = resAfter.json();
@@ -1463,7 +1499,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1525,7 +1561,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1583,7 +1619,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1636,7 +1672,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1683,7 +1719,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1735,7 +1771,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1788,7 +1824,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1837,7 +1873,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1897,7 +1933,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1943,7 +1979,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_alvo_123',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -1996,7 +2032,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_de_outro_cliente',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 404);
@@ -2040,7 +2076,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2086,7 +2122,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_story_imagem',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2132,7 +2168,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_reel_feed',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2177,7 +2213,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_carrossel_multi',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2222,7 +2258,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/post_sem_midia',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2275,7 +2311,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2330,7 +2366,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz/cmu0iex0s0002qv767osni1ml',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
@@ -2380,7 +2416,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
     const res = await app.inject({
       method: 'GET',
       url: '/clients/cli_1/content/postiz',
-      headers: { 'x-api-key': 'secret_internal_123', 'x-organization-id': 'org_1' },
+      headers: { 'Authorization': `Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJ1c2VyX3Rlc3QiLCJlbWFpbCI6InRlc3RAemFmaXJhLmNvbSIsImFjdGl2ZU9yZ2FuaXphdGlvbklkIjoib3JnXzEiLCJpYXQiOjE3ODk5NDQ5OTl9.0EWBIVrQaCpZ3-fHJ1_0wjM8IMiGbdvbNUfSk-QS_-A`, 'x-organization-id': 'org_1' },
     });
 
     assert.strictEqual(res.statusCode, 200);
