@@ -1,4 +1,4 @@
-﻿-- CreateTable
+-- CreateTable
 CREATE TABLE "permissions" (
     "code" TEXT NOT NULL,
     "area" TEXT NOT NULL,
