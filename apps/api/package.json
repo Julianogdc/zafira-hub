@@ -13,8 +13,12 @@
         "db:seed": "prisma db seed",
         "admin:set-password": "tsx scripts/set-admin-password.ts",
         "rbac:bootstrap": "tsx src/scripts/bootstrap-rbac.ts",
+        "ci:prepare-rbac-organizations": "tsx src/scripts/prepare-rbac-ci-organizations.ts",
         "test": "tsx --test src/lib/__tests__/*.test.ts",
-        "prisma:generate": "prisma generate"
+        "test:integration:db": "tsx --test src/integration-tests/*.test.ts",
+        "prisma:generate": "prisma generate",
+        "prisma:migrate:deploy": "prisma migrate deploy",
+        "prisma:migrate:status": "prisma migrate status"
     },
     "prisma": {
         "seed": "tsx prisma/seed.ts"
