@@ -68,13 +68,64 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     await assert.rejects(
       prisma.userClientAssignment.create({
         data: {
-          clientId: clientB.id,
+          organizationId: orgA.id,
           organizationMemberId: memberAMem.id,
+          clientId: clientB.id,
         }
       }),
-      /Foreign key constraint/i, // Or similar Prisma constraint error
+      /Foreign key constraint/i,
       'Membership Org A -> Client Org B DEVE FALHAR pela constraint composta'
     );
+  });
+
+  await t.test('L.I - Teste Team Cross-Org Real', async () => {
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+
+    const memberAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'member_a@zafira.test' } });
+    const membershipA = await prisma.organizationMember.findUniqueOrThrow({ 
+      where: { organizationId_userId: { organizationId: orgA.id, userId: memberAUser.id } } 
+    });
+
+    // We need a member from orgB to test failure
+    // Using Admin B as our target B membership
+    const adminBUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_b@zafira.test' } });
+    const membershipB = await prisma.organizationMember.findUniqueOrThrow({ 
+      where: { organizationId_userId: { organizationId: orgB.id, userId: adminBUser.id } } 
+    });
+
+    const teamA = await prisma.team.create({
+      data: {
+        organizationId: orgA.id,
+        name: 'Team A'
+      }
+    });
+
+    // 3. TeamMember com Team A + Membership A: SUCESSO.
+    await prisma.teamMember.create({
+      data: {
+        organizationId: orgA.id,
+        teamId: teamA.id,
+        organizationMemberId: membershipA.id
+      }
+    });
+
+    // 4. Team A + Membership B: DEVE FALHAR.
+    await assert.rejects(
+      prisma.teamMember.create({
+        data: {
+          organizationId: orgA.id,
+          teamId: teamA.id,
+          organizationMemberId: membershipB.id
+        }
+      }),
+      /Foreign key constraint/i,
+      'Team A + Membership B DEVE FALHAR pela constraint composta'
+    );
+
+    // cleanup
+    await prisma.teamMember.deleteMany({ where: { teamId: teamA.id } });
+    await prisma.team.delete({ where: { id: teamA.id } });
   });
 
   await t.test('M - Policy Resolver com Prisma Real', async () => {
@@ -101,8 +152,9 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     assert.strictEqual(res.allowed, false);
 
     // 5. override allowed=true concede clients.edit ao MEMBER A
-    await prisma.permissionOverride.create({
+    await prisma.organizationMemberPermission.create({
       data: {
+        organizationId: orgA.id,
         organizationMemberId: memId,
         permissionCode: 'clients.edit',
         allowed: true
@@ -112,7 +164,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     assert.ok(res.allowed);
 
     // 6. remover/alterar override para false bloqueia
-    await prisma.permissionOverride.update({
+    await prisma.organizationMemberPermission.update({
       where: { organizationMemberId_permissionCode: { organizationMemberId: memId, permissionCode: 'clients.edit' } },
       data: { allowed: false }
     });
@@ -120,14 +172,15 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     assert.strictEqual(res.allowed, false);
 
     // limpar
-    await prisma.permissionOverride.delete({
+    await prisma.organizationMemberPermission.delete({
       where: { organizationMemberId_permissionCode: { organizationMemberId: memId, permissionCode: 'clients.edit' } }
     });
 
     // 7. override false bloqueia MANAGER mesmo quando role default concede
     const mgrMemId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: orgA.id, userId: managerUser.id } } })).id;
-    await prisma.permissionOverride.create({
+    await prisma.organizationMemberPermission.create({
       data: {
+        organizationId: orgA.id,
         organizationMemberId: mgrMemId,
         permissionCode: 'clients.edit',
         allowed: false
@@ -135,7 +188,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     });
     res = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.strictEqual(res.allowed, false);
-    await prisma.permissionOverride.delete({
+    await prisma.organizationMemberPermission.delete({
       where: { organizationMemberId_permissionCode: { organizationMemberId: mgrMemId, permissionCode: 'clients.edit' } }
     });
 
@@ -188,12 +241,6 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     assert.strictEqual(clients.length, 1);
     assert.strictEqual(clients[0].name, 'Client A Assigned');
 
-    // 5. Member A não lista Client A Unassigned
-    // (comprovado pela length ser 1 acima)
-
-    // 6. Member A nunca lista Client B
-    // (idem)
-
     // 7. Admin A não lê Client B pelo clientId
     const clientB = await prisma.client.findFirstOrThrow({ where: { organizationId: orgB.id } });
     await assert.rejects(svc.getClientById({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, clientB.id));
@@ -203,8 +250,6 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
     // 9. Member A com override clients.edit=true pode editar Client A Assigned
     const clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
-    // Note: service uses context. Member must be assigned to edit!
-    // Since Member A is assigned, it will find it.
     await svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAAssigned.id, { name: 'Client A Assigned Edited' });
     
     // 10. O mesmo Member A NÃO pode editar Client A Unassigned

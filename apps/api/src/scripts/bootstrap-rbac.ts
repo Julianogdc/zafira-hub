@@ -23,11 +23,13 @@ async function main() {
     // 1. Upsert Permissions
     console.log('Sincronizando catálogo de permissões...');
     for (const code of PERMISSIONS) {
+      const area = code.split('.')[0];
       await prisma.permission.upsert({
         where: { code },
         update: {},
         create: {
           code,
+          area,
           description: `Permissão do sistema: ${code}`,
         },
       });

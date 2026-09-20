@@ -16,6 +16,23 @@ if (!dbUrl.includes('/zafira_hub_ci')) {
 
 const prisma = new PrismaClient();
 
+async function upsertClient(organizationId: string, document: string, name: string, legalName: string) {
+  let client = await prisma.client.findFirst({
+    where: { organizationId, document }
+  });
+  if (client) {
+    return client;
+  }
+  return await prisma.client.create({
+    data: {
+      organizationId,
+      document,
+      name,
+      legalName
+    }
+  });
+}
+
 async function main() {
   console.log('Iniciando preparação de organizações fictícias para CI...');
 
@@ -44,7 +61,7 @@ async function main() {
     const adminA = await prisma.user.upsert({
       where: { email: 'admin_a@zafira.test' },
       update: {},
-      create: { name: 'Admin A', email: 'admin_a@zafira.test', password: 'hash' }
+      create: { name: 'Admin A', email: 'admin_a@zafira.test' }
     });
     const memAdminA = await prisma.organizationMember.upsert({
       where: { organizationId_userId: { organizationId: orgA.id, userId: adminA.id } },
@@ -55,7 +72,7 @@ async function main() {
     const managerA = await prisma.user.upsert({
       where: { email: 'manager_a@zafira.test' },
       update: {},
-      create: { name: 'Manager A', email: 'manager_a@zafira.test', password: 'hash' }
+      create: { name: 'Manager A', email: 'manager_a@zafira.test' }
     });
     const memManagerA = await prisma.organizationMember.upsert({
       where: { organizationId_userId: { organizationId: orgA.id, userId: managerA.id } },
@@ -66,7 +83,7 @@ async function main() {
     const memberA = await prisma.user.upsert({
       where: { email: 'member_a@zafira.test' },
       update: {},
-      create: { name: 'Member A', email: 'member_a@zafira.test', password: 'hash' }
+      create: { name: 'Member A', email: 'member_a@zafira.test' }
     });
     const memMemberA = await prisma.organizationMember.upsert({
       where: { organizationId_userId: { organizationId: orgA.id, userId: memberA.id } },
@@ -78,7 +95,7 @@ async function main() {
     const adminB = await prisma.user.upsert({
       where: { email: 'admin_b@zafira.test' },
       update: {},
-      create: { name: 'Admin B', email: 'admin_b@zafira.test', password: 'hash' }
+      create: { name: 'Admin B', email: 'admin_b@zafira.test' }
     });
     const memAdminB = await prisma.organizationMember.upsert({
       where: { organizationId_userId: { organizationId: orgB.id, userId: adminB.id } },
@@ -87,52 +104,24 @@ async function main() {
     });
 
     // Clients
-    const clientAAssigned = await prisma.client.upsert({
-      where: { document: '11111111111' }, // fake doc to make it idempotent
-      update: {},
-      create: {
-        organizationId: orgA.id,
-        name: 'Client A Assigned',
-        legalName: 'Client A Assigned',
-        document: '11111111111',
-      }
-    });
-
-    const clientAUnassigned = await prisma.client.upsert({
-      where: { document: '22222222222' },
-      update: {},
-      create: {
-        organizationId: orgA.id,
-        name: 'Client A Unassigned',
-        legalName: 'Client A Unassigned',
-        document: '22222222222',
-      }
-    });
-
-    const clientB = await prisma.client.upsert({
-      where: { document: '33333333333' },
-      update: {},
-      create: {
-        organizationId: orgB.id,
-        name: 'Client B',
-        legalName: 'Client B',
-        document: '33333333333',
-      }
-    });
+    const clientAAssigned = await upsertClient(orgA.id, '11111111111', 'Client A Assigned', 'Client A Assigned');
+    const clientAUnassigned = await upsertClient(orgA.id, '22222222222', 'Client A Unassigned', 'Client A Unassigned');
+    const clientB = await upsertClient(orgB.id, '33333333333', 'Client B', 'Client B');
 
     // Assignments
     // Member A -> Client A Assigned
     await prisma.userClientAssignment.upsert({
       where: {
-        clientId_organizationMemberId: {
-          clientId: clientAAssigned.id,
-          organizationMemberId: memMemberA.id
+        organizationMemberId_clientId: {
+          organizationMemberId: memMemberA.id,
+          clientId: clientAAssigned.id
         }
       },
       update: {},
       create: {
-        clientId: clientAAssigned.id,
-        organizationMemberId: memMemberA.id
+        organizationId: orgA.id,
+        organizationMemberId: memMemberA.id,
+        clientId: clientAAssigned.id
       }
     });
 
