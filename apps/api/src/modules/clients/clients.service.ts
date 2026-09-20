@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma.js';
 import { CreateClientInput, ListClientsQuery, UpdateClientInput } from './clients.schemas.js';
+import { RoleType } from '@zafira/domain';
 
 export class AppError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -8,27 +9,13 @@ export class AppError extends Error {
   }
 }
 
+export interface ClientServiceContext {
+  organizationId: string;
+  membershipId: string;
+  role: RoleType;
+}
+
 export class ClientsService {
-  /**
-   * Obtém a organização padrão Zafira ou garante sua existência.
-   */
-  private async getZafiraOrganization() {
-    let org = await prisma.organization.findUnique({
-      where: { slug: 'zafira' },
-    });
-
-    if (!org) {
-      org = await prisma.organization.create({
-        data: {
-          name: 'Zafira',
-          slug: 'zafira',
-        },
-      });
-    }
-
-    return org;
-  }
-
   /**
    * Valida se um usuário é membro da organização especificada.
    */
@@ -43,18 +30,30 @@ export class ClientsService {
     });
 
     if (!membership) {
-      throw new AppError(400, 'O responsável informado não é membro da organização Zafira');
+      throw new AppError(400, 'O responsável informado não é membro da organização');
     }
   }
 
-  /**
-   * Lista todos os clientes da organização com filtros opcionais.
-   */
-  async listClients(filters: ListClientsQuery) {
-    const org = await this.getZafiraOrganization();
+  private getMemberScopeFilter(ctx: ClientServiceContext) {
+    if (ctx.role === 'MEMBER') {
+      return {
+        assignedMembers: {
+          some: {
+            organizationMemberId: ctx.membershipId
+          }
+        }
+      };
+    }
+    return {};
+  }
 
+  /**
+   * Lista todos os clientes da organização com filtros opcionais e escopo de permissão.
+   */
+  async listClients(ctx: ClientServiceContext, filters: ListClientsQuery) {
     const where: any = {
-      organizationId: org.id,
+      organizationId: ctx.organizationId,
+      ...this.getMemberScopeFilter(ctx)
     };
 
     if (filters.status) {
@@ -95,15 +94,14 @@ export class ClientsService {
   }
 
   /**
-   * Busca um cliente por ID dentro da organização Zafira.
+   * Busca um cliente por ID dentro da organização com escopo de permissão.
    */
-  async getClientById(id: string) {
-    const org = await this.getZafiraOrganization();
-
+  async getClientById(ctx: ClientServiceContext, id: string) {
     const client = await prisma.client.findFirst({
       where: {
         id,
-        organizationId: org.id,
+        organizationId: ctx.organizationId,
+        ...this.getMemberScopeFilter(ctx)
       },
       include: {
         responsibleUser: {
@@ -135,18 +133,16 @@ export class ClientsService {
   }
 
   /**
-   * Cria um novo cliente vinculado à organização Zafira.
+   * Cria um novo cliente vinculado à organização ativa.
    */
-  async createClient(data: CreateClientInput) {
-    const org = await this.getZafiraOrganization();
-
+  async createClient(ctx: ClientServiceContext, data: CreateClientInput) {
     if (data.responsibleUserId) {
-      await this.validateMember(org.id, data.responsibleUserId);
+      await this.validateMember(ctx.organizationId, data.responsibleUserId);
     }
 
     const client = await prisma.client.create({
       data: {
-        organizationId: org.id,
+        organizationId: ctx.organizationId,
         name: data.name,
         legalName: data.legalName,
         document: data.document,
@@ -177,14 +173,13 @@ export class ClientsService {
   /**
    * Atualiza parcialmente um cliente existente.
    */
-  async updateClient(id: string, data: UpdateClientInput) {
-    const org = await this.getZafiraOrganization();
-
-    // Verifica se o cliente existe na organização
+  async updateClient(ctx: ClientServiceContext, id: string, data: UpdateClientInput) {
+    // Verifica se o cliente existe na organização e se tem permissão (escopo)
     const existing = await prisma.client.findFirst({
       where: {
         id,
-        organizationId: org.id,
+        organizationId: ctx.organizationId,
+        ...this.getMemberScopeFilter(ctx)
       },
     });
 
@@ -194,7 +189,7 @@ export class ClientsService {
 
     // Se informou ou alterou o responsável, valida a associação
     if (data.responsibleUserId) {
-      await this.validateMember(org.id, data.responsibleUserId);
+      await this.validateMember(ctx.organizationId, data.responsibleUserId);
     }
 
     // Valida datas combinadas com os dados existentes se apenas uma for enviada

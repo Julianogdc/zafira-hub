@@ -1,5 +1,8 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../lib/prisma.js';
+import { PermissionCode } from '@zafira/domain';
+import { resolveAuthorizationContext } from '../modules/authorization/resolver.js';
+
 
 export interface AuthUserContext {
   type: 'user';
@@ -161,5 +164,56 @@ export function requireRole(allowedRoles: ('ADMIN' | 'MANAGER' | 'MEMBER')[]) {
         message: 'PermissÃ£o insuficiente para executar esta aÃ§Ã£o',
       });
     }
+  };
+}
+
+export function requirePermission(permissionCode: PermissionCode) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const auth = request.authContext;
+
+    if (!auth) {
+      return reply.status(401).send({ error: 'unauthorized' });
+    }
+
+    if (auth.type === 'api_key') {
+      const headerOrg = request.headers['x-organization-id'] as string | undefined;
+      if (headerOrg && auth.allowedOrganizationIds && !auth.allowedOrganizationIds.includes(headerOrg)) {
+        return reply.status(403).send({
+          status: 'error',
+          error: 'forbidden',
+          message: 'Chave de integração não autorizada para a organização informada',
+        });
+      }
+      // API Key with no restriction has full privileges
+      return;
+    }
+
+    const headerOrg = request.headers['x-organization-id'] as string | undefined;
+    const explicitOrgId = auth.activeOrganizationId || headerOrg;
+
+    if (!explicitOrgId) {
+      return reply.status(400).send({
+        status: 'error',
+        error: 'ORGANIZATION_CONTEXT_REQUIRED',
+        message: 'Contexto de organização ativo é obrigatório.',
+      });
+    }
+
+    const authResult = await resolveAuthorizationContext({
+      userId: auth.userId,
+      activeOrganizationId: explicitOrgId,
+      permissionCode,
+    });
+
+    if (!authResult.allowed) {
+      return reply.status(403).send({
+        status: 'error',
+        error: 'forbidden',
+        message: 'Permissão insuficiente para executar esta ação',
+      });
+    }
+
+    // Attach resolved authorization info to request context so endpoints can use it
+    (request as any).authorizationResult = authResult;
   };
 }

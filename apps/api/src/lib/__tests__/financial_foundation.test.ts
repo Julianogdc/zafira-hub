@@ -1733,7 +1733,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
       'Não pode haver organizationSlug === "zafira" em auth.ts'
     );
     assert.strictEqual(
-      /zafira/i.test(authContent),
+      (/zafira/i.test(authContent.replace('@zafira/domain', ''))),
       false,
       'Não pode haver referência a zafira em auth.ts'
     );
@@ -4988,6 +4988,7 @@ test('--- Etapa 5A — Fundação Financeira Unificada: Asaas + Banco Inter PJ -
     });
   });
 });
+
 
 
 
