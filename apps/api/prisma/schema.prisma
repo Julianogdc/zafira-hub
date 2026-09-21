@@ -69,6 +69,8 @@ model Organization {
   auditLogs             AuditLog[]
   teamMembers           TeamMember[]
   userClientAssignments UserClientAssignment[]
+  config                OrganizationConfig?
+  featureFlags          OrganizationFeatureFlag[]
 
   @@map("organizations")
 }
@@ -580,4 +582,31 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model OrganizationConfig {
+  organizationId String   @id
+  locale         String   @default("pt-BR")
+  timezone       String   @default("UTC")
+  currency       String   @default("BRL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("organization_configs")
+}
+
+model OrganizationFeatureFlag {
+  organizationId String
+  key            String
+  enabled        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, key])
+  @@index([organizationId])
+  @@map("organization_feature_flags")
 }

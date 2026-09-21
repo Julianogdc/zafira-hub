@@ -13,6 +13,7 @@ import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
 import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
 import { financialRoutes } from './modules/financial/financial.routes.js';
 import { auditRoutes } from './modules/audit/audit.routes.js';
+import { organizationConfigRoutes } from './modules/organization-config/organization-config.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -114,6 +115,9 @@ export function buildApp(): FastifyInstance {
 
   // 12. Rotas do Módulo de Auditoria Operacional
   app.register(auditRoutes);
+
+  // 13. Rotas de Configuração da Organização e Feature Flags
+  app.register(organizationConfigRoutes);
 
   return app;
 }

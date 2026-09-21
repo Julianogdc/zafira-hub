@@ -4,6 +4,8 @@ import { PrismaClient } from '@prisma/client';
 import { resolveAuthorizationContext } from '../modules/authorization/resolver.js';
 import { ClientsService } from '../modules/clients/clients.service.js';
 import { AuditService } from '../modules/audit/audit.service.js';
+import { OrganizationConfigService } from '../modules/organization-config/organization-config.service.js';
+import { FeatureFlagService } from '../modules/organization-config/feature-flag.service.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 
 // --- GUARD DE SEGURANÇA (ETAPA F) ---
@@ -26,7 +28,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
   await t.test('J - Testes Reais de Migration', async () => {
     const migrations = await prisma.$queryRaw<any[]>`SELECT * FROM _prisma_migrations`;
-    assert.strictEqual(migrations.length, 10, 'Deve haver exatamente 10 migrations aplicadas');
+    assert.strictEqual(migrations.length, 11, 'Deve haver exatamente 11 migrations aplicadas');
     for (const mig of migrations) {
       assert.ok(mig.finished_at, `Migration ${mig.migration_name} não foi finalizada`);
     }
@@ -420,5 +422,78 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
         where: { id: { in: [logA1.id, logA2.id, logB1.id] } },
       });
     }
+  });
+
+  await t.test('Q - OrganizationConfig e FeatureFlags com PostgreSQL Real', async () => {
+    const configService = new OrganizationConfigService(prisma);
+    const flagService = new FeatureFlagService(prisma);
+    const auditService = new AuditService(prisma);
+
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+    const adminAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
+    const adminBUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_b@zafira.test' } });
+
+    // 1. Config Org A criada com defaults
+    const configA = await configService.getConfig(orgA.id);
+    assert.strictEqual(configA.organizationId, orgA.id);
+    assert.strictEqual(configA.locale, 'pt-BR');
+    assert.strictEqual(configA.timezone, 'UTC');
+    assert.strictEqual(configA.currency, 'BRL');
+
+    // 2. Config Org B criada com defaults
+    const configB = await configService.getConfig(orgB.id);
+    assert.strictEqual(configB.organizationId, orgB.id);
+    assert.strictEqual(configB.timezone, 'UTC');
+
+    // 3. Alterar Config A não altera Config B
+    const updatedA = await configService.updateConfig(orgA.id, adminAUser.id, {
+      timezone: 'America/Sao_Paulo',
+      currency: 'USD',
+    });
+    assert.strictEqual(updatedA.timezone, 'America/Sao_Paulo');
+    assert.strictEqual(updatedA.currency, 'USD');
+
+    const checkConfigB = await configService.getConfig(orgB.id);
+    assert.strictEqual(checkConfigB.timezone, 'UTC', 'Config de Org B NÃO deve ser alterada por mutação em Org A');
+    assert.strictEqual(checkConfigB.currency, 'BRL');
+
+    // 4. Flag FINANCIAL = true em Org A
+    const flagA = await flagService.setFlag(orgA.id, adminAUser.id, 'FINANCIAL', true);
+    assert.strictEqual(flagA.key, 'FINANCIAL');
+    assert.strictEqual(flagA.enabled, true);
+
+    // 5. Mesma flag permanece false/ausente em Org B
+    const isFinBEnabled = await flagService.isEnabled(orgB.id, 'FINANCIAL');
+    assert.strictEqual(isFinBEnabled, false, 'Flag FINANCIAL em Org B deve permanecer false');
+
+    // 6. setFlag false funciona
+    const flagADisabled = await flagService.setFlag(orgA.id, adminAUser.id, 'FINANCIAL', false);
+    assert.strictEqual(flagADisabled.enabled, false);
+
+    // 7 & 8. AuditLogs de config e flags pertencem a Org A
+    const listAuditA = await auditService.list({ organizationId: orgA.id });
+    const configAuditA = listAuditA.items.find((item: any) => item.action === 'organization.config_changed');
+    const flagAuditA = listAuditA.items.find((item: any) => item.action === 'feature_flag.changed');
+
+    assert.ok(configAuditA, 'Deve existir AuditLog de alteração de configuração para Org A');
+    assert.strictEqual(configAuditA.actorUserId, adminAUser.id);
+    assert.strictEqual(configAuditA.entityType, 'OrganizationConfig');
+
+    assert.ok(flagAuditA, 'Deve existir AuditLog de alteração de feature flag para Org A');
+    assert.strictEqual(flagAuditA.actorUserId, adminAUser.id);
+    assert.strictEqual(flagAuditA.entityType, 'OrganizationFeatureFlag');
+
+    // 9. Org B não recebe os AuditLogs de Org A
+    const listAuditB = await auditService.list({ organizationId: orgB.id });
+    const hasAuditAInB = listAuditB.items.some(
+      (item: any) => item.id === configAuditA.id || item.id === flagAuditA.id
+    );
+    assert.strictEqual(hasAuditAInB, false, 'Org B NUNCA deve receber AuditLogs pertencentes a Org A');
+
+    // Cleanup
+    await prisma.organizationFeatureFlag.deleteMany({
+      where: { organizationId: { in: [orgA.id, orgB.id] } },
+    });
   });
 });
