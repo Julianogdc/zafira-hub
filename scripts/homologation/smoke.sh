@@ -51,9 +51,9 @@ echo "[+] GET /hub-api/metrics (sem header) => 401 Unauthorized (bloqueio confir
 # 5. Teste de Métricas com API Key (se fornecida)
 if [ -n "${HUB_INTERNAL_API_KEY}" ]; then
   echo "[*] Testando GET /hub-api/metrics com chave interna..."
-  METRICS_STATUS_AUTH=$(curl -s -o /dev/null -w "%{http_code}" -H "x-hub-internal-api-key: ${HUB_INTERNAL_API_KEY}" "${WEB_BASE_URL}/hub-api/metrics")
+  METRICS_STATUS_AUTH=$(curl -s -o /dev/null -w "%{http_code}" -H "x-api-key: ${HUB_INTERNAL_API_KEY}" "${WEB_BASE_URL}/hub-api/metrics")
   if [ "${METRICS_STATUS_AUTH}" -ne 200 ]; then
-    echo "[-] FALHA: GET /hub-api/metrics com x-hub-internal-api-key retornou HTTP ${METRICS_STATUS_AUTH} (esperado 200)" >&2
+    echo "[-] FALHA: GET /hub-api/metrics com x-api-key retornou HTTP ${METRICS_STATUS_AUTH} (esperado 200)" >&2
     exit 1
   fi
   echo "[+] GET /hub-api/metrics (com chave interna) => 200 OK"
