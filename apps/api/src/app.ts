@@ -5,7 +5,7 @@ import cookie from '@fastify/cookie';
 import jwt from '@fastify/jwt';
 import rateLimit from '@fastify/rate-limit';
 import multipart from '@fastify/multipart';
-import { healthRoutes } from './routes/health.js';
+import { createHealthRoutes } from './routes/health.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { clientRoutes } from './modules/clients/clients.routes.js';
 import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
@@ -17,10 +17,45 @@ import { organizationConfigRoutes } from './modules/organization-config/organiza
 import { usersRoutes } from './modules/users/users.routes.js';
 import { invitationsRoutes } from './modules/users/invitations.routes.js';
 import { teamRoutes } from './modules/teams/team.routes.js';
+import { ObservabilityService } from './modules/observability/observability.service.js';
+import { createMetricsRoutes } from './modules/observability/metrics.routes.js';
+import { getFastifyLoggerConfig } from './modules/observability/logger-config.js';
 
-export function buildApp(): FastifyInstance {
+export interface BuildAppOptions {
+  logger?: any;
+  observabilityService?: ObservabilityService;
+}
+
+const REQUEST_START_TIME = Symbol('requestStartTime');
+
+export function buildApp(options?: BuildAppOptions): FastifyInstance {
+  const loggerConfig = options?.logger !== undefined ? options.logger : getFastifyLoggerConfig();
+
   const app = fastify({
-    logger: process.env.NODE_ENV === 'test' ? false : true,
+    logger: loggerConfig,
+  });
+
+  const observability = options?.observabilityService || new ObservabilityService();
+  (app as any).observability = observability;
+
+  // Header x-request-id canônico em todas as respostas HTTP (sucessos e erros)
+  app.addHook('onSend', async (request, reply) => {
+    reply.header('x-request-id', request.id);
+  });
+
+  // Medição monotônica de latência e contagem de requisições HTTP com route templates
+  app.addHook('onRequest', async (request) => {
+    (request as any)[REQUEST_START_TIME] = process.hrtime.bigint();
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const startTime = (request as any)[REQUEST_START_TIME];
+    if (startTime) {
+      const durationNs = process.hrtime.bigint() - startTime;
+      const durationSeconds = Number(durationNs) / 1e9;
+      const routeTemplate = (request as any).routeOptions?.url || request.routerPath || 'unmatched';
+      observability.recordHttpRequest(request.method, routeTemplate, reply.statusCode, durationSeconds);
+    }
   });
 
   // 1. Configuração de CORS com origens explícitas e credenciais (sem wildcard)
@@ -96,7 +131,10 @@ export function buildApp(): FastifyInstance {
   });
 
   // 5. Rotas Públicas de diagnóstico e infraestrutura
-  app.register(healthRoutes);
+  app.register(createHealthRoutes(observability));
+
+  // 5.1 Rota Protegida de Métricas Prometheus (Machine-Only)
+  app.register(createMetricsRoutes(observability));
 
   // 6. Rotas de Autenticação (/auth/login, /auth/me, /auth/logout)
   app.register(authRoutes);

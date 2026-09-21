@@ -222,3 +222,30 @@ export function requirePermission(permissionCode: PermissionCode) {
     (request as any).authorizationResult = authResult;
   };
 }
+
+/**
+ * Middleware para exigir credencial de maquina (API key interna).
+ * Rejeita explicitamente usuarios humanos autenticados com 403 MACHINE_CREDENTIAL_REQUIRED.
+ */
+export function requireMachineCredential() {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    const auth = request.authContext;
+
+    if (!auth) {
+      return reply.status(401).send({ error: 'unauthorized' });
+    }
+
+    if (auth.type === 'user') {
+      return reply.status(403).send({
+        status: 'error',
+        error: 'forbidden',
+        code: 'MACHINE_CREDENTIAL_REQUIRED',
+        message: 'Endpoint restrito a credenciais de maquina',
+      });
+    }
+
+    if (auth.type !== 'api_key') {
+      return reply.status(401).send({ error: 'unauthorized' });
+    }
+  };
+}
