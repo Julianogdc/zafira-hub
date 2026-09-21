@@ -75,6 +75,7 @@ model Organization {
   auditLogs             AuditLog[]
   teamMembers           TeamMember[]
   userClientAssignments UserClientAssignment[]
+  teamClientAssignments TeamClientAssignment[]
   config                OrganizationConfig?
   featureFlags          OrganizationFeatureFlag[]
   invitations           OrganizationInvitation[]
@@ -171,6 +172,7 @@ model Client {
   suggestedTransactions  FinancialTransaction[]  @relation("SuggestedClientTransactions")
   financialCategoryRules FinancialCategoryRule[]
   assignedMembers        UserClientAssignment[]
+  teamAssignments        TeamClientAssignment[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -551,8 +553,9 @@ model Team {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  members      TeamMember[]
+  organization      Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members           TeamMember[]
+  clientAssignments TeamClientAssignment[]
 
   @@unique([organizationId, name])
   @@unique([organizationId, id])
@@ -574,6 +577,22 @@ model TeamMember {
   @@index([organizationId])
   @@index([organizationMemberId])
   @@map("team_members")
+}
+
+model TeamClientAssignment {
+  organizationId String
+  teamId         String
+  clientId       String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team         Team         @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([teamId, clientId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("team_client_assignments")
 }
 
 model UserClientAssignment {

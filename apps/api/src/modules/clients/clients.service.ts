@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma.js';
 import { CreateClientInput, ListClientsQuery, UpdateClientInput } from './clients.schemas.js';
 import { RoleType } from '@zafira/domain';
+import { buildClientResourceScopeWhere } from '../authorization/client-resource-scope.js';
 
 export class AppError extends Error {
   constructor(public statusCode: number, message: string) {
@@ -34,38 +35,27 @@ export class ClientsService {
     }
   }
 
-  private getMemberScopeFilter(ctx: ClientServiceContext) {
-    if (ctx.role === 'MEMBER') {
-      return {
-        assignedMembers: {
-          some: {
-            organizationMemberId: ctx.membershipId
-          }
-        }
-      };
-    }
-    return {};
-  }
-
   /**
-   * Lista todos os clientes da organização com filtros opcionais e escopo de permissão.
+   * Lista todos os clientes da organização com filtros opcionais e escopo de recurso.
    */
   async listClients(ctx: ClientServiceContext, filters: ListClientsQuery) {
+    const scopeWhere = buildClientResourceScopeWhere(ctx);
     const where: any = {
-      organizationId: ctx.organizationId,
-      ...this.getMemberScopeFilter(ctx)
+      AND: [scopeWhere],
     };
 
     if (filters.status) {
-      where.status = filters.status;
+      where.AND.push({ status: filters.status });
     }
 
     if (filters.search) {
-      where.OR = [
-        { name: { contains: filters.search, mode: 'insensitive' } },
-        { legalName: { contains: filters.search, mode: 'insensitive' } },
-        { email: { contains: filters.search, mode: 'insensitive' } },
-      ];
+      where.AND.push({
+        OR: [
+          { name: { contains: filters.search, mode: 'insensitive' } },
+          { legalName: { contains: filters.search, mode: 'insensitive' } },
+          { email: { contains: filters.search, mode: 'insensitive' } },
+        ],
+      });
     }
 
     const clients = await prisma.client.findMany({
@@ -94,14 +84,14 @@ export class ClientsService {
   }
 
   /**
-   * Busca um cliente por ID dentro da organização com escopo de permissão.
+   * Busca um cliente por ID dentro da organização com escopo de recurso.
    */
   async getClientById(ctx: ClientServiceContext, id: string) {
+    const scopeWhere = buildClientResourceScopeWhere(ctx);
     const client = await prisma.client.findFirst({
       where: {
         id,
-        organizationId: ctx.organizationId,
-        ...this.getMemberScopeFilter(ctx)
+        AND: [scopeWhere],
       },
       include: {
         responsibleUser: {
@@ -134,52 +124,65 @@ export class ClientsService {
 
   /**
    * Cria um novo cliente vinculado à organização ativa.
+   * Se o criador for MANAGER ou MEMBER (não-ADMIN), cria automaticamente
+   * UserClientAssignment para o criador na mesma transação.
    */
   async createClient(ctx: ClientServiceContext, data: CreateClientInput) {
     if (data.responsibleUserId) {
       await this.validateMember(ctx.organizationId, data.responsibleUserId);
     }
 
-    const client = await prisma.client.create({
-      data: {
-        organizationId: ctx.organizationId,
-        name: data.name,
-        legalName: data.legalName,
-        document: data.document,
-        email: data.email || null,
-        phone: data.phone,
-        status: data.status ?? 'ACTIVE',
-        responsibleUserId: data.responsibleUserId,
-        contractValue: data.contractValue !== undefined ? data.contractValue : null,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        notes: data.notes,
-      },
-      include: {
-        responsibleUser: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            avatarUrl: true,
+    return await prisma.$transaction(async (tx) => {
+      const client = await tx.client.create({
+        data: {
+          organizationId: ctx.organizationId,
+          name: data.name,
+          legalName: data.legalName,
+          document: data.document,
+          email: data.email || null,
+          phone: data.phone,
+          status: data.status ?? 'ACTIVE',
+          responsibleUserId: data.responsibleUserId,
+          contractValue: data.contractValue !== undefined ? data.contractValue : null,
+          startDate: data.startDate,
+          endDate: data.endDate,
+          notes: data.notes,
+        },
+        include: {
+          responsibleUser: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              avatarUrl: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    return client;
+      if (ctx.role !== 'ADMIN') {
+        await tx.userClientAssignment.create({
+          data: {
+            organizationId: ctx.organizationId,
+            organizationMemberId: ctx.membershipId,
+            clientId: client.id,
+          },
+        });
+      }
+
+      return client;
+    });
   }
 
   /**
-   * Atualiza parcialmente um cliente existente.
+   * Atualiza parcialmente um cliente existente com validação de escopo de recurso.
    */
   async updateClient(ctx: ClientServiceContext, id: string, data: UpdateClientInput) {
-    // Verifica se o cliente existe na organização e se tem permissão (escopo)
+    const scopeWhere = buildClientResourceScopeWhere(ctx);
     const existing = await prisma.client.findFirst({
       where: {
         id,
-        organizationId: ctx.organizationId,
-        ...this.getMemberScopeFilter(ctx)
+        AND: [scopeWhere],
       },
     });
 
@@ -187,12 +190,10 @@ export class ClientsService {
       throw new AppError(404, 'Cliente não encontrado');
     }
 
-    // Se informou ou alterou o responsável, valida a associação
     if (data.responsibleUserId) {
       await this.validateMember(ctx.organizationId, data.responsibleUserId);
     }
 
-    // Valida datas combinadas com os dados existentes se apenas uma for enviada
     const finalStartDate = data.startDate !== undefined ? data.startDate : existing.startDate;
     const finalEndDate = data.endDate !== undefined ? data.endDate : existing.endDate;
 

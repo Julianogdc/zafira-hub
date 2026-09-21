@@ -7,6 +7,7 @@ import { AuditService } from '../modules/audit/audit.service.js';
 import { OrganizationConfigService } from '../modules/organization-config/organization-config.service.js';
 import { FeatureFlagService } from '../modules/organization-config/feature-flag.service.js';
 import { UsersService, UserAdminError } from '../modules/users/users.service.js';
+import { TeamService, TeamError, teamService } from '../modules/teams/team.service.js';
 import argon2 from 'argon2';
 import { hashInvitationToken } from '../modules/users/invitation-token.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
@@ -31,7 +32,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
   await t.test('J - Testes Reais de Migration', async () => {
     const migrations = await prisma.$queryRaw<any[]>`SELECT * FROM _prisma_migrations`;
-    assert.strictEqual(migrations.length, 13, 'Deve haver exatamente 13 migrations aplicadas');
+    assert.strictEqual(migrations.length, 14, 'Deve haver exatamente 14 migrations aplicadas');
     for (const mig of migrations) {
       assert.ok(mig.finished_at, `Migration ${mig.migration_name} não foi finalizada`);
     }
@@ -1018,6 +1019,293 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       for (const uId of createdUserIds) {
         await prisma.organizationMember.deleteMany({ where: { userId: uId } });
         await prisma.user.deleteMany({ where: { id: uId } });
+      }
+    }
+  });
+
+  await t.test('U - Team e Client Resource Scope com PostgreSQL Real', async () => {
+    // 1. Catálogo e Defaults
+    const teamViewPerm = await prisma.permission.findUnique({ where: { code: 'teams.view' } });
+    const teamManagePerm = await prisma.permission.findUnique({ where: { code: 'teams.manage' } });
+    assert.ok(teamViewPerm, 'teams.view deve estar persistida');
+    assert.ok(teamManagePerm, 'teams.manage deve estar persistida');
+
+    const adminTeamsView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'ADMIN', permissionCode: 'teams.view' } }
+    });
+    const adminTeamsManage = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'ADMIN', permissionCode: 'teams.manage' } }
+    });
+    assert.ok(adminTeamsView, 'ADMIN deve possuir teams.view default');
+    assert.ok(adminTeamsManage, 'ADMIN deve possuir teams.manage default');
+
+    const managerTeamsView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'MANAGER', permissionCode: 'teams.view' } }
+    });
+    const managerTeamsManage = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'MANAGER', permissionCode: 'teams.manage' } }
+    });
+    assert.ok(managerTeamsView, 'MANAGER deve possuir teams.view default');
+    assert.strictEqual(managerTeamsManage, null, 'MANAGER NÃO deve possuir teams.manage default');
+
+    const memberTeamsView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'MEMBER', permissionCode: 'teams.view' } }
+    });
+    assert.strictEqual(memberTeamsView, null, 'MEMBER NÃO deve possuir teams.view');
+
+    // Orgs e Membros
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+
+    const adminA = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
+    const managerA = await prisma.user.findUniqueOrThrow({ where: { email: 'manager_a@zafira.test' } });
+    const memberA = await prisma.user.findUniqueOrThrow({ where: { email: 'member_a@zafira.test' } });
+
+    const adminAMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgA.id, userId: adminA.id } }
+    });
+    const managerAMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgA.id, userId: managerA.id } }
+    });
+    const memberAMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgA.id, userId: memberA.id } }
+    });
+
+    const adminB = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_b@zafira.test' } });
+    const adminBMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgB.id, userId: adminB.id } }
+    });
+
+    const teamService = new TeamService(prisma);
+    const clientsService = new ClientsService();
+    const auditService = new AuditService(prisma);
+
+    const createdTeamIds: string[] = [];
+    const createdClientIds: string[] = [];
+
+    try {
+      // 2. Criação de Team Org A
+      const teamA = await teamService.createTeam(
+        { organizationId: orgA.id, actorId: adminA.id },
+        { name: 'Squad Growth' }
+      );
+      createdTeamIds.push(teamA.id);
+      assert.strictEqual(teamA.name, 'Squad Growth');
+      assert.strictEqual(teamA.isActive, true);
+
+      // 3. Mesmo nome em Org B é permitido
+      const teamB = await teamService.createTeam(
+        { organizationId: orgB.id, actorId: adminB.id },
+        { name: 'Squad Growth' }
+      );
+      createdTeamIds.push(teamB.id);
+      assert.strictEqual(teamB.name, 'Squad Growth');
+
+      // 4. Nome duplicado na mesma Org A falha com 409
+      await assert.rejects(
+        teamService.createTeam(
+          { organizationId: orgA.id, actorId: adminA.id },
+          { name: 'Squad Growth' }
+        ),
+        (err: any) => err instanceof TeamError && err.code === 'TEAM_NAME_ALREADY_EXISTS' && err.statusCode === 409
+      );
+
+      // 5. Foreign membership em replaceMembers é rejeitado
+      await assert.rejects(
+        teamService.replaceMembers(
+          { organizationId: orgA.id, actorId: adminA.id },
+          teamA.id,
+          { membershipIds: [adminBMem.id] }
+        ),
+        (err: any) => err instanceof TeamError && err.code === 'MEMBERSHIP_NOT_IN_ORGANIZATION' && err.statusCode === 400
+      );
+
+      // 6. DB FK cross-org rejeita TeamMember
+      await assert.rejects(
+        prisma.teamMember.create({
+          data: {
+            organizationId: orgA.id,
+            teamId: teamA.id,
+            organizationMemberId: adminBMem.id,
+          }
+        }),
+        /Foreign key constraint/i
+      );
+
+      // 7. Criar clientes de teste em Org A
+      const clientDirect = await prisma.client.create({
+        data: { organizationId: orgA.id, name: 'Client Direct U', status: 'ACTIVE' }
+      });
+      createdClientIds.push(clientDirect.id);
+
+      const clientTeam = await prisma.client.create({
+        data: { organizationId: orgA.id, name: 'Client Team U', status: 'ACTIVE' }
+      });
+      createdClientIds.push(clientTeam.id);
+
+      const clientBoth = await prisma.client.create({
+        data: { organizationId: orgA.id, name: 'Client Both U', status: 'ACTIVE' }
+      });
+      createdClientIds.push(clientBoth.id);
+
+      const clientUnassigned = await prisma.client.create({
+        data: { organizationId: orgA.id, name: 'Client Unassigned U', status: 'ACTIVE' }
+      });
+      createdClientIds.push(clientUnassigned.id);
+
+      const clientOrgB = await prisma.client.create({
+        data: { organizationId: orgB.id, name: 'Client Org B U', status: 'ACTIVE' }
+      });
+      createdClientIds.push(clientOrgB.id);
+
+      // 8. Foreign client em replaceClients é rejeitado
+      await assert.rejects(
+        teamService.replaceClients(
+          { organizationId: orgA.id, actorId: adminA.id },
+          teamA.id,
+          { clientIds: [clientOrgB.id] }
+        ),
+        (err: any) => err instanceof TeamError && err.code === 'CLIENT_NOT_IN_ORGANIZATION' && err.statusCode === 400
+      );
+
+      // 9. DB FK cross-org rejeita TeamClientAssignment
+      await assert.rejects(
+        prisma.teamClientAssignment.create({
+          data: {
+            organizationId: orgA.id,
+            teamId: teamA.id,
+            clientId: clientOrgB.id,
+          }
+        }),
+        /Foreign key constraint/i
+      );
+
+      // 10. Configurar assignments para Manager A:
+      // Direct assignment para clientDirect e clientBoth
+      await prisma.userClientAssignment.createMany({
+        data: [
+          { organizationId: orgA.id, organizationMemberId: managerAMem.id, clientId: clientDirect.id },
+          { organizationId: orgA.id, organizationMemberId: managerAMem.id, clientId: clientBoth.id },
+        ]
+      });
+
+      // Atribuir Manager A na teamA
+      await teamService.replaceMembers(
+        { organizationId: orgA.id, actorId: adminA.id },
+        teamA.id,
+        { membershipIds: [managerAMem.id] }
+      );
+
+      // Atribuir clientTeam e clientBoth à teamA
+      await teamService.replaceClients(
+        { organizationId: orgA.id, actorId: adminA.id },
+        teamA.id,
+        { clientIds: [clientTeam.id, clientBoth.id] }
+      );
+
+      // 11. Manager A com escopo: Direct (clientDirect), Team (clientTeam), Union (clientBoth)
+      const managerContext = { organizationId: orgA.id, membershipId: managerAMem.id, role: 'MANAGER' as const };
+      const managerClients = await clientsService.listClients(managerContext, {});
+      const managerClientNames = managerClients.map(c => c.name);
+
+      assert.ok(managerClientNames.includes('Client Direct U'), 'Deve incluir client com direct assignment');
+      assert.ok(managerClientNames.includes('Client Team U'), 'Deve incluir client com active team assignment');
+      assert.ok(managerClientNames.includes('Client Both U'), 'Deve incluir client com direct + team union');
+      assert.strictEqual(managerClientNames.includes('Client Unassigned U'), false, 'NÃO deve incluir client não atribuído');
+
+      // 12. União não duplica clientBoth
+      const bothCount = managerClients.filter(c => c.id === clientBoth.id).length;
+      assert.strictEqual(bothCount, 1, 'Client com direct e team deve aparecer exatamente uma vez');
+
+      // 13. Admin A enxerga todos os clientes da organização (organization-wide)
+      const adminContext = { organizationId: orgA.id, membershipId: adminAMem.id, role: 'ADMIN' as const };
+      const adminClients = await clientsService.listClients(adminContext, {});
+      const adminClientNames = adminClients.map(c => c.name);
+      assert.ok(adminClientNames.includes('Client Unassigned U'), 'Admin enxerga unassigned client');
+      assert.ok(adminClientNames.includes('Client Direct U'));
+      assert.ok(adminClientNames.includes('Client Team U'));
+
+      // 14. Team inativa remove acesso derivado por equipe
+      await teamService.updateTeam(
+        { organizationId: orgA.id, actorId: adminA.id },
+        teamA.id,
+        { isActive: false }
+      );
+
+      const managerClientsAfterInactive = await clientsService.listClients(managerContext, {});
+      const namesInactive = managerClientsAfterInactive.map(c => c.name);
+      assert.strictEqual(namesInactive.includes('Client Team U'), false, 'Team inativa remove acesso a Client Team U');
+      assert.ok(namesInactive.includes('Client Direct U'), 'Direct assignment continua acessível com team inativa');
+      assert.ok(namesInactive.includes('Client Both U'), 'Direct assignment preserva acesso a Client Both U');
+
+      // 15. Reativação restaura acesso
+      await teamService.updateTeam(
+        { organizationId: orgA.id, actorId: adminA.id },
+        teamA.id,
+        { isActive: true }
+      );
+
+      const managerClientsReactivated = await clientsService.listClients(managerContext, {});
+      const namesReactivated = managerClientsReactivated.map(c => c.name);
+      assert.ok(namesReactivated.includes('Client Team U'), 'Reativação restaura acesso a Client Team U');
+
+      // 16. Get e Update de cliente fora de escopo retorna NOT_FOUND (404)
+      await assert.rejects(
+        clientsService.getClientById(managerContext, clientUnassigned.id),
+        /não encontrado/i
+      );
+      await assert.rejects(
+        clientsService.updateClient(managerContext, clientUnassigned.id, { name: 'Hack Attempt' }),
+        /não encontrado/i
+      );
+
+      // 17. Criação de client por non-admin autorizado auto-assign para criador
+      const newCreatedClient = await clientsService.createClient(
+        managerContext,
+        { name: 'Client Created By Manager' }
+      );
+      createdClientIds.push(newCreatedClient.id);
+
+      const directAssignCheck = await prisma.userClientAssignment.findUnique({
+        where: {
+          organizationMemberId_clientId: {
+            organizationMemberId: managerAMem.id,
+            clientId: newCreatedClient.id,
+          }
+        }
+      });
+      assert.ok(directAssignCheck, 'Novo client criado por Manager deve ser auto-atribuído a ele');
+
+      // 18. Team de Org A nunca afeta Org B
+      const teamDetailB = await teamService.getTeamDetail(orgB.id, teamB.id);
+      assert.strictEqual(teamDetailB.members.length, 0);
+      assert.strictEqual(teamDetailB.clients.length, 0);
+
+      // 19. Cross-org team get falha com 404
+      await assert.rejects(
+        teamService.getTeamDetail(orgB.id, teamA.id),
+        (err: any) => err instanceof TeamError && err.code === 'TEAM_NOT_FOUND' && err.statusCode === 404
+      );
+
+      // 20. AuditLogs de Team registrados e tenant-scoped
+      const logsA = await auditService.list({ organizationId: orgA.id });
+      const teamCreatedLog = logsA.items.find((l: any) => l.action === 'team.created');
+      const teamMembersLog = logsA.items.find((l: any) => l.action === 'team.members_changed');
+      const teamClientsLog = logsA.items.find((l: any) => l.action === 'team.clients_changed');
+      assert.ok(teamCreatedLog, 'Log team.created deve existir');
+      assert.ok(teamMembersLog, 'Log team.members_changed deve existir');
+      assert.ok(teamClientsLog, 'Log team.clients_changed deve existir');
+    } finally {
+      // Cleanup integral
+      for (const tId of createdTeamIds) {
+        await prisma.teamClientAssignment.deleteMany({ where: { teamId: tId } });
+        await prisma.teamMember.deleteMany({ where: { teamId: tId } });
+        await prisma.team.deleteMany({ where: { id: tId } });
+      }
+      for (const cId of createdClientIds) {
+        await prisma.teamClientAssignment.deleteMany({ where: { clientId: cId } });
+        await prisma.userClientAssignment.deleteMany({ where: { clientId: cId } });
+        await prisma.client.deleteMany({ where: { id: cId } });
       }
     }
   });

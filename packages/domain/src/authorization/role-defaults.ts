@@ -49,6 +49,8 @@ export const ADMIN_DEFAULTS: PermissionCode[] = [
   'users.assign_clients',
   'users.suspend',
   'users.remove',
+  'teams.view',
+  'teams.manage',
   'integrations.view',
   'integrations.connect',
   'integrations.reconnect',
@@ -99,6 +101,7 @@ export const MANAGER_DEFAULTS: PermissionCode[] = [
   'commercial.export',
   'users.view',
   'users.assign_clients',
+  'teams.view',
   'integrations.view',
   'integrations.sync'
 ];

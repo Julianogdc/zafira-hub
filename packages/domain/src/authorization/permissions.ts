@@ -45,6 +45,8 @@ export const PERMISSIONS = [
   'users.assign_clients',
   'users.suspend',
   'users.remove',
+  'teams.view',
+  'teams.manage',
   'integrations.view',
   'integrations.connect',
   'integrations.reconnect',

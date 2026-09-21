@@ -16,6 +16,7 @@ import { auditRoutes } from './modules/audit/audit.routes.js';
 import { organizationConfigRoutes } from './modules/organization-config/organization-config.routes.js';
 import { usersRoutes } from './modules/users/users.routes.js';
 import { invitationsRoutes } from './modules/users/invitations.routes.js';
+import { teamRoutes } from './modules/teams/team.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -126,6 +127,9 @@ export function buildApp(): FastifyInstance {
 
   // 15. Rotas Públicas de Convites e Ativação
   app.register(invitationsRoutes);
+
+  // 16. Rotas de Gestão de Equipes e Squads (Teams)
+  app.register(teamRoutes);
 
   return app;
 }

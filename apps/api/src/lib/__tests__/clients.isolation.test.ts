@@ -1,49 +1,83 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { ClientsService } from '../../modules/clients/clients.service.js';
+import { buildClientResourceScopeWhere } from '../../modules/authorization/client-resource-scope.js';
 
-test('Client Isolation and Scope rules', async (t) => {
-  const svc = new ClientsService();
-
-  // Testando apenas a lógica de geração de query parameters (getMemberScopeFilter)
-  // Já que não podemos conectar banco real e os métodos usam prisma interno.
-  // Como o método é privado, testamos indiretamente observando o que a classe espera no contexto.
-  
-  await t.test('Admin Org A lista somente Clients de A', () => {
-    // Escopo organizacional puro
-    const filter = (svc as any).getMemberScopeFilter({
+test('Client Isolation and Resource Scope rules', async (t) => {
+  await t.test('Admin Org A lista somente Clients de A (escopo organization-wide)', () => {
+    const scope = buildClientResourceScopeWhere({
       organizationId: 'org-a',
       membershipId: 'mem-1',
-      role: 'ADMIN'
+      role: 'ADMIN',
     });
-    
-    assert.deepStrictEqual(filter, {});
+
+    assert.deepStrictEqual(scope, {
+      organizationId: 'org-a',
+    });
   });
 
-  await t.test('Manager Org A lista somente Clients de A', () => {
-    // Escopo organizacional puro
-    const filter = (svc as any).getMemberScopeFilter({
+  await t.test('Manager Org A restrito a direct assignment + active team assignment', () => {
+    const scope = buildClientResourceScopeWhere({
       organizationId: 'org-a',
       membershipId: 'mem-2',
-      role: 'MANAGER'
+      role: 'MANAGER',
     });
-    
-    assert.deepStrictEqual(filter, {});
+
+    assert.strictEqual(scope.organizationId, 'org-a');
+    assert.deepStrictEqual(scope.OR, [
+      {
+        assignedMembers: {
+          some: {
+            organizationMemberId: 'mem-2',
+          },
+        },
+      },
+      {
+        teamAssignments: {
+          some: {
+            team: {
+              isActive: true,
+              members: {
+                some: {
+                  organizationMemberId: 'mem-2',
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
   });
 
-  await t.test('Member A restrito a clientes atribuídos', () => {
-    const filter = (svc as any).getMemberScopeFilter({
+  await t.test('Member Org A restrito a direct assignment + active team assignment', () => {
+    const scope = buildClientResourceScopeWhere({
       organizationId: 'org-a',
       membershipId: 'mem-3',
-      role: 'MEMBER'
+      role: 'MEMBER',
     });
-    
-    assert.deepStrictEqual(filter, {
-      assignedMembers: {
-        some: {
-          organizationMemberId: 'mem-3'
-        }
-      }
-    });
+
+    assert.strictEqual(scope.organizationId, 'org-a');
+    assert.deepStrictEqual(scope.OR, [
+      {
+        assignedMembers: {
+          some: {
+            organizationMemberId: 'mem-3',
+          },
+        },
+      },
+      {
+        teamAssignments: {
+          some: {
+            team: {
+              isActive: true,
+              members: {
+                some: {
+                  organizationMemberId: 'mem-3',
+                },
+              },
+            },
+          },
+        },
+      },
+    ]);
   });
 });
