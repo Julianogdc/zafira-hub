@@ -1,5 +1,11 @@
-node_modules
-dist
 .git
-
-npm-debug.log
+node_modules
+**/node_modules
+dist
+**/dist
+coverage
+.env
+.env.*
+!.env.example
+*.log
+.zafira-context

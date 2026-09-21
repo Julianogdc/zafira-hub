@@ -43,7 +43,7 @@ export const invitationsRoutes: FastifyPluginAsync = async (app: FastifyInstance
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Token de convite inválido ou ausente',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -80,7 +80,7 @@ export const invitationsRoutes: FastifyPluginAsync = async (app: FastifyInstance
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Dados de aceite inválidos',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 

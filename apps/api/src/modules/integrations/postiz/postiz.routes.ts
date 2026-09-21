@@ -65,8 +65,9 @@ export function createPostizRoutes(customService?: PostizService) {
       });
     };
 
-    function extractClientId(params: ClientParams): string {
-      return (params.clientId || params.id || '').trim();
+    function extractClientId(params: unknown): string {
+      const p = (params || {}) as ClientParams;
+      return (p.clientId || p.id || '').trim();
     }
 
     function getOrganizationId(request: FastifyRequest): string | undefined {
@@ -246,9 +247,9 @@ export function createPostizRoutes(customService?: PostizService) {
       try {
         const clientId = extractClientId(request.params);
         const organizationId = getOrganizationId(request);
-        const externalId = (request.params.externalId || '').trim();
+        const { externalId } = (request.params || {}) as { externalId?: string };
 
-        const result = await service.unlinkAccountFromClient(clientId, externalId, organizationId);
+        const result = await service.unlinkAccountFromClient(clientId, (externalId || '').trim(), organizationId);
 
         return reply.status(200).send({
           status: 'ok',
@@ -282,7 +283,7 @@ export function createPostizRoutes(customService?: PostizService) {
       try {
         const clientId = extractClientId(request.params);
         const organizationId = getOrganizationId(request);
-        const { startDate, endDate } = request.query || {};
+        const { startDate, endDate } = (request.query || {}) as { startDate?: string; endDate?: string };
 
         const result = await service.getClientPosts(clientId, { startDate, endDate }, organizationId);
 

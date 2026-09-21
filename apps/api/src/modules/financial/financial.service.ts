@@ -20,6 +20,14 @@ export interface FinancialAccountsOverviewResponse {
     lastSyncedAt: string | null;
     isActive: boolean;
   }[];
+  periodSummary?: {
+    startDate: string;
+    endDate: string;
+    operationalIncome: number;
+    operationalExpense: number;
+    internalTransfersAmount: number;
+    pendingReviewCount: number;
+  };
   timestamp: string;
 }
 
@@ -32,6 +40,7 @@ export interface FinancialTransactionsFilters {
   kind?: FinancialTransactionKind;
   categoryId?: string;
   clientId?: string;
+  pendingCategoryOnly?: boolean;
   counterparty?: string;
   status?: string;
   search?: string;

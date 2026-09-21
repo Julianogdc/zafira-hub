@@ -125,9 +125,12 @@ export class AsaasClient {
       if (!response.ok) {
         let errorMessage = `Asaas retornou status ${response.status}`;
         try {
-          const body = await response.json();
+          const body = (await response.json()) as {
+            errors?: Array<{ description?: string; message?: string }>;
+            message?: string;
+          };
           if (body?.errors && Array.isArray(body.errors) && body.errors.length > 0) {
-            errorMessage = body.errors.map((e: any) => e.description || e.message).join('; ');
+            errorMessage = body.errors.map((e) => e.description || e.message).join('; ');
           } else if (body?.message) {
             errorMessage = body.message;
           }

@@ -1,7 +1,7 @@
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../lib/prisma.js';
 import { PermissionCode } from '@zafira/domain';
-import { resolveAuthorizationContext } from '../modules/authorization/resolver.js';
+import { resolveAuthorizationContext, AuthorizationResult } from '../modules/authorization/resolver.js';
 
 
 export interface AuthUserContext {
@@ -27,6 +27,7 @@ export type AuthContext = AuthUserContext | AuthApiKeyContext;
 declare module 'fastify' {
   interface FastifyRequest {
     authContext?: AuthContext;
+    authorizationResult?: AuthorizationResult;
   }
 }
 
@@ -64,7 +65,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
 
   if (token) {
     try {
-      const decoded = await (request.server as any).jwt.verify<{ sub: string; email: string; activeOrganizationId?: string | null }>(token);
+      const decoded = (await (request.server as any).jwt.verify(token)) as { sub: string; email: string; activeOrganizationId?: string | null };
 
       const user = await prisma.user.findUnique({
         where: { id: decoded.sub },

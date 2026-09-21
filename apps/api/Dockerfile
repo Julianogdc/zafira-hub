@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim
+FROM node:24.12.0-bookworm-slim
 
 WORKDIR /app
 
@@ -6,8 +6,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl python3 build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+RUN npm install -g npm@11.6.2
+
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/domain/package.json packages/domain/
 
 RUN npm ci --include=dev
 

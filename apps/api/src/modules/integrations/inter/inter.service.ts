@@ -27,6 +27,7 @@ export interface InterSyncResult {
     balanceAsOf: string | null;
   };
   syncedTransactions: number;
+  syncedCount?: number;
   autoMatchedTransfers?: number;
   reviewTransfers?: number;
   timestamp: string;

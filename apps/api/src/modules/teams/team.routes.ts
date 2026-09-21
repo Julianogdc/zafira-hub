@@ -47,7 +47,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       preHandler: [authenticate, requirePermission('teams.view')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+      const organizationId = request.authorizationResult!.organizationId!;
 
       try {
         const teams = await teamService.listTeams(organizationId);
@@ -65,14 +65,14 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * GET /api/v1/teams/:teamId
    * Permissão: teams.view
    */
-  app.get<{ Params: { teamId: string } }>(
+  app.get(
     '/api/v1/teams/:teamId',
     {
       preHandler: [authenticate, requirePermission('teams.view')],
     },
-    async (request, reply) => {
-      const organizationId = request.authorizationResult!.organizationId;
-      const { teamId } = request.params;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
+      const { teamId } = request.params as { teamId: string };
 
       try {
         const team = await teamService.getTeamDetail(organizationId, teamId);
@@ -96,7 +96,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       preHandler: [authenticate, requirePermission('teams.manage')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = getActorUserId(request, reply);
       if (!actorUserId) return;
 
@@ -106,7 +106,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Dados de criação de equipe inválidos',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -135,17 +135,17 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * PATCH /api/v1/teams/:teamId
    * Permissão: teams.manage
    */
-  app.patch<{ Params: { teamId: string } }>(
+  app.patch(
     '/api/v1/teams/:teamId',
     {
       preHandler: [authenticate, requirePermission('teams.manage')],
     },
-    async (request, reply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = getActorUserId(request, reply);
       if (!actorUserId) return;
 
-      const { teamId } = request.params;
+      const { teamId } = request.params as { teamId: string };
 
       const parseResult = UpdateTeamRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -153,7 +153,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Dados de atualização de equipe inválidos',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -183,17 +183,17 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * PUT /api/v1/teams/:teamId/members
    * Permissão: teams.manage
    */
-  app.put<{ Params: { teamId: string } }>(
+  app.put(
     '/api/v1/teams/:teamId/members',
     {
       preHandler: [authenticate, requirePermission('teams.manage')],
     },
-    async (request, reply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = getActorUserId(request, reply);
       if (!actorUserId) return;
 
-      const { teamId } = request.params;
+      const { teamId } = request.params as { teamId: string };
 
       const parseResult = ReplaceTeamMembersRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -201,7 +201,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Lista de membros inválida',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -231,17 +231,17 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
    * PUT /api/v1/teams/:teamId/clients
    * Permissão: teams.manage
    */
-  app.put<{ Params: { teamId: string } }>(
+  app.put(
     '/api/v1/teams/:teamId/clients',
     {
       preHandler: [authenticate, requirePermission('teams.manage')],
     },
-    async (request, reply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = getActorUserId(request, reply);
       if (!actorUserId) return;
 
-      const { teamId } = request.params;
+      const { teamId } = request.params as { teamId: string };
 
       const parseResult = ReplaceTeamClientsRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -249,7 +249,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Lista de clientes inválida',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 

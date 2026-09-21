@@ -126,7 +126,7 @@ export class PostizClient {
         let errorMessage = `Postiz retornou status ${response.status}`;
         if (contentType.includes('application/json')) {
           try {
-            const errorBody = await response.json();
+            const errorBody = (await response.json()) as { msg?: string; message?: string };
             if (errorBody?.msg) {
               errorMessage = errorBody.msg;
             } else if (errorBody?.message) {

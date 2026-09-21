@@ -53,7 +53,7 @@ export function buildApp(options?: BuildAppOptions): FastifyInstance {
     if (startTime) {
       const durationNs = process.hrtime.bigint() - startTime;
       const durationSeconds = Number(durationNs) / 1e9;
-      const routeTemplate = (request as any).routeOptions?.url || request.routerPath || 'unmatched';
+      const routeTemplate = (request as any).routeOptions?.url || 'unmatched';
       observability.recordHttpRequest(request.method, routeTemplate, reply.statusCode, durationSeconds);
     }
   });
@@ -71,10 +71,9 @@ export function buildApp(options?: BuildAppOptions): FastifyInstance {
   });
 
   // Preserva o payload bruto (rawBody) para validação de assinaturas HMAC em Webhooks (ex: Asana)
-  app.addContentTypeParser(['application/json', /^application\/json/], { parseAs: 'buffer' }, (req, body, done) => {
+  app.addContentTypeParser(/^application\/json/, { parseAs: 'buffer' }, (req, body: Buffer, done) => {
     try {
-      const buffer = body as Buffer;
-      const rawString = buffer.length ? buffer.toString('utf-8') : '';
+      const rawString = body && body.length ? body.toString('utf-8') : '';
       (req as any).rawBody = rawString;
       if (!rawString || rawString.trim().length === 0) {
         return done(null, {});

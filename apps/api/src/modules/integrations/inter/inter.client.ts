@@ -436,7 +436,7 @@ export class InterClient {
       const expiresInSeconds = typeof data.expires_in === 'number' ? data.expires_in : 3600;
       this.tokenExpiresAt = Date.now() + expiresInSeconds * 1000;
 
-      return this.cachedToken;
+      return data.access_token;
     } catch (err: any) {
       if (err instanceof InterIntegrationError) throw err;
       throw new InterIntegrationError(

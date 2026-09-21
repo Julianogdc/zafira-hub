@@ -1,16 +1,22 @@
 # ---------- STAGE 1: BUILD ----------
-FROM node:20-alpine AS build
+FROM node:24.12.0-alpine AS build
 
 WORKDIR /app
 
+RUN npm install -g npm@11.6.2
+
 COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
+COPY packages/contracts/package.json packages/contracts/
+COPY packages/domain/package.json packages/domain/
+
 RUN npm ci
 
 COPY . .
 
-ARG VITE_SUPABASE_URL
-ARG VITE_SUPABASE_ANON_KEY
+ARG VITE_SUPABASE_URL=""
+ARG VITE_SUPABASE_ANON_KEY=""
 
 # Mapeia ARGs para variáveis de ambiente para o build
 ENV VITE_SUPABASE_URL=$VITE_SUPABASE_URL

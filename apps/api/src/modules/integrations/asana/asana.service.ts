@@ -219,7 +219,7 @@ export class AsanaService {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorData = ((await response.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> }) || {};
       const message = errorData?.errors?.[0]?.message || `Erro na comunicação com a API do Asana (HTTP ${response.status})`;
       throw new AsanaIntegrationError(response.status, message, errorData);
     }
@@ -1458,7 +1458,7 @@ export class AsanaService {
       throw new AsanaIntegrationError(response.status, 'Falha ao renovar token do Asana.');
     }
 
-    const data = await response.json();
+    const data = (await response.json()) as { expires_in?: number; access_token: string; refresh_token?: string };
     const expiresAt = data.expires_in ? new Date(Date.now() + data.expires_in * 1000) : null;
 
     await prisma.organizationIntegration.update({
@@ -1500,11 +1500,16 @@ export class AsanaService {
     });
 
     if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
+      const err = ((await response.json().catch(() => ({}))) as { error_description?: string }) || {};
       throw new AsanaIntegrationError(response.status, err.error_description || 'Falha ao autenticar com o Asana.');
     }
 
-    const tokenData = await response.json();
+    const tokenData = (await response.json()) as {
+      expires_in?: number;
+      access_token: string;
+      refresh_token?: string;
+      data?: { gid?: string; name?: string; email?: string; workspaces?: Array<{ gid?: string }> };
+    };
     const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
     const workspaceId = tokenData.data?.workspaces?.[0]?.gid || null;
 

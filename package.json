@@ -16,6 +16,7 @@
     "lint": "npm run lint --workspace=@zafira/web",
     "typecheck:contracts": "npm run typecheck --workspace=@zafira/contracts",
     "typecheck:domain": "npm run typecheck --workspace=@zafira/domain",
+    "typecheck:api": "npm run typecheck --workspace=@zafira/api",
     "test:domain": "npm run test --workspace=@zafira/domain",
     "prisma:generate": "npm run prisma:generate --workspace=@zafira/api",
     "test:integration:db": "npm run test:integration:db --workspace=@zafira/api",
@@ -23,7 +24,11 @@
     "prisma:migrate:status": "npm run prisma:migrate:status --workspace=@zafira/api",
     "ci:prepare-rbac-organizations": "npm run ci:prepare-rbac-organizations --workspace=@zafira/api"
   },
-  "packageManager": "npm@11.6.2"
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": "^24.12.0",
+    "npm": "^11.6.2"
+  }
 }
 
 

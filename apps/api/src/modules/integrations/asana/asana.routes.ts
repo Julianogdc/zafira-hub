@@ -214,10 +214,10 @@ export async function asanaRoutes(app: FastifyInstance) {
     {
       preHandler: [authenticate, requirePermission('projects.view')],
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const organizationId = getOrganizationId(request);
-        const projects = await asanaService.getClientProjects(request.params.id, organizationId);
+        const projects = await asanaService.getClientProjects((request.params as any).id, organizationId);
         return reply.status(200).send(projects);
       } catch (error) {
         return handleError(error, reply);
@@ -232,11 +232,11 @@ export async function asanaRoutes(app: FastifyInstance) {
     {
       preHandler: [authenticate, requirePermission('projects.manage_links')],
     },
-    async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const organizationId = getOrganizationId(request);
         const body = linkProjectsSchema.parse(request.body);
-        const result = await asanaService.linkProjectsToClient(request.params.id, organizationId, body.projectGids);
+        const result = await asanaService.linkProjectsToClient((request.params as any).id, organizationId, body.projectGids);
         return reply.status(201).send({
           status: 'ok',
           message: `${result.linked} projeto(s) vinculado(s) com sucesso.`,
@@ -256,12 +256,12 @@ export async function asanaRoutes(app: FastifyInstance) {
       preHandler: [authenticate, requirePermission('projects.manage_links')],
     },
     async (
-      request: FastifyRequest<{ Params: { id: string; integrationId: string } }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
         const organizationId = getOrganizationId(request);
-        await asanaService.unlinkProject(request.params.id, organizationId, request.params.integrationId);
+        await asanaService.unlinkProject((request.params as any).id, organizationId, (request.params as any).integrationId);
         return reply.status(200).send({
           status: 'ok',
           message: 'Projeto desvinculado com sucesso.',
@@ -273,10 +273,10 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   // 6. GET /clients/:id/asana/tasks
-  const getTasksHandler = async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+  const getTasksHandler = async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const organizationId = getOrganizationId(request);
-      const tasks = await asanaService.getClientTasks(request.params.id, organizationId);
+      const tasks = await asanaService.getClientTasks((request.params as any).id, organizationId);
       return reply.status(200).send(tasks);
     } catch (error) {
       return handleError(error, reply);
@@ -302,12 +302,12 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.1 GET /clients/:id/asana/tasks/:taskGid (Busca rápida de tarefa individual para atualização instantânea na UI)
   const getSingleTaskHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
-      const task = await asanaService.getClientSingleTask(request.params.id, organizationId, request.params.taskGid);
+      const task = await asanaService.getClientSingleTask((request.params as any).id, organizationId, (request.params as any).taskGid);
       return reply.status(200).send(task);
     } catch (error) {
       return handleError(error, reply);
@@ -333,16 +333,16 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.2 PATCH /clients/:id/asana/tasks/:taskGid (Edição de tarefa com RBAC ADMIN/MANAGER)
   const patchSingleTaskHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const parsedBody = updateTaskSchema.parse(request.body);
       const updated = await asanaService.updateClientTask(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
+        (request.params as any).taskGid,
         parsedBody
       );
       return reply.status(200).send(updated);
@@ -370,14 +370,14 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.2.1 POST /clients/:id/asana/tasks (Criação de nova tarefa/demanda com RBAC ADMIN/MANAGER)
   const postCreateTaskHandler = async (
-    request: FastifyRequest<{ Params: { id: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const parsedBody = createTaskSchema.parse(request.body);
       const created = await asanaService.createClientTask(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
         parsedBody
       );
@@ -406,15 +406,15 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.3 GET /clients/:id/asana/projects/:projectGid/sections (Lista seções válidas do projeto)
   const getSectionsHandler = async (
-    request: FastifyRequest<{ Params: { id: string; projectGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const sections = await asanaService.getProjectSections(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.projectGid
+        (request.params as any).projectGid
       );
       return reply.status(200).send(sections);
     } catch (error) {
@@ -445,16 +445,16 @@ export async function asanaRoutes(app: FastifyInstance) {
   });
 
   const postTaskSectionHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const { sectionGid } = moveTaskSectionSchema.parse(request.body);
       const updated = await asanaService.moveTaskSection(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
+        (request.params as any).taskGid,
         sectionGid
       );
       return reply.status(200).send(updated);
@@ -488,15 +488,15 @@ export async function asanaRoutes(app: FastifyInstance) {
   });
 
   const getSubtasksHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const subtasks = await asanaService.getTaskSubtasks(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid
+        (request.params as any).taskGid
       );
       return reply.status(200).send(subtasks);
     } catch (error) {
@@ -522,16 +522,16 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   const postSubtaskHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const parsedBody = createSubtaskSchema.parse(request.body);
       const created = await asanaService.createTaskSubtask(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
+        (request.params as any).taskGid,
         parsedBody
       );
       return reply.status(201).send(created);
@@ -563,15 +563,15 @@ export async function asanaRoutes(app: FastifyInstance) {
   });
 
   const getStoriesHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const stories = await asanaService.getTaskStories(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid
+        (request.params as any).taskGid
       );
       return reply.status(200).send(stories);
     } catch (error) {
@@ -597,16 +597,16 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   const postStoryHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const { text } = addCommentSchema.parse(request.body);
       const story = await asanaService.addTaskComment(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
+        (request.params as any).taskGid,
         text
       );
       return reply.status(201).send(story);
@@ -634,15 +634,15 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.7 Anexos: GET e POST (Upload Multipart direto para Asana Cloud sem retenção na VPS)
   const getAttachmentsHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const attachments = await asanaService.getTaskAttachments(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid
+        (request.params as any).taskGid
       );
       return reply.status(200).send(attachments);
     } catch (error) {
@@ -668,7 +668,7 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   const postAttachmentHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
@@ -680,9 +680,9 @@ export async function asanaRoutes(app: FastifyInstance) {
 
       const buffer = await file.toBuffer();
       const attachment = await asanaService.uploadTaskAttachment(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
+        (request.params as any).taskGid,
         buffer,
         file.filename,
         file.mimetype
@@ -743,13 +743,13 @@ export async function asanaRoutes(app: FastifyInstance) {
   });
 
   const postTagHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const { tagGid } = addTagSchema.parse(request.body);
-      await asanaService.addTagToTask(request.params.id, organizationId, request.params.taskGid, tagGid);
+      await asanaService.addTagToTask((request.params as any).id, organizationId, (request.params as any).taskGid, tagGid);
       return reply.status(200).send({ status: 'ok', message: 'Tag vinculada com sucesso.' });
     } catch (error) {
       return handleError(error, reply);
@@ -774,16 +774,16 @@ export async function asanaRoutes(app: FastifyInstance) {
   );
 
   const deleteTagHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string; tagGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       await asanaService.removeTagFromTask(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid,
-        request.params.tagGid
+        (request.params as any).taskGid,
+        (request.params as any).tagGid
       );
       return reply.status(200).send({ status: 'ok', message: 'Tag desvinculada com sucesso.' });
     } catch (error) {
@@ -810,15 +810,15 @@ export async function asanaRoutes(app: FastifyInstance) {
 
   // 6.9 Dependências: GET
   const getDependenciesHandler = async (
-    request: FastifyRequest<{ Params: { id: string; taskGid: string } }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
     try {
       const organizationId = getOrganizationId(request);
       const dependencies = await asanaService.getTaskDependencies(
-        request.params.id,
+        (request.params as any).id,
         organizationId,
-        request.params.taskGid
+        (request.params as any).taskGid
       );
       return reply.status(200).send(dependencies);
     } catch (error) {
@@ -895,183 +895,11 @@ export async function asanaRoutes(app: FastifyInstance) {
     }
   );
 
-  const callbackHandler = async (
-    request: FastifyRequest<{ Querystring: { code?: string; state?: string; error?: string } }>,
-    reply: FastifyReply
-  ) => {
-    const { code, state: stateParam, error } = request.query;
-    const targetOrigin = getTargetOrigin();
-
-    // Limpa opcionalmente o cookie legado se presente
-    if (request.cookies.asana_oauth_nonce) {
-      reply.clearCookie('asana_oauth_nonce', { path: '/' });
-    }
-
-    if (error || !code || !stateParam) {
-      const errDescription = error || 'Autorização cancelada ou recusada.';
-      return reply.type('text/html').send(`
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-          <head>
-            <meta charset="utf-8">
-            <title>Autorização Asana - Zafira Hub</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
-              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
-              p { margin: 0 0 20px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
-              button { background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
-              button:hover { background: #3f3f46; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">✕</div>
-              <h2>Conexão não concluída</h2>
-              <p>${errDescription}</p>
-              <button onclick="window.close()">Fechar Janela</button>
-            </div>
-            <script>
-              const targetOrigin = "${targetOrigin}";
-              try {
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errDescription}' }, targetOrigin);
-                }
-              } catch (e) {}
-            </script>
-          </body>
-        </html>
-      `);
-    }
-
-    try {
-      // Validação criptográfica HMAC + verificação e consumo atômico no banco de dados (uso único garantido)
-      const verified = await verifyAndConsumeOAuthState(prisma, stateParam, 'ASANA');
-      const organizationId = verified.organizationId;
-      const redirectUri = getOAuthRedirectUri();
-
-      // Executa a troca do código por tokens cifrados com AES-256-GCM
-      await asanaService.exchangeOAuthCode(organizationId, code, redirectUri);
-
-      return reply.type('text/html').send(`
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-          <head>
-            <meta charset="utf-8">
-            <title>Asana Conectado - Zafira Hub</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2); color: #10b981; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
-              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
-              p { margin: 0 0 16px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
-              .badge { display: inline-block; padding: 4px 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 20px; font-size: 12px; color: #71717a; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">✓</div>
-              <h2>Asana Conectado!</h2>
-              <p>A autorização foi validada com sucesso. O Zafira Hub já está sincronizado com seu Asana.</p>
-              <div class="badge">Fechando esta janela em instantes...</div>
-            </div>
-            <script>
-              const targetOrigin = "${targetOrigin}";
-              try {
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_SUCCESS' }, targetOrigin);
-                }
-              } catch (e) {
-                console.error(e);
-              }
-              setTimeout(function() {
-                window.close();
-              }, 1200);
-            </script>
-          </body>
-        </html>
-      `);
-    } catch (err: any) {
-      const errMsg = err?.message || 'Falha na validação de segurança';
-      return reply.type('text/html').send(`
-        <!DOCTYPE html>
-        <html lang="pt-BR">
-          <head>
-            <meta charset="utf-8">
-            <title>Erro de Conexão - Zafira Hub</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-              .card { background: #18181b; border: 1px solid #27272a; border-radius: 12px; padding: 32px; text-align: center; max-width: 420px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-              .icon { width: 48px; height: 48px; border-radius: 50%; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 22px; font-weight: bold; }
-              h2 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
-              p { margin: 0 0 20px; font-size: 14px; color: #a1a1aa; line-height: 1.5; }
-              button { background: #27272a; border: 1px solid #3f3f46; color: #f4f4f5; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500; }
-              button:hover { background: #3f3f46; }
-            </style>
-          </head>
-          <body>
-            <div class="card">
-              <div class="icon">✕</div>
-              <h2>Erro de Validação</h2>
-              <p>${errMsg}</p>
-              <button onclick="window.close()">Fechar Janela</button>
-            </div>
-            <script>
-              const targetOrigin = "${targetOrigin}";
-              try {
-                if (window.opener) {
-                  window.opener.postMessage({ type: 'ASANA_AUTH_ERROR', error: '${errMsg}' }, targetOrigin);
-                }
-              } catch (e) {}
-            </script>
-          </body>
-        </html>
-      `);
-    }
-  };
-
-  // 8. GET /integrations/asana/oauth/callback (Valida state criptografado e realiza token exchange seguro no backend)
-  // CLASSE: MACHINE_AUTHENTICATED
-  app.get('/integrations/asana/oauth/callback', callbackHandler);
-  // CLASSE: MACHINE_AUTHENTICATED
-  app.get('/api/integrations/asana/oauth/callback', callbackHandler);
-
-  // 9. GET /integrations/asana/events (Canal SSE autenticado e isolado por organização)
-  const eventsHandler = async (request: FastifyRequest, reply: FastifyReply) => {
-    try {
-      const organizationId = getOrganizationId(request);
-      sseHub.register(organizationId, reply);
-    } catch (error) {
-      return handleError(error, reply);
-    }
-  };
-
-  // CLASSE: HUMAN_AUTHENTICATED
-  app.get(
-    '/integrations/asana/events',
-    {
-      preHandler: [authenticate, requirePermission('deliverables.view')],
-    },
-    eventsHandler
-  );
-  // CLASSE: HUMAN_AUTHENTICATED
-  app.get(
-    '/api/integrations/asana/events',
-    {
-      preHandler: [authenticate, requirePermission('deliverables.view')],
-    },
-    eventsHandler
-  );
-
-  // 10. POST /integrations/asana/webhooks/:subscriptionId (Endpoint público para Webhooks do Asana)
   const webhookHandler = async (
-    request: FastifyRequest<{
-      Params: { subscriptionId: string };
-    }>,
+    request: FastifyRequest,
     reply: FastifyReply
   ) => {
-    const { subscriptionId } = request.params;
+    const { subscriptionId } = (request.params || {}) as { subscriptionId: string };
     const xHookSecret = request.headers['x-hook-secret'] as string | undefined;
     const xHookSignature = request.headers['x-hook-signature'] as string | undefined;
 

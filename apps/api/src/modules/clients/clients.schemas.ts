@@ -20,11 +20,11 @@ export const createClientSchema = z
       .uuid('ID do responsável deve ser um UUID válido')
       .optional(),
     contractValue: z
-      .number({ invalid_type_error: 'O valor do contrato deve ser numérico' })
+      .number({ message: 'O valor do contrato deve ser numérico' })
       .nonnegative('O valor do contrato não pode ser negativo')
       .optional(),
-    startDate: z.coerce.date({ invalid_type_error: 'Data inicial inválida' }).optional(),
-    endDate: z.coerce.date({ invalid_type_error: 'Data final inválida' }).optional(),
+    startDate: z.coerce.date({ message: 'Data inicial inválida' }).optional(),
+    endDate: z.coerce.date({ message: 'Data final inválida' }).optional(),
     notes: z.string().optional(),
   })
   .refine(
@@ -60,12 +60,12 @@ export const updateClientSchema = z
       .optional()
       .nullable(),
     contractValue: z
-      .number({ invalid_type_error: 'O valor do contrato deve ser numérico' })
+      .number({ message: 'O valor do contrato deve ser numérico' })
       .nonnegative('O valor do contrato não pode ser negativo')
       .optional()
       .nullable(),
-    startDate: z.coerce.date({ invalid_type_error: 'Data inicial inválida' }).optional().nullable(),
-    endDate: z.coerce.date({ invalid_type_error: 'Data final inválida' }).optional().nullable(),
+    startDate: z.coerce.date({ message: 'Data inicial inválida' }).optional().nullable(),
+    endDate: z.coerce.date({ message: 'Data final inválida' }).optional().nullable(),
     notes: z.string().optional().nullable(),
   })
   .refine(

@@ -16,6 +16,7 @@
         "ci:prepare-rbac-organizations": "tsx src/scripts/prepare-rbac-ci-organizations.ts",
         "test": "tsx --test src/lib/__tests__/*.test.ts src/modules/**/__tests__/*.test.ts",
         "test:integration:db": "tsx --test src/integration-tests/*.test.ts",
+        "typecheck": "tsc --noEmit -p tsconfig.typecheck.json",
         "prisma:generate": "prisma generate",
         "prisma:migrate:deploy": "prisma migrate deploy",
         "prisma:migrate:status": "prisma migrate status"

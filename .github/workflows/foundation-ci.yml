@@ -37,6 +37,9 @@ jobs:
       - name: Typecheck Domain
         run: npm run typecheck:domain
 
+      - name: Typecheck API
+        run: npm run typecheck:api
+
       - name: Build Web
         run: npm run build:web
 
@@ -107,3 +110,27 @@ jobs:
 
       - name: Database Integration Tests
         run: npm run test:integration:db
+
+  docker-build:
+    name: Docker Build Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API Docker Image
+        run: |
+          docker build \
+            -f apps/api/Dockerfile \
+            -t zafira-hub-api:ci-test \
+            .
+
+      - name: Build Web Docker Image
+        run: |
+          docker build \
+            -f apps/web/Dockerfile \
+            -t zafira-hub-web:ci-test \
+            .

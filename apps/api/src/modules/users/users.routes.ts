@@ -1,4 +1,4 @@
-import { FastifyInstance, FastifyPluginAsync, FastifyRequest, FastifyReply } from 'fastify';
+import { FastifyInstance, FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { usersService, UserAdminError } from './users.service.js';
 import {
@@ -19,10 +19,11 @@ function handleControllerError(err: any, reply: FastifyReply) {
     });
   }
 
+  // Falha inesperada
   return reply.status(500).send({
     status: 'error',
-    code: 'INTERNAL_ERROR',
-    message: err.message || 'Erro interno do servidor',
+    code: 'INTERNAL_SERVER_ERROR',
+    message: 'Erro interno no processamento de usuários da organização',
   });
 }
 
@@ -37,7 +38,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       preHandler: [authenticate, requirePermission('users.view')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+      const organizationId = request.authorizationResult!.organizationId!;
 
       const parseResult = ListUsersQuerySchema.safeParse(request.query);
       if (!parseResult.success) {
@@ -45,7 +46,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Parâmetros de busca inválidos',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -70,9 +71,9 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.view')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
-      const { membershipId } = request.params;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
+      const { membershipId } = request.params as { membershipId: string };
 
       try {
         const result = await usersService.getMemberDetail(organizationId, membershipId);
@@ -96,7 +97,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
       preHandler: [authenticate, requirePermission('users.invite')],
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
 
       const parseResult = InviteUserRequestSchema.safeParse(request.body);
@@ -105,7 +106,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Dados do convite inválidos',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -131,10 +132,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.invite')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       try {
         const result = await usersService.reissueInvitation(organizationId, actorUserId, membershipId);
@@ -157,10 +158,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.edit_role')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       const parseResult = UpdateUserRoleRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -168,7 +169,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Papel (role) informado é inválido',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -193,10 +194,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.edit_permissions')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       const parseResult = UpdateUserPermissionsRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -204,7 +205,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Alterações de permissão inválidas',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -234,10 +235,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.assign_clients')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       const parseResult = AssignClientsRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -245,7 +246,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Lista de clientes inválida',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -270,10 +271,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.suspend')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       const parseResult = UpdateUserStatusRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -281,7 +282,7 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
           status: 'error',
           code: 'VALIDATION_ERROR',
           message: 'Status informado é inválido. Permitido apenas ACTIVE ou SUSPENDED',
-          details: parseResult.error.errors,
+          details: parseResult.error.issues,
         });
       }
 
@@ -306,10 +307,10 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('users.remove')],
     },
-    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
-      const organizationId = request.authorizationResult!.organizationId;
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId!;
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const { membershipId } = request.params;
+      const { membershipId } = request.params as { membershipId: string };
 
       try {
         const result = await usersService.removeMember(organizationId, actorUserId, membershipId);

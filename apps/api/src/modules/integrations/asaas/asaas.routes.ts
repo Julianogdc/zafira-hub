@@ -38,8 +38,9 @@ export function createAsaasRoutes(customService?: AsaasService) {
     return undefined;
   }
 
-  function extractClientId(params: ClientParams): string {
-    return (params.clientId || params.id || '').trim();
+  function extractClientId(params: unknown): string {
+    const p = (params || {}) as ClientParams;
+    return (p.clientId || p.id || '').trim();
   }
 
   return async function asaasRoutes(app: FastifyInstance) {
@@ -47,7 +48,7 @@ export function createAsaasRoutes(customService?: AsaasService) {
     // 1. GET /clients/:clientId/integrations/asaas/financial-summary
     // =========================================================================
     const getFinancialSummaryHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -111,7 +112,7 @@ export function createAsaasRoutes(customService?: AsaasService) {
     // 3. POST /clients/:clientId/integrations/asaas/sync (Sincronização restrita a 1 cliente)
     // =========================================================================
     const syncClientHandler = async (
-      request: FastifyRequest<{ Params: ClientParams }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -148,18 +149,7 @@ export function createAsaasRoutes(customService?: AsaasService) {
     // 4. GET /integrations/asaas/financial-overview (Visão financeira global do Hub)
     // =========================================================================
     const getFinancialOverviewHandler = async (
-      request: FastifyRequest<{
-        Querystring: {
-          period?: string;
-          startDate?: string;
-          endDate?: string;
-          clientId?: string;
-          status?: string;
-          search?: string;
-          page?: string;
-          limit?: string;
-        };
-      }>,
+      request: FastifyRequest,
       reply: FastifyReply
     ) => {
       try {
@@ -171,15 +161,26 @@ export function createAsaasRoutes(customService?: AsaasService) {
           });
         }
 
+        const query = (request.query || {}) as {
+          period?: string;
+          startDate?: string;
+          endDate?: string;
+          clientId?: string;
+          status?: string;
+          search?: string;
+          page?: string;
+          limit?: string;
+        };
+
         const filters = {
-          period: request.query.period,
-          startDate: request.query.startDate,
-          endDate: request.query.endDate,
-          clientId: request.query.clientId,
-          status: request.query.status,
-          search: request.query.search,
-          page: request.query.page ? parseInt(request.query.page, 10) : undefined,
-          limit: request.query.limit ? parseInt(request.query.limit, 10) : undefined,
+          period: query.period,
+          startDate: query.startDate,
+          endDate: query.endDate,
+          clientId: query.clientId,
+          status: query.status,
+          search: query.search,
+          page: query.page ? parseInt(query.page, 10) : undefined,
+          limit: query.limit ? parseInt(query.limit, 10) : undefined,
         };
 
         const result = await service.getFinancialOverview(organizationId, filters);

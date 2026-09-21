@@ -22,7 +22,7 @@ export const auditRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     {
       preHandler: [authenticate, requirePermission('admin.view_audit')],
     },
-    async (request: FastifyRequest<{ Querystring: AuditQuery }>, reply) => {
+    async (request: FastifyRequest, reply) => {
       const auth = request.authContext;
       const headerOrg = request.headers['x-organization-id'] as string | undefined;
       const organizationId = (auth?.type === 'user' ? auth.activeOrganizationId : null) || headerOrg;
@@ -35,7 +35,8 @@ export const auditRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         });
       }
 
-      const { limit, cursor, action, entityType, actorUserId } = request.query;
+      const query = (request.query || {}) as AuditQuery;
+      const { limit, cursor, action, entityType, actorUserId } = query;
 
       const parsedLimit = limit ? parseInt(limit, 10) : 50;
 

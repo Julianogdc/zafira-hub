@@ -122,12 +122,12 @@ export const organizationConfigRoutes: FastifyPluginAsync = async (app: FastifyI
     {
       preHandler: [authenticate, requirePermission('admin.configure_organization')],
     },
-    async (request: FastifyRequest<{ Body: UpdateConfigInput }>, reply: FastifyReply) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const organizationId = getOrganizationContext(request, reply);
       if (!organizationId) return;
 
       const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
-      const body = request.body || {};
+      const body = (request.body || {}) as UpdateConfigInput;
 
       try {
         const updated = await organizationConfigService.updateConfig(organizationId, actorUserId, body);
@@ -185,15 +185,12 @@ export const organizationConfigRoutes: FastifyPluginAsync = async (app: FastifyI
     {
       preHandler: [authenticate, requirePermission('admin.configure_organization')],
     },
-    async (
-      request: FastifyRequest<{ Params: { key: string }; Body: { enabled: boolean } }>,
-      reply: FastifyReply
-    ) => {
+    async (request: FastifyRequest, reply: FastifyReply) => {
       const organizationId = getOrganizationContext(request, reply);
       if (!organizationId) return;
 
-      const { key } = request.params;
-      const { enabled } = request.body || {};
+      const { key } = request.params as { key: string };
+      const { enabled } = (request.body || {}) as { enabled?: boolean };
 
       if (!isValidFeatureFlagKey(key)) {
         return reply.status(400).send({
