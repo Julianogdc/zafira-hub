@@ -595,7 +595,7 @@ jobs:
             "${API_REF}"
 
           echo "Aguardando container api-hml atingir status healthy..."
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
             echo "api-hml status ($i): $STATUS"
             if [ "$STATUS" = "healthy" ]; then
@@ -614,7 +614,7 @@ jobs:
 
           echo "Validando liveness e readiness da API..."
           docker exec api-hml node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Liveness:', data); if (data.status !== 'ok') process.exit(1); })"
-          docker exec api-hml node -e "fetch('http://127.0.0.1:3001/health/database').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Readiness:', data); if (data.status !== 'connected') process.exit(1); })"
+          docker exec api-hml node -e "fetch('http://127.0.0.1:3001/health/database').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Readiness:', data); if (data.status !== 'ok' || data.database !== 'connected') process.exit(1); })"
           echo "API Liveness & Database Readiness: PASS"
 
       - name: Launch Staging Web Container
@@ -685,7 +685,7 @@ jobs:
             "${ROLLBACK_API}"
 
           echo "Aguardando api-hml (rollback) atingir status healthy..."
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
             if [ "$STATUS" = "healthy" ]; then
               break
@@ -737,7 +737,7 @@ jobs:
             -e DATABASE_URL="${DATABASE_URL}" \
             "${CURRENT_API}"
 
-          for i in $(seq 1 30); do
+          for i in $(seq 1 40); do
             STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
             if [ "$STATUS" = "healthy" ]; then break; fi
             sleep 2

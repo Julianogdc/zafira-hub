@@ -30,14 +30,14 @@ if ! echo "${HEALTH_BODY}" | grep -q '"status":"ok"'; then
 fi
 echo "[+] GET /hub-api/health => 200 OK (status: ok)"
 
-# 3. Teste do Readiness do Banco via Reverse Proxy (GET /hub-api/health/database => 200 com status connected)
+# 3. Teste do Readiness do Banco via Reverse Proxy (GET /hub-api/health/database => 200 com database: connected)
 echo "[*] Testando GET /hub-api/health/database ..."
 DB_HEALTH_BODY=$(curl -s "${WEB_BASE_URL}/hub-api/health/database")
-if ! echo "${DB_HEALTH_BODY}" | grep -q '"status":"connected"'; then
-  echo "[-] FALHA: GET /hub-api/health/database não retornou connected. Resposta: ${DB_HEALTH_BODY}" >&2
+if ! echo "${DB_HEALTH_BODY}" | grep -q '"database":"connected"'; then
+  echo "[-] FALHA: GET /hub-api/health/database não retornou database connected. Resposta: ${DB_HEALTH_BODY}" >&2
   exit 1
 fi
-echo "[+] GET /hub-api/health/database => 200 OK (status: connected)"
+echo "[+] GET /hub-api/health/database => 200 OK (database: connected)"
 
 # 4. Teste de Métricas não autenticado (GET /hub-api/metrics sem key => 401)
 echo "[*] Testando GET /hub-api/metrics sem autenticação ..."
