@@ -172,10 +172,7 @@ export class UsersService {
       this.db.rolePermission.findMany({ where: { role: member.role } }),
     ]);
 
-    const rolePermMap = new Map<string, boolean>();
-    for (const rp of rolePermissions) {
-      rolePermMap.set(rp.permissionCode, rp.granted);
-    }
+    const rolePermissionCodes = new Set(rolePermissions.map((rp) => rp.permissionCode));
 
     const memberOverrideMap = new Map<string, boolean>();
     for (const p of member.permissions) {
@@ -183,7 +180,7 @@ export class UsersService {
     }
 
     const permissionsMatrix = allPermissions.map((p) => {
-      const roleGranted = rolePermMap.get(p.code) ?? false;
+      const roleGranted = rolePermissionCodes.has(p.code);
       const override = memberOverrideMap.has(p.code) ? memberOverrideMap.get(p.code)! : null;
       const effective = override !== null ? override : roleGranted;
 

@@ -22,14 +22,14 @@ test('UsersService - Unit Tests', async (t) => {
     { code: 'admin.configure_organization', area: 'admin', description: 'Configurar organização' },
   ];
   const rolePermissionsCatalog = [
-    { role: 'ADMIN', permissionCode: 'clients.view', granted: true },
-    { role: 'ADMIN', permissionCode: 'users.view', granted: true },
-    { role: 'ADMIN', permissionCode: 'users.invite', granted: true },
-    { role: 'ADMIN', permissionCode: 'users.edit_permissions', granted: true },
-    { role: 'ADMIN', permissionCode: 'admin.configure_organization', granted: true },
-    { role: 'MANAGER', permissionCode: 'clients.view', granted: true },
-    { role: 'MANAGER', permissionCode: 'users.view', granted: true },
-    { role: 'MEMBER', permissionCode: 'clients.view', granted: true },
+    { role: 'ADMIN', permissionCode: 'clients.view' },
+    { role: 'ADMIN', permissionCode: 'users.view' },
+    { role: 'ADMIN', permissionCode: 'users.invite' },
+    { role: 'ADMIN', permissionCode: 'users.edit_permissions' },
+    { role: 'ADMIN', permissionCode: 'admin.configure_organization' },
+    { role: 'MANAGER', permissionCode: 'clients.view' },
+    { role: 'MANAGER', permissionCode: 'users.view' },
+    { role: 'MEMBER', permissionCode: 'clients.view' },
   ];
 
   function resetStores() {
@@ -399,6 +399,20 @@ test('UsersService - Unit Tests', async (t) => {
   await t.test('17 a 23. updatePermissions e matriz: overrides, validação, proteção de lockout do último admin', async () => {
     setupBasicOrg();
 
+    // 0. ADMIN sem override => roleGranted=true, override=null, effective=true
+    const adminDetail = await service.getMemberDetail(orgA, 'mem_admin_a');
+    const adminUserView = adminDetail.permissions.find((p) => p.code === 'users.view');
+    assert.strictEqual(adminUserView?.roleGranted, true);
+    assert.strictEqual(adminUserView?.override, null);
+    assert.strictEqual(adminUserView?.effective, true);
+
+    // 0b. MEMBER sem override e sem RolePermission users.view => roleGranted=false, override=null, effective=false
+    const memberDetailInitial = await service.getMemberDetail(orgA, 'mem_member_a');
+    const memberUserViewInitial = memberDetailInitial.permissions.find((p) => p.code === 'users.view');
+    assert.strictEqual(memberUserViewInitial?.roleGranted, false);
+    assert.strictEqual(memberUserViewInitial?.override, null);
+    assert.strictEqual(memberUserViewInitial?.effective, false);
+
     // 17 & 18. Override true e false para member
     await service.updatePermissions(orgA, actorUserId, 'mem_member_a', {
       changes: [
@@ -411,8 +425,13 @@ test('UsersService - Unit Tests', async (t) => {
     const invPerm = detail.permissions.find((p) => p.code === 'users.invite');
     const viewPerm = detail.permissions.find((p) => p.code === 'clients.view');
 
+    // users.invite: roleGranted=false, override=true, effective=true
+    assert.strictEqual(invPerm?.roleGranted, false);
     assert.strictEqual(invPerm?.override, true);
     assert.strictEqual(invPerm?.effective, true);
+
+    // clients.view: roleGranted=true, override=false, effective=false
+    assert.strictEqual(viewPerm?.roleGranted, true);
     assert.strictEqual(viewPerm?.override, false);
     assert.strictEqual(viewPerm?.effective, false);
 
@@ -422,6 +441,7 @@ test('UsersService - Unit Tests', async (t) => {
     });
     const detailAfter = await service.getMemberDetail(orgA, 'mem_member_a');
     const invPermAfter = detailAfter.permissions.find((p) => p.code === 'users.invite');
+    assert.strictEqual(invPermAfter?.roleGranted, false);
     assert.strictEqual(invPermAfter?.override, null);
     assert.strictEqual(invPermAfter?.effective, false); // Member não tem users.invite default
 

@@ -290,28 +290,44 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     // 8. Manager A não edita Client B pelo clientId
     await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, clientB.id, { name: 'xxx' }));
 
-    // 9. Member A com override clients.edit=true pode editar Client A Assigned
-    const clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
-    await svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAAssigned.id, { name: 'Client A Assigned Edited' });
-    
-    // 10. O mesmo Member A NÃO pode editar Client A Unassigned
-    const clientAUnassigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Unassigned' } });
-    await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAUnassigned.id, { name: 'xxx' }));
+    let newClient: any = null;
+    let clientAAssigned: any = null;
 
-    // 11. O mesmo Member A NÃO pode editar Client B
-    await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientB.id, { name: 'xxx' }));
+    try {
+      // 9. Member A com override clients.edit=true pode editar Client A Assigned
+      clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
+      await svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAAssigned.id, { name: 'Client A Assigned Edited' });
+      // 10. O mesmo Member A NÃO pode editar Client A Unassigned
+      const clientAUnassigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Unassigned' } });
+      await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAUnassigned.id, { name: 'xxx' }));
 
-    // 12. create grava organizationId da organização ativa
-    const newClient = await svc.createClient({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, {
-      name: 'New Client A',
-      document: '111',
-      legalName: 'NC A'
-    });
-    assert.strictEqual(newClient.organizationId, orgA.id);
+      // 11. O mesmo Member A NÃO pode editar Client B
+      await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientB.id, { name: 'xxx' }));
 
-    // 13. update mantém organizationId
-    const updatedClient = await svc.updateClient({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, newClient.id, { name: 'New Client A Updated' });
-    assert.strictEqual(updatedClient.organizationId, orgA.id);
+      // 12. create grava organizationId da organização ativa
+      newClient = await svc.createClient({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, {
+        name: 'New Client A',
+        document: '111',
+        legalName: 'NC A'
+      });
+      assert.strictEqual(newClient.organizationId, orgA.id);
+
+      // 13. update mantém organizationId
+      const updatedClient = await svc.updateClient({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, newClient.id, { name: 'New Client A Updated' });
+      assert.strictEqual(updatedClient.organizationId, orgA.id);
+    } finally {
+      // Restaura o nome de Client A Assigned para não poluir outros testes
+      if (clientAAssigned) {
+        await prisma.client.update({
+          where: { id: clientAAssigned.id },
+          data: { name: 'Client A Assigned' },
+        });
+      }
+      // Remove o cliente temporário criado no teste N
+      if (newClient) {
+        await prisma.client.deleteMany({ where: { id: newClient.id } });
+      }
+    }
   });
 
   await t.test('O - Teste Direto A -> B (CROSS_ORG_DENY)', async () => {
@@ -593,8 +609,25 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
     const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
     const adminAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
-    const clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
-    const clientB = await prisma.client.findFirstOrThrow({ where: { organizationId: orgB.id } });
+    const managerAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'manager_a@zafira.test' } });
+
+    // Fixtures de Client isoladas para o subteste S
+    const clientSOrgA = await prisma.client.create({
+      data: {
+        organizationId: orgA.id,
+        document: '99911122201',
+        name: 'CI User Admin S Client A',
+        legalName: 'CI User Admin S Client A LTDA',
+      },
+    });
+    const clientSOrgB = await prisma.client.create({
+      data: {
+        organizationId: orgB.id,
+        document: '99911122202',
+        name: 'CI User Admin S Client B',
+        legalName: 'CI User Admin S Client B LTDA',
+      },
+    });
 
     // 1 & 2. Permissions users.view e users.edit_permissions persistidas
     const permView = await prisma.permission.findUnique({ where: { code: 'users.view' } });
@@ -602,7 +635,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     assert.ok(permView, 'Permission users.view deve existir persistida');
     assert.ok(permEditPerms, 'Permission users.edit_permissions deve existir persistida');
 
-    // 3, 4, 5. RolePermissions defaults
+    // 3, 4, 5. RolePermissions defaults (checagem de existência no PostgreSQL)
     const adminView = await prisma.rolePermission.findUnique({
       where: { role_permissionCode: { role: 'ADMIN', permissionCode: 'users.view' } },
     });
@@ -616,10 +649,34 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       where: { role_permissionCode: { role: 'MEMBER', permissionCode: 'users.view' } },
     });
 
-    assert.strictEqual(adminView?.granted, true, 'ADMIN deve possuir users.view');
-    assert.strictEqual(adminEditPerms?.granted, true, 'ADMIN deve possuir users.edit_permissions');
-    assert.strictEqual(managerView?.granted, true, 'MANAGER deve possuir users.view');
-    assert.strictEqual(memberView, null, 'MEMBER NÃO deve possuir users.view');
+    assert.ok(adminView, 'ADMIN deve possuir RolePermission users.view');
+    assert.ok(adminEditPerms, 'ADMIN deve possuir RolePermission users.edit_permissions');
+    assert.ok(managerView, 'MANAGER deve possuir RolePermission users.view');
+    assert.strictEqual(memberView, null, 'MEMBER NÃO deve possuir RolePermission users.view');
+
+    // Validação da Matriz de Permissões contra PostgreSQL Real
+    const adminMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgA.id, userId: adminAUser.id } },
+    });
+    const managerMem = await prisma.organizationMember.findUniqueOrThrow({
+      where: { organizationId_userId: { organizationId: orgA.id, userId: managerAUser.id } },
+    });
+
+    const adminDetail = await usersService.getMemberDetail(orgA.id, adminMem.id);
+    const admView = adminDetail.permissions.find((p) => p.code === 'users.view');
+    const admEdit = adminDetail.permissions.find((p) => p.code === 'users.edit_permissions');
+    assert.strictEqual(admView?.roleGranted, true, 'ADMIN: users.view deve ter roleGranted true');
+    assert.strictEqual(admView?.effective, true, 'ADMIN: users.view deve ter effective true');
+    assert.strictEqual(admEdit?.roleGranted, true, 'ADMIN: users.edit_permissions deve ter roleGranted true');
+    assert.strictEqual(admEdit?.effective, true, 'ADMIN: users.edit_permissions deve ter effective true');
+
+    const managerDetail = await usersService.getMemberDetail(orgA.id, managerMem.id);
+    const mgrView = managerDetail.permissions.find((p) => p.code === 'users.view');
+    const mgrEdit = managerDetail.permissions.find((p) => p.code === 'users.edit_permissions');
+    assert.strictEqual(mgrView?.roleGranted, true, 'MANAGER: users.view deve ter roleGranted true');
+    assert.strictEqual(mgrView?.effective, true, 'MANAGER: users.view deve ter effective true');
+    assert.strictEqual(mgrEdit?.roleGranted, false, 'MANAGER: users.edit_permissions deve ter roleGranted false');
+    assert.strictEqual(mgrEdit?.effective, false, 'MANAGER: users.edit_permissions deve ter effective false');
 
     // 6, 7, 8. Invite pending em Org A cria User global INVITED e Membership A INVITED
     const inviteRes = await usersService.inviteUser(orgA.id, adminAUser.id, {
@@ -649,13 +706,13 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
       // 10 & 11. Assignment aceita Client A e rejeita Client B (alien)
       const assignRes = await usersService.assignClients(orgA.id, adminAUser.id, inviteRes.membershipId, {
-        clientIds: [clientAAssigned.id],
+        clientIds: [clientSOrgA.id],
       });
-      assert.deepStrictEqual(assignRes.clientIds, [clientAAssigned.id]);
+      assert.deepStrictEqual(assignRes.clientIds, [clientSOrgA.id]);
 
       await assert.rejects(
         usersService.assignClients(orgA.id, adminAUser.id, inviteRes.membershipId, {
-          clientIds: [clientB.id],
+          clientIds: [clientSOrgB.id],
         }),
         (err: any) => err instanceof UserAdminError && err.code === 'CLIENT_NOT_IN_ORGANIZATION'
       );
@@ -739,9 +796,11 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       await prisma.organizationMember.deleteMany({ where: { userId: multiMemUser.id } });
       await prisma.user.delete({ where: { id: multiMemUser.id } });
     } finally {
-      // Cleanup do usuário convidado
+      // Cleanup do usuário convidado e das fixtures de Client do teste S
+      await prisma.userClientAssignment.deleteMany({ where: { organizationMemberId: inviteRes.membershipId } });
       await prisma.organizationMember.deleteMany({ where: { id: inviteRes.membershipId } });
       await prisma.user.deleteMany({ where: { id: inviteRes.userId } });
+      await prisma.client.deleteMany({ where: { id: { in: [clientSOrgA.id, clientSOrgB.id] } } });
     }
   });
 });
