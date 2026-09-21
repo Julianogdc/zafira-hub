@@ -10,10 +10,22 @@ import {
 test('ADMIN possui todo catálogo default', () => {
   assert.strictEqual(roleHasDefaultPermission('ADMIN', 'admin.configure_organization'), true);
   assert.strictEqual(roleHasDefaultPermission('ADMIN', 'clients.edit'), true);
+  assert.strictEqual(roleHasDefaultPermission('ADMIN', 'users.view'), true);
+  assert.strictEqual(roleHasDefaultPermission('ADMIN', 'users.edit_permissions'), true);
 });
 
 test('MANAGER não possui admin.configure_organization', () => {
   assert.strictEqual(roleHasDefaultPermission('MANAGER', 'admin.configure_organization'), false);
+});
+
+test('MANAGER possui users.view mas não possui users.edit_permissions nem users.invite', () => {
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.view'), true);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.assign_clients'), true);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.edit_permissions'), false);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.invite'), false);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.edit_role'), false);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.suspend'), false);
+  assert.strictEqual(roleHasDefaultPermission('MANAGER', 'users.remove'), false);
 });
 
 test('MANAGER não possui financial.edit', () => {
@@ -24,6 +36,11 @@ test('MEMBER possui clients.view', () => {
   assert.strictEqual(roleHasDefaultPermission('MEMBER', 'clients.view'), true);
 });
 
+test('MEMBER não possui users.view nem users.edit_permissions', () => {
+  assert.strictEqual(roleHasDefaultPermission('MEMBER', 'users.view'), false);
+  assert.strictEqual(roleHasDefaultPermission('MEMBER', 'users.edit_permissions'), false);
+});
+
 test('MEMBER não possui clients.edit', () => {
   assert.strictEqual(roleHasDefaultPermission('MEMBER', 'clients.edit'), false);
 });
@@ -31,6 +48,8 @@ test('MEMBER não possui clients.edit', () => {
 test('permission code inválido não pode ser tratado como válido', () => {
   assert.strictEqual(isValidPermissionCode('invalid.permission'), false);
   assert.strictEqual(isValidPermissionCode('clients.edit'), true);
+  assert.strictEqual(isValidPermissionCode('users.view'), true);
+  assert.strictEqual(isValidPermissionCode('users.edit_permissions'), true);
 });
 
 // --- Testes do Policy Engine Puro de Runtime ---

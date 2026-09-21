@@ -6,6 +6,7 @@ import { ClientsService } from '../modules/clients/clients.service.js';
 import { AuditService } from '../modules/audit/audit.service.js';
 import { OrganizationConfigService } from '../modules/organization-config/organization-config.service.js';
 import { FeatureFlagService } from '../modules/organization-config/feature-flag.service.js';
+import { UsersService, UserAdminError } from '../modules/users/users.service.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 
 // --- GUARD DE SEGURANÇA (ETAPA F) ---
@@ -582,6 +583,165 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       // Cleanup dos usuários de teste
       await prisma.organizationMember.deleteMany({ where: { userId: { in: [multiUser.id, inactiveUser.id] } } });
       await prisma.user.deleteMany({ where: { id: { in: [multiUser.id, inactiveUser.id] } } });
+    }
+  });
+
+  await t.test('S - Gestão Administrativa de Usuários da Organização com PostgreSQL Real', async () => {
+    const usersService = new UsersService(prisma);
+    const auditService = new AuditService(prisma);
+
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+    const adminAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
+    const clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
+    const clientB = await prisma.client.findFirstOrThrow({ where: { organizationId: orgB.id } });
+
+    // 1 & 2. Permissions users.view e users.edit_permissions persistidas
+    const permView = await prisma.permission.findUnique({ where: { code: 'users.view' } });
+    const permEditPerms = await prisma.permission.findUnique({ where: { code: 'users.edit_permissions' } });
+    assert.ok(permView, 'Permission users.view deve existir persistida');
+    assert.ok(permEditPerms, 'Permission users.edit_permissions deve existir persistida');
+
+    // 3, 4, 5. RolePermissions defaults
+    const adminView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'ADMIN', permissionCode: 'users.view' } },
+    });
+    const adminEditPerms = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'ADMIN', permissionCode: 'users.edit_permissions' } },
+    });
+    const managerView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'MANAGER', permissionCode: 'users.view' } },
+    });
+    const memberView = await prisma.rolePermission.findUnique({
+      where: { role_permissionCode: { role: 'MEMBER', permissionCode: 'users.view' } },
+    });
+
+    assert.strictEqual(adminView?.granted, true, 'ADMIN deve possuir users.view');
+    assert.strictEqual(adminEditPerms?.granted, true, 'ADMIN deve possuir users.edit_permissions');
+    assert.strictEqual(managerView?.granted, true, 'MANAGER deve possuir users.view');
+    assert.strictEqual(memberView, null, 'MEMBER NÃO deve possuir users.view');
+
+    // 6, 7, 8. Invite pending em Org A cria User global INVITED e Membership A INVITED
+    const inviteRes = await usersService.inviteUser(orgA.id, adminAUser.id, {
+      name: 'Real DB Invited User',
+      email: 'real_db_invited@zafira.test',
+    });
+    assert.strictEqual(inviteRes.role, 'MEMBER');
+    assert.strictEqual(inviteRes.membershipStatus, 'INVITED');
+
+    const createdUserDb = await prisma.user.findUniqueOrThrow({ where: { id: inviteRes.userId } });
+    assert.strictEqual(createdUserDb.status, 'INVITED');
+    assert.strictEqual(createdUserDb.passwordHash, null);
+
+    const createdMemDb = await prisma.organizationMember.findUniqueOrThrow({ where: { id: inviteRes.membershipId } });
+    assert.strictEqual(createdMemDb.status, 'INVITED');
+    assert.strictEqual(createdMemDb.role, 'MEMBER');
+
+    try {
+      // 9. Role alterável sem ativar convite
+      const updatedRole = await usersService.updateRole(orgA.id, adminAUser.id, inviteRes.membershipId, {
+        role: 'MANAGER',
+      });
+      assert.strictEqual(updatedRole.role, 'MANAGER');
+      const memAfterRole = await prisma.organizationMember.findUniqueOrThrow({ where: { id: inviteRes.membershipId } });
+      assert.strictEqual(memAfterRole.status, 'INVITED', 'Status deve permanecer INVITED');
+      assert.strictEqual(memAfterRole.role, 'MANAGER');
+
+      // 10 & 11. Assignment aceita Client A e rejeita Client B (alien)
+      const assignRes = await usersService.assignClients(orgA.id, adminAUser.id, inviteRes.membershipId, {
+        clientIds: [clientAAssigned.id],
+      });
+      assert.deepStrictEqual(assignRes.clientIds, [clientAAssigned.id]);
+
+      await assert.rejects(
+        usersService.assignClients(orgA.id, adminAUser.id, inviteRes.membershipId, {
+          clientIds: [clientB.id],
+        }),
+        (err: any) => err instanceof UserAdminError && err.code === 'CLIENT_NOT_IN_ORGANIZATION'
+      );
+
+      // 12, 13, 14. Membership ACTIVE pode ser suspensa e User.status global permanece ACTIVE
+      const multiMemUser = await prisma.user.create({
+        data: {
+          name: 'Multi Active User',
+          email: 'multi_active_user@zafira.test',
+          status: 'ACTIVE',
+          memberships: {
+            create: [
+              { organizationId: orgA.id, role: 'MEMBER', status: 'ACTIVE' },
+              { organizationId: orgB.id, role: 'MEMBER', status: 'ACTIVE' },
+            ],
+          },
+        },
+        include: { memberships: true },
+      });
+
+      const memA = multiMemUser.memberships.find((m) => m.organizationId === orgA.id)!;
+      const memB = multiMemUser.memberships.find((m) => m.organizationId === orgB.id)!;
+
+      // Suspender membership A
+      await usersService.updateStatus(orgA.id, adminAUser.id, memA.id, { status: 'SUSPENDED' });
+      const memAAfterSusp = await prisma.organizationMember.findUniqueOrThrow({ where: { id: memA.id } });
+      assert.strictEqual(memAAfterSusp.status, 'SUSPENDED');
+
+      // User.status permanece ACTIVE
+      const userGlobalCheck = await prisma.user.findUniqueOrThrow({ where: { id: multiMemUser.id } });
+      assert.strictEqual(userGlobalCheck.status, 'ACTIVE');
+
+      // Membership B ativa continua funcionando em B
+      const resOrgB = await resolveAuthorizationContext({
+        userId: multiMemUser.id,
+        activeOrganizationId: orgB.id,
+        permissionCode: 'clients.view',
+      });
+      assert.strictEqual(resOrgB.allowed, true);
+
+      // 15. Remoção de A não remove B
+      await usersService.removeMember(orgA.id, adminAUser.id, memA.id);
+      const memACheck = await prisma.organizationMember.findUnique({ where: { id: memA.id } });
+      assert.strictEqual(memACheck, null);
+
+      const memBCheck = await prisma.organizationMember.findUnique({ where: { id: memB.id } });
+      assert.ok(memBCheck, 'Membership B deve continuar existindo');
+
+      // 16. AuditLogs pertencem somente à Org A
+      const logsA = await auditService.list({ organizationId: orgA.id });
+      const hasInviteLog = logsA.items.some((l: any) => l.action === 'user.invited');
+      const hasRoleLog = logsA.items.some((l: any) => l.action === 'user.role_changed');
+      assert.strictEqual(hasInviteLog, true);
+      assert.strictEqual(hasRoleLog, true);
+
+      const logsB = await auditService.list({ organizationId: orgB.id });
+      const hasALogInB = logsB.items.some((l: any) => l.entityId === inviteRes.membershipId);
+      assert.strictEqual(hasALogInB, false, 'Org B NUNCA deve conter logs de Org A');
+
+      // 17. Last active admin é protegido
+      const adminAMem = await prisma.organizationMember.findUniqueOrThrow({
+        where: { organizationId_userId: { organizationId: orgA.id, userId: adminAUser.id } },
+      });
+
+      await assert.rejects(
+        usersService.updateRole(orgA.id, adminAUser.id, adminAMem.id, { role: 'MEMBER' }),
+        (err: any) => err instanceof UserAdminError && err.code === 'LAST_ACTIVE_ADMIN'
+      );
+
+      await assert.rejects(
+        usersService.updateStatus(orgA.id, adminAUser.id, adminAMem.id, { status: 'SUSPENDED' }),
+        (err: any) => err instanceof UserAdminError && err.code === 'LAST_ACTIVE_ADMIN'
+      );
+
+      await assert.rejects(
+        usersService.removeMember(orgA.id, adminAUser.id, adminAMem.id),
+        (err: any) => err instanceof UserAdminError && err.code === 'LAST_ACTIVE_ADMIN'
+      );
+
+      // Cleanup multiMemUser
+      await prisma.organizationMember.deleteMany({ where: { userId: multiMemUser.id } });
+      await prisma.user.delete({ where: { id: multiMemUser.id } });
+    } finally {
+      // Cleanup do usuário convidado
+      await prisma.organizationMember.deleteMany({ where: { id: inviteRes.membershipId } });
+      await prisma.user.deleteMany({ where: { id: inviteRes.userId } });
     }
   });
 });

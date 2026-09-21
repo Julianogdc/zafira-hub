@@ -14,6 +14,7 @@ import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
 import { financialRoutes } from './modules/financial/financial.routes.js';
 import { auditRoutes } from './modules/audit/audit.routes.js';
 import { organizationConfigRoutes } from './modules/organization-config/organization-config.routes.js';
+import { usersRoutes } from './modules/users/users.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -118,6 +119,9 @@ export function buildApp(): FastifyInstance {
 
   // 13. Rotas de Configuração da Organização e Feature Flags
   app.register(organizationConfigRoutes);
+
+  // 14. Rotas de Gestão Administrativa de Usuários da Organização
+  app.register(usersRoutes);
 
   return app;
 }

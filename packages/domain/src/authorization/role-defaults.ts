@@ -42,8 +42,10 @@ export const ADMIN_DEFAULTS: PermissionCode[] = [
   'commercial.edit_deal',
   'commercial.view_values',
   'commercial.export',
+  'users.view',
   'users.invite',
   'users.edit_role',
+  'users.edit_permissions',
   'users.assign_clients',
   'users.suspend',
   'users.remove',
@@ -95,6 +97,7 @@ export const MANAGER_DEFAULTS: PermissionCode[] = [
   'commercial.edit_deal',
   'commercial.view_values',
   'commercial.export',
+  'users.view',
   'users.assign_clients',
   'integrations.view',
   'integrations.sync'
