@@ -78,12 +78,20 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       });
 
       if (user && user.status === 'ACTIVE') {
-        const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
+        const activeMemberships = user.memberships.filter((m) => m.status === 'ACTIVE');
+        const hasMatchingActiveOrg = Boolean(
+          decoded.activeOrganizationId &&
+            activeMemberships.some(
+              (m) => m.organization.id === decoded.activeOrganizationId || m.organizationId === decoded.activeOrganizationId
+            )
+        );
+        const resolvedActiveOrganizationId = hasMatchingActiveOrg ? decoded.activeOrganizationId! : null;
+
         request.authContext = {
           type: 'user',
           userId: user.id,
           email: user.email,
-          activeOrganizationId: decoded.activeOrganizationId || null,
+          activeOrganizationId: resolvedActiveOrganizationId,
           memberships: activeMemberships.map((m) => ({
             organizationId: m.organization.id,
             organizationSlug: m.organization.slug,

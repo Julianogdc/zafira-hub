@@ -32,7 +32,7 @@ export class AuthService {
       throw new AppError(401, 'Credenciais inválidas');
     }
 
-    const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
+    const activeMemberships = user.memberships.filter((m) => m.status === 'ACTIVE');
 
     // Zero memberships ACTIVE: reject
     if (activeMemberships.length === 0) {
@@ -104,7 +104,7 @@ export class AuthService {
       throw new AppError(401, 'Usuário inativo ou não encontrado');
     }
 
-    const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
+    const activeMemberships = user.memberships.filter((m) => m.status === 'ACTIVE');
 
     if (activeMemberships.length === 0) {
       throw new AppError(403, 'Usuário não possui organizações ativas associadas.');

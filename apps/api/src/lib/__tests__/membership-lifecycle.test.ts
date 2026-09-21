@@ -57,8 +57,8 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     assert.strictEqual(authReq.authContext, undefined);
   });
 
-  // 2. User ACTIVE + membership ACTIVE => authenticate expõe membership
-  await t.test('2. User ACTIVE + membership ACTIVE expõe membership no authContext', async () => {
+  // 2. User ACTIVE + membership ACTIVE => authenticate expõe membership e preserva activeOrganizationId
+  await t.test('2. User ACTIVE + membership ACTIVE expõe membership no authContext e preserva activeOrganizationId', async () => {
     prisma.user.findUnique = (async () => ({
       id: 'usr_active',
       email: 'active@zafira.com',
@@ -74,12 +74,13 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     await authenticate(authReq, replyMock);
     assert.ok(authReq.authContext);
     assert.strictEqual(authReq.authContext.type, 'user');
+    assert.strictEqual(authReq.authContext.activeOrganizationId, 'org_1');
     assert.strictEqual(authReq.authContext.memberships.length, 1);
     assert.strictEqual(authReq.authContext.memberships[0].organizationId, 'org_1');
   });
 
-  // 3. User ACTIVE + membership SUSPENDED => organização não disponível no authContext
-  await t.test('3. User ACTIVE + membership SUSPENDED não inclui organização no authContext', async () => {
+  // 3. User ACTIVE + membership SUSPENDED => JWT apontando para SUSPENDED resulta em activeOrganizationId null
+  await t.test('3. JWT apontando para membership SUSPENDED resulta em activeOrganizationId = null no authContext', async () => {
     prisma.user.findUnique = (async () => ({
       id: 'usr_suspended_mem',
       email: 'user_susp@zafira.com',
@@ -95,11 +96,12 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     await authenticate(authReq, replyMock);
     assert.ok(authReq.authContext);
     assert.strictEqual(authReq.authContext.type, 'user');
+    assert.strictEqual(authReq.authContext.activeOrganizationId, null, 'activeOrganizationId deve virar null quando a membership é SUSPENDED');
     assert.strictEqual(authReq.authContext.memberships.length, 0, 'Membership SUSPENDED não deve estar presente no authContext');
   });
 
-  // 4. User ACTIVE + membership INVITED => organização não disponível no authContext
-  await t.test('4. User ACTIVE + membership INVITED não inclui organização no authContext', async () => {
+  // 4. User ACTIVE + membership INVITED => JWT apontando para INVITED resulta em activeOrganizationId null
+  await t.test('4. JWT apontando para membership INVITED resulta em activeOrganizationId = null no authContext', async () => {
     prisma.user.findUnique = (async () => ({
       id: 'usr_invited_mem',
       email: 'user_inv@zafira.com',
@@ -115,11 +117,32 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     await authenticate(authReq, replyMock);
     assert.ok(authReq.authContext);
     assert.strictEqual(authReq.authContext.type, 'user');
+    assert.strictEqual(authReq.authContext.activeOrganizationId, null, 'activeOrganizationId deve virar null quando a membership é INVITED');
     assert.strictEqual(authReq.authContext.memberships.length, 0, 'Membership INVITED não deve estar presente no authContext');
   });
 
-  // 5. Login com somente membership SUSPENDED => rejeitado 403
-  await t.test('5. Login com usuário que possui apenas membership SUSPENDED é rejeitado com 403', async () => {
+  // 5. Status ausente em membership mock => não tratado como ACTIVE (fail-closed)
+  await t.test('5. Status ausente em membership mock não ganha status ACTIVE (fail-closed)', async () => {
+    prisma.user.findUnique = (async () => ({
+      id: 'usr_nostatus',
+      email: 'nostatus@zafira.com',
+      status: 'ACTIVE',
+      memberships: [{ id: 'mem_no_st', role: 'MEMBER', organization: { id: 'org_nostatus', slug: 'org-nostatus' } }],
+    })) as any;
+
+    const token = await app.jwt.sign({ sub: 'usr_nostatus', email: 'nostatus@zafira.com', activeOrganizationId: 'org_nostatus' });
+
+    let authReq: any = { headers: { authorization: `Bearer ${token}` }, server: app };
+    const replyMock: any = { status: () => ({ send: () => {} }) };
+
+    await authenticate(authReq, replyMock);
+    assert.ok(authReq.authContext);
+    assert.strictEqual(authReq.authContext.memberships.length, 0, 'Membership sem status ACTIVE explícito não entra em activeMemberships');
+    assert.strictEqual(authReq.authContext.activeOrganizationId, null);
+  });
+
+  // 6. Login com somente membership SUSPENDED => rejeitado 403
+  await t.test('6. Login com usuário que possui apenas membership SUSPENDED é rejeitado com 403', async () => {
     const passwordHash = await argon2.hash('Secret123!');
     prisma.user.findUnique = (async () => ({
       id: 'usr_only_susp',
@@ -140,8 +163,8 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     );
   });
 
-  // 6. Login com A ACTIVE + B SUSPENDED => seleciona/permite somente A
-  await t.test('6. Login com Org A (ACTIVE) e Org B (SUSPENDED) auto-seleciona apenas Org A', async () => {
+  // 7. Login com A ACTIVE + B SUSPENDED => seleciona/permite somente A
+  await t.test('7. Login com Org A (ACTIVE) e Org B (SUSPENDED) auto-seleciona apenas Org A', async () => {
     const passwordHash = await argon2.hash('Secret123!');
     prisma.user.findUnique = (async () => ({
       id: 'usr_multi_one_active',
@@ -174,8 +197,8 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     );
   });
 
-  // 7. JWT antigo apontando para Org B cuja membership virou SUSPENDED => não recupera acesso a B na sessão
-  await t.test('7. resolveSession com activeOrganizationId do token apontando para membership SUSPENDED não mantém B ativo', async () => {
+  // 8. JWT antigo apontando para Org B cuja membership virou SUSPENDED => não recupera acesso a B na sessão
+  await t.test('8. resolveSession com activeOrganizationId do token apontando para membership SUSPENDED não mantém B ativo', async () => {
     prisma.user.findUnique = (async () => ({
       id: 'usr_jwt_old',
       email: 'jwt_old@zafira.com',
@@ -197,14 +220,15 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     assert.strictEqual(session.activeOrganizationId, 'org_A');
   });
 
-  // 8. Resolver: membership ACTIVE + RolePermission => allow
-  await t.test('8. Resolver: membership ACTIVE + RolePermission concedida => ALLOW', async () => {
+  // 9. Resolver: User ACTIVE + Membership ACTIVE + RolePermission => ALLOW
+  await t.test('9. Resolver: User ACTIVE + membership ACTIVE + RolePermission => ALLOW', async () => {
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_act',
       organizationId: 'org_1',
       userId: 'usr_1',
       role: 'ADMIN',
       status: 'ACTIVE',
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -223,21 +247,52 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     assert.strictEqual(res.reason, 'GRANTED_BY_ROLE_PERMISSION');
   });
 
-  // 9. Resolver: membership SUSPENDED + RolePermission => deny MEMBERSHIP_NOT_ACTIVE
-  await t.test('9. Resolver: membership SUSPENDED => DENY MEMBERSHIP_NOT_ACTIVE (mesmo com Role ADMIN)', async () => {
+  // 10. Resolver: User INACTIVE + Membership ACTIVE + RolePermission => DENY USER_NOT_ACTIVE e RolePermission NÃO é consultada
+  await t.test('10. Resolver: User INACTIVE + Membership ACTIVE => DENY USER_NOT_ACTIVE e RolePermission NÃO é consultada', async () => {
+    let rolePermConsulted = false;
+    prisma.organizationMember.findUnique = (async () => ({
+      id: 'mem_act2',
+      organizationId: 'org_1',
+      userId: 'usr_inactive_res',
+      role: 'ADMIN',
+      status: 'ACTIVE',
+      user: { status: 'INACTIVE' },
+      permissions: [],
+    })) as any;
+
+    (prisma as any).rolePermission.findUnique = (async () => {
+      rolePermConsulted = true;
+      return { role: 'ADMIN', permissionCode: 'financial.view_summary' };
+    }) as any;
+
+    const res = await resolveAuthorizationContext({
+      userId: 'usr_inactive_res',
+      activeOrganizationId: 'org_1',
+      permissionCode: 'financial.view_summary',
+    });
+
+    assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'USER_NOT_ACTIVE');
+    assert.strictEqual(rolePermConsulted, false, 'RolePermission NÃO deve ser consultada quando User não está ACTIVE');
+  });
+
+  // 11. Resolver: User ACTIVE + membership SUSPENDED + override true => DENY MEMBERSHIP_NOT_ACTIVE e RolePermission NÃO é consultada
+  await t.test('11. Resolver: User ACTIVE + membership SUSPENDED + override true => DENY MEMBERSHIP_NOT_ACTIVE e RolePermission NÃO é consultada', async () => {
+    let rolePermConsulted = false;
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_susp',
       organizationId: 'org_1',
       userId: 'usr_1',
       role: 'ADMIN',
       status: 'SUSPENDED',
-      permissions: [],
+      user: { status: 'ACTIVE' },
+      permissions: [{ permissionCode: 'financial.view_summary', allowed: true }],
     })) as any;
 
-    (prisma as any).rolePermission.findUnique = (async () => ({
-      role: 'ADMIN',
-      permissionCode: 'financial.view_summary',
-    })) as any;
+    (prisma as any).rolePermission.findUnique = (async () => {
+      rolePermConsulted = true;
+      return { role: 'ADMIN', permissionCode: 'financial.view_summary' };
+    }) as any;
 
     const res = await resolveAuthorizationContext({
       userId: 'usr_1',
@@ -247,16 +302,18 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
 
     assert.strictEqual(res.allowed, false);
     assert.strictEqual(res.reason, 'MEMBERSHIP_NOT_ACTIVE');
+    assert.strictEqual(rolePermConsulted, false, 'RolePermission NÃO deve ser consultada quando membership é SUSPENDED');
   });
 
-  // 10. Resolver: membership INVITED + RolePermission => deny MEMBERSHIP_NOT_ACTIVE
-  await t.test('10. Resolver: membership INVITED => DENY MEMBERSHIP_NOT_ACTIVE', async () => {
+  // 12. Resolver: User ACTIVE + membership INVITED => DENY MEMBERSHIP_NOT_ACTIVE
+  await t.test('12. Resolver: User ACTIVE + membership INVITED => DENY MEMBERSHIP_NOT_ACTIVE', async () => {
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_inv',
       organizationId: 'org_1',
       userId: 'usr_1',
       role: 'ADMIN',
       status: 'INVITED',
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -270,36 +327,15 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
     assert.strictEqual(res.reason, 'MEMBERSHIP_NOT_ACTIVE');
   });
 
-  // 11. Resolver: override allowed=true em membership SUSPENDED => ainda DENY
-  await t.test('11. Resolver: override individual allowed=true NÃO vence membership SUSPENDED', async () => {
-    prisma.organizationMember.findUnique = (async () => ({
-      id: 'mem_susp_ov',
-      organizationId: 'org_1',
-      userId: 'usr_1',
-      role: 'ADMIN',
-      status: 'SUSPENDED',
-      permissions: [{ permissionCode: 'financial.view_summary', allowed: true }],
-    })) as any;
-
-    const res = await resolveAuthorizationContext({
-      userId: 'usr_1',
-      activeOrganizationId: 'org_1',
-      permissionCode: 'financial.view_summary',
-    });
-
-    assert.strictEqual(res.allowed, false);
-    assert.strictEqual(res.reason, 'MEMBERSHIP_NOT_ACTIVE');
-  });
-
-  // 12. PROVA MULTI-ORG: User X possui Org A (SUSPENDED) e Org B (ACTIVE)
-  await t.test('12. PROVA MULTI-ORG: User X suspenso na Org A tem acesso negado em A, mas permitido em B, e User.status global continua ACTIVE', async () => {
+  // 13. PROVA MULTI-ORG: User X possui Org A (SUSPENDED) e Org B (ACTIVE)
+  await t.test('13. PROVA MULTI-ORG: User X suspenso na Org A tem acesso negado em A, mas permitido em B, e User.status global continua ACTIVE', async () => {
     const userGlobal = {
       id: 'usr_multi_proof',
       email: 'proof@zafira.com',
       status: 'ACTIVE',
     };
 
-    // Consulta para Org A
+    // Consulta para Org A e Org B
     prisma.organizationMember.findUnique = (async ({ where }: any) => {
       if (where.organizationId_userId.organizationId === 'org_A') {
         return {
@@ -308,6 +344,7 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
           userId: userGlobal.id,
           role: 'ADMIN',
           status: 'SUSPENDED',
+          user: { status: 'ACTIVE' },
           permissions: [],
         };
       }
@@ -318,6 +355,7 @@ test('--- Membership Lifecycle & Organization-Scoped Suspension Suite ---', asyn
           userId: userGlobal.id,
           role: 'ADMIN',
           status: 'ACTIVE',
+          user: { status: 'ACTIVE' },
           permissions: [],
         };
       }

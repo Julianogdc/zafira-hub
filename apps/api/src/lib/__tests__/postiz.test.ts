@@ -34,6 +34,7 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
         memberships: [{
           organization: { id: 'org_1', slug: 'zafira' },
           role: 'ADMIN',
+          status: 'ACTIVE',
         }],
       }),
     };
@@ -45,6 +46,8 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
         organizationId: 'org_1',
         userId: 'user_test',
         role: 'ADMIN',
+        status: 'ACTIVE',
+        user: { status: 'ACTIVE' },
         permissions: [{ allowed: true }],
       }),
     };

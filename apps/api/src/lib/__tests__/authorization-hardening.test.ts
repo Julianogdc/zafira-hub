@@ -213,6 +213,8 @@ test('DINAMICO / HARDENING: 3. Rota HUMAN com authContext de usuário + Permissi
         organizationId: 'org_1',
         userId: 'usr_1',
         role: 'ADMIN',
+        status: 'ACTIVE',
+        user: { status: 'ACTIVE' },
         permissions: [],
       }),
     };

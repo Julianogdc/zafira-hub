@@ -342,6 +342,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -377,6 +378,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -438,6 +440,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgIdAuth,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -493,6 +496,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -528,6 +532,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 
@@ -582,6 +587,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 

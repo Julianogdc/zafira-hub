@@ -50,6 +50,7 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
             {
               id: 'mem_1',
               role: 'MEMBER',
+              status: 'ACTIVE',
               organization: { id: orgId, slug: 'org-test-1', name: 'Org Test 1' },
             },
           ],
@@ -62,8 +63,10 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
       return {
         id: 'mem_1',
         role: 'MEMBER',
+        status: 'ACTIVE',
         organizationId: orgId,
         userId,
+        user: { status: 'ACTIVE' },
         permissions: [],
       };
     }) as any;
@@ -100,6 +103,7 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
             {
               id: 'mem_revoked',
               role: 'ADMIN',
+              status: 'ACTIVE',
               organization: { id: orgId, slug: 'org-test-1', name: 'Org Test 1' },
             },
           ],
@@ -112,8 +116,10 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
       return {
         id: 'mem_revoked',
         role: 'ADMIN',
+        status: 'ACTIVE',
         organizationId: orgId,
         userId,
+        user: { status: 'ACTIVE' },
         permissions: [
           {
             permissionCode: 'admin.view_audit',
@@ -151,6 +157,7 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
             {
               id: 'mem_admin',
               role: 'ADMIN',
+              status: 'ACTIVE',
               organization: { id: orgId, slug: 'org-test-1', name: 'Org Test 1' },
             },
           ],
@@ -163,8 +170,10 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
       return {
         id: 'mem_admin',
         role: 'ADMIN',
+        status: 'ACTIVE',
         organizationId: orgId,
         userId,
+        user: { status: 'ACTIVE' },
         permissions: [],
       };
     }) as any;
@@ -230,6 +239,7 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
             {
               id: 'mem_tenant',
               role: 'ADMIN',
+              status: 'ACTIVE',
               organization: { id: orgIdUser, slug: 'org-tenant-user', name: 'Org Tenant' },
             },
           ],
@@ -242,8 +252,10 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
       return {
         id: 'mem_tenant',
         role: 'ADMIN',
+        status: 'ACTIVE',
         organizationId: orgIdUser,
         userId,
+        user: { status: 'ACTIVE' },
         permissions: [],
       };
     }) as any;
@@ -311,6 +323,7 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
         {
           id: 'mem_a',
           role: 'ADMIN',
+          status: 'ACTIVE',
           organization: { id: orgId, slug: 'org-audit', name: 'Org Audit' },
         },
       ],
@@ -319,8 +332,10 @@ test('Audit Routes - GET /api/v1/audit (HTTP Tests)', async (t) => {
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_a',
       role: 'ADMIN',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
+      user: { status: 'ACTIVE' },
       permissions: [],
     })) as any;
 

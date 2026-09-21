@@ -33,6 +33,11 @@ export async function resolveAuthorizationContext({
       },
     },
     include: {
+      user: {
+        select: {
+          status: true,
+        },
+      },
       permissions: {
         where: { permissionCode },
       },
@@ -43,7 +48,17 @@ export async function resolveAuthorizationContext({
     return { allowed: false, reason: 'NO_MEMBERSHIP_IN_ACTIVE_ORGANIZATION' };
   }
 
-  if (membership.status && membership.status !== 'ACTIVE') {
+  if (membership.user?.status !== 'ACTIVE') {
+    return {
+      allowed: false,
+      reason: 'USER_NOT_ACTIVE',
+      membershipId: membership.id,
+      organizationId: membership.organizationId,
+      role: membership.role as RoleType,
+    };
+  }
+
+  if (membership.status !== 'ACTIVE') {
     return {
       allowed: false,
       reason: 'MEMBERSHIP_NOT_ACTIVE',

@@ -501,6 +501,20 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
     const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
 
+    // 0. Criar usuário com User.status = 'INACTIVE' e Membership.status = 'ACTIVE'
+    const inactiveUser = await prisma.user.create({
+      data: {
+        name: 'Inactive User Real DB',
+        email: 'inactive_real_db@zafira.test',
+        status: 'INACTIVE',
+        memberships: {
+          create: [
+            { organizationId: orgA.id, role: 'ADMIN', status: 'ACTIVE' },
+          ],
+        },
+      },
+    });
+
     // Criar usuário dedicado com 2 memberships no banco real
     const multiUser = await prisma.user.create({
       data: {
@@ -520,6 +534,15 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     });
 
     try {
+      // 0. Resolver para User INACTIVE com Membership ACTIVE => DENY USER_NOT_ACTIVE
+      const resInactive = await resolveAuthorizationContext({
+        userId: inactiveUser.id,
+        activeOrganizationId: orgA.id,
+        permissionCode: 'clients.view',
+      });
+      assert.strictEqual(resInactive.allowed, false, 'User globalmente INACTIVE deve ser negado mesmo com membership ACTIVE');
+      assert.strictEqual(resInactive.reason, 'USER_NOT_ACTIVE');
+
       // 1. Resolver acesso na Org A (membership SUSPENDED) => DENY MEMBERSHIP_NOT_ACTIVE
       const resA = await resolveAuthorizationContext({
         userId: multiUser.id,
@@ -556,9 +579,9 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       assert.strictEqual(resAInvited.allowed, false, 'Acesso à Org A com membership INVITED deve ser negado');
       assert.strictEqual(resAInvited.reason, 'MEMBERSHIP_NOT_ACTIVE');
     } finally {
-      // Cleanup do usuário de teste
-      await prisma.organizationMember.deleteMany({ where: { userId: multiUser.id } });
-      await prisma.user.delete({ where: { id: multiUser.id } });
+      // Cleanup dos usuários de teste
+      await prisma.organizationMember.deleteMany({ where: { userId: { in: [multiUser.id, inactiveUser.id] } } });
+      await prisma.user.deleteMany({ where: { id: { in: [multiUser.id, inactiveUser.id] } } });
     }
   });
 });
