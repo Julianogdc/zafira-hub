@@ -8,6 +8,7 @@ const SENSITIVE_KEYS_SET = new Set([
   'accesstoken',
   'refreshtoken',
   'apikey',
+  'xapikey',
   'secret',
   'cookie',
   'authorization',
@@ -40,11 +41,14 @@ export function sanitizeAuditPayload(data: unknown, seen = new WeakSet()): unkno
   seen.add(data as object);
 
   if (Array.isArray(data)) {
-    return data.map((item) => sanitizeAuditPayload(item, seen));
+    return data.map((item) => (item === undefined ? null : sanitizeAuditPayload(item, seen)));
   }
 
   const sanitized: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+    if (value === undefined) {
+      continue;
+    }
     const normalizedKey = key.toLowerCase().replace(/[-_]/g, '');
     if (SENSITIVE_KEYS_SET.has(normalizedKey)) {
       sanitized[key] = '[REDACTED]';
@@ -142,7 +146,10 @@ export class AuditService {
       where,
       take: safeLimit + 1,
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [
+        { createdAt: 'desc' },
+        { id: 'desc' },
+      ],
       include: {
         actorUser: {
           select: {
@@ -156,8 +163,8 @@ export class AuditService {
 
     let nextCursor: string | null = null;
     if (items.length > safeLimit) {
-      const nextItem = items.pop();
-      nextCursor = nextItem ? nextItem.id : null;
+      items.pop(); // Remove o item extra
+      nextCursor = items.length > 0 ? items[items.length - 1].id : null; // ID do último item retornado
     }
 
     return {

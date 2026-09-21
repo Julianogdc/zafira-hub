@@ -33,8 +33,8 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
     assert.strictEqual(sanitized.user.profile.refreshToken, '[REDACTED]');
   });
 
-  // 3. Sanitiza API key em array/object
-  await t.test('3. sanitiza API key e secrets em arrays e objetos', () => {
+  // 3. Sanitiza API key em array/object e x-api-key
+  await t.test('3. sanitiza API key, x-api-key e secrets em arrays e objetos', () => {
     const input = {
       integrations: [
         { provider: 'ASANA', apiKey: 'secret_key_1', clientSecret: 'cs_1' },
@@ -43,6 +43,10 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
       jwt: 'jwt_val',
       authorization: 'Bearer token',
       cookie: 'session=123',
+      headers: {
+        'x-api-key': 'secret_internal_key',
+        'X-API-KEY': 'another_secret',
+      },
     };
     const sanitized = sanitizeAuditPayload(input) as any;
     assert.strictEqual(sanitized.integrations[0].apiKey, '[REDACTED]');
@@ -52,6 +56,8 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
     assert.strictEqual(sanitized.jwt, '[REDACTED]');
     assert.strictEqual(sanitized.authorization, '[REDACTED]');
     assert.strictEqual(sanitized.cookie, '[REDACTED]');
+    assert.strictEqual(sanitized.headers['x-api-key'], '[REDACTED]');
+    assert.strictEqual(sanitized.headers['X-API-KEY'], '[REDACTED]');
   });
 
   // 4. Preserva campos não sensíveis
@@ -79,6 +85,25 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
 
     const d = new Date('2026-09-21T10:00:00.000Z');
     assert.strictEqual(sanitizeAuditPayload(d), '2026-09-21T10:00:00.000Z');
+  });
+
+  // 5.1. Normalização de undefined nested
+  await t.test('5.1. normaliza undefined nested omitindo propriedades em objetos e convertendo para null em arrays', () => {
+    const input = {
+      title: 'Valid Field',
+      emptyField: undefined,
+      nested: {
+        keepThis: 123,
+        removeThis: undefined,
+      },
+      list: ['item1', undefined, 'item3'],
+    };
+    const sanitized = sanitizeAuditPayload(input) as any;
+    assert.strictEqual(sanitized.title, 'Valid Field');
+    assert.strictEqual('emptyField' in sanitized, false);
+    assert.strictEqual(sanitized.nested.keepThis, 123);
+    assert.strictEqual('removeThis' in sanitized.nested, false);
+    assert.deepStrictEqual(sanitized.list, ['item1', null, 'item3']);
   });
 
   // 6. record usa organizationId informado
@@ -130,13 +155,14 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
       entityType: 'User',
       before: { passwordHash: '$argon2id$...secret' },
       after: { apiKey: 'super_secret_key', email: 'user@zafira.com' },
-      metadata: { token: 'bearer_token_xyz' },
+      metadata: { token: 'bearer_token_xyz', 'x-api-key': 'hdr_key_secret' },
     });
 
     assert.strictEqual(capturedData.before.passwordHash, '[REDACTED]');
     assert.strictEqual(capturedData.after.apiKey, '[REDACTED]');
     assert.strictEqual(capturedData.after.email, 'user@zafira.com');
     assert.strictEqual(capturedData.metadata.token, '[REDACTED]');
+    assert.strictEqual(capturedData.metadata['x-api-key'], '[REDACTED]');
   });
 
   // 8. list sempre filtra organizationId
@@ -234,5 +260,65 @@ test('AuditService - Sanitização e Serviço de Auditoria', async (t) => {
     assert.strictEqual(capturedWhere.organizationId, 'org_1');
     assert.strictEqual(capturedWhere.entityType, 'FinancialCategory');
     assert.strictEqual(capturedWhere.actorUserId, 'usr_actor_99');
+  });
+
+  // 13. Paginação Lossless (sem perda e sem duplicação de itens)
+  await t.test('13. paginação lossless com cursor do último item retornado (sem pular registros)', async () => {
+    // 3 registros no banco ordenados desc
+    const allDbRecords = [
+      { id: 'log_1', action: 'action.1', createdAt: new Date('2026-09-21T12:00:00Z') },
+      { id: 'log_2', action: 'action.2', createdAt: new Date('2026-09-21T11:00:00Z') },
+      { id: 'log_3', action: 'action.3', createdAt: new Date('2026-09-21T10:00:00Z') },
+    ];
+
+    const mockPrisma: any = {
+      auditLog: {
+        findMany: async ({ take, cursor, skip }: any) => {
+          let startIndex = 0;
+          if (cursor) {
+            const foundIndex = allDbRecords.findIndex((r) => r.id === cursor.id);
+            startIndex = foundIndex !== -1 ? foundIndex + (skip || 0) : 0;
+          }
+          return allDbRecords.slice(startIndex, startIndex + take).map((r) => ({ ...r }));
+        },
+      },
+    };
+
+    const service = new AuditService(mockPrisma);
+
+    // Página 1: limit 2 => busca 3, retorna log_1 e log_2, nextCursor = log_2
+    const page1 = await service.list({ organizationId: 'org_1', limit: 2 });
+    assert.strictEqual(page1.items.length, 2);
+    assert.strictEqual(page1.items[0].id, 'log_1');
+    assert.strictEqual(page1.items[1].id, 'log_2');
+    assert.strictEqual(page1.nextCursor, 'log_2', 'nextCursor DEVE ser o ID do último item retornado (log_2)');
+
+    // Página 2: usando nextCursor 'log_2' => com skip 1 no cursor, deve retornar log_3
+    const page2 = await service.list({ organizationId: 'org_1', limit: 2, cursor: page1.nextCursor! });
+    assert.strictEqual(page2.items.length, 1);
+    assert.strictEqual(page2.items[0].id, 'log_3', 'Página 2 DEVE retornar exatamente log_3');
+    assert.strictEqual(page2.nextCursor, null, 'nextCursor da última página DEVE ser null');
+
+    // Prova de completude e unicidade: todos os itens vistos
+    const allSeenIds = [...page1.items.map((i: any) => i.id), ...page2.items.map((i: any) => i.id)];
+    assert.deepStrictEqual(allSeenIds, ['log_1', 'log_2', 'log_3'], 'Nenhum registro foi perdido nem duplicado');
+  });
+
+  // 14. Ordenação Determinística com tie-breaker id
+  await t.test('14. list solicita ordenação determinística [createdAt desc, id desc]', async () => {
+    let capturedOrderBy: any = null;
+    const mockPrisma: any = {
+      auditLog: {
+        findMany: async ({ orderBy }: any) => {
+          capturedOrderBy = orderBy;
+          return [];
+        },
+      },
+    };
+
+    const service = new AuditService(mockPrisma);
+    await service.list({ organizationId: 'org_1' });
+
+    assert.deepStrictEqual(capturedOrderBy, [{ createdAt: 'desc' }, { id: 'desc' }]);
   });
 });
