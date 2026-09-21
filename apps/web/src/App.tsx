@@ -9,7 +9,6 @@ import { lazy, Suspense, useEffect } from "react";
 import { GlobalErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { Loader2 } from "lucide-react";
 import { useAuthStore } from "./store/useAuthStore";
-import { supabase } from "./lib/supabase";
 
 // Lazy Imports for Performance
 const Index = lazy(() => import("./pages/Index"));

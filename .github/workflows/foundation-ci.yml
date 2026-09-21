@@ -134,3 +134,123 @@ jobs:
             -f apps/web/Dockerfile \
             -t zafira-hub-web:ci-test \
             .
+
+      - name: Bundle Safety Scan
+        run: |
+          echo "Inspecionando bundle estático gerado dentro da imagem Web..."
+          docker create --name web-extract zafira-hub-web:ci-test
+          mkdir -p /tmp/web-dist
+          docker cp web-extract:/usr/share/nginx/html/. /tmp/web-dist/
+          docker rm web-extract
+
+          if grep -rn "zafira-hub-v2-api.hvrb9d.easypanel.host" /tmp/web-dist; then
+            echo "FALHA: Domínio legado hardcoded encontrado no bundle compilado!"
+            exit 1
+          fi
+          echo "Bundle Safety Scan: PASS (zero referências a domínios legados)"
+
+      - name: Create Smoke Network & Launch API Container
+        run: |
+          docker network create zafira-hub-smoke
+          docker run -d \
+            --name api \
+            --network zafira-hub-smoke \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
+            -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
+            zafira-hub-api:ci-test
+
+      - name: Verify API Container Smoke & Health
+        run: |
+          echo "Aguardando container API atingir status healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API container is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          FINAL_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api)
+          if [ "$FINAL_STATUS" != "healthy" ]; then
+            echo "FALHA: API container não atingiu status healthy ($FINAL_STATUS)"
+            docker logs api
+            exit 1
+          fi
+
+          echo "Executando requisição direta GET /health na API..."
+          docker exec api node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log(data); if (data.status !== 'ok') process.exit(1); })"
+          echo "API Smoke: PASS"
+
+      - name: Launch Web Container
+        run: |
+          docker run -d \
+            --name web \
+            --network zafira-hub-smoke \
+            -p 8080:80 \
+            -e API_UPSTREAM="http://api:3001" \
+            zafira-hub-web:ci-test
+
+      - name: Verify Web Container Smoke & Nginx Render
+        run: |
+          echo "Aguardando container Web atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Web container is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          FINAL_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web)
+          if [ "$FINAL_STATUS" != "healthy" ]; then
+            echo "FALHA: Web container não atingiu status healthy ($FINAL_STATUS)"
+            docker logs web
+            exit 1
+          fi
+
+          echo "Validando configuração Nginx renderizada (nginx -T)..."
+          NGINX_CONF=$(docker exec web nginx -T)
+          echo "$NGINX_CONF" | grep -q "proxy_pass http://api:3001/;" || {
+            echo "FALHA: API_UPSTREAM não foi renderizado corretamente na configuração do Nginx!"
+            echo "$NGINX_CONF"
+            exit 1
+          }
+
+          echo "$NGINX_CONF" | grep -q "try_files \$uri \$uri/ /index.html;" || {
+            echo "FALHA: Variável \$uri foi corrompida pelo envsubst!"
+            echo "$NGINX_CONF"
+            exit 1
+          }
+
+          echo "Nginx Template Render: PASS"
+
+      - name: Verify Reverse Proxy Smoke
+        run: |
+          echo "Testando endpoint raiz do Web (GET /)..."
+          curl -fsS http://127.0.0.1:8080/ > /dev/null
+          echo "Web Root GET /: PASS"
+
+          echo "Testando reverse proxy Web -> API (GET /hub-api/health)..."
+          RESP=$(curl -fsS http://127.0.0.1:8080/hub-api/health)
+          echo "Resposta recebida via proxy: $RESP"
+          echo "$RESP" | grep -q '"status":"ok"' || echo "$RESP" | grep -q '"status": "ok"' || {
+            echo "FALHA: Resposta inesperada de /hub-api/health"
+            exit 1
+          }
+          echo "Reverse Proxy Smoke (/hub-api/health): PASS"
+
+      - name: Cleanup Smoke Containers
+        if: always()
+        run: |
+          echo "Limpando containers e rede de smoke..."
+          docker rm -f api web || true
+          docker network rm zafira-hub-smoke || true
+          echo "Cleanup concluído."

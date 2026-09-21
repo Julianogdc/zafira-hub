@@ -12,9 +12,9 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://zafira-hub-v2-api.hvrb9d.easypanel.host',
+        target: process.env.VITE_DEV_API_TARGET || 'http://127.0.0.1:3001',
         changeOrigin: true,
-        secure: true,
+        secure: false,
         timeout: 0,
         proxyTimeout: 0,
         rewrite: (path) => path.replace(/^\/api/, ''),

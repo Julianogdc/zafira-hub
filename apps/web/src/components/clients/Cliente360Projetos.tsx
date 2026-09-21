@@ -318,14 +318,8 @@ export function Cliente360Projetos({ clientId, canManage }: Cliente360ProjetosPr
     const handleOAuthMessage = (event: MessageEvent) => {
       // Validação estrita de origem: aceita apenas mensagens vindas da API oficial ou da origem local autorizada
       const allowedOrigins = [
-        'https://zafira-hub-v2-api.hvrb9d.easypanel.host',
         window.location.origin,
       ];
-      if (import.meta.env.VITE_API_URL) {
-        try {
-          allowedOrigins.push(new URL(import.meta.env.VITE_API_URL).origin);
-        } catch {}
-      }
 
       if (!allowedOrigins.includes(event.origin)) {
         // Ignora eventos de origens não autorizadas

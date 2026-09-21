@@ -1,8 +1,7 @@
-// Em desenvolvimento local, usa o proxy do Vite (/api) para evitar problemas de cookies cross-site em HTTP
+// Em desenvolvimento local, usa o proxy do Vite (/api)
+// Em produção, usa o reverse proxy do Nginx (/hub-api)
 const isDev = import.meta.env.DEV;
-const API_BASE_URL = isDev
-  ? '/api'
-  : (import.meta.env.VITE_API_URL || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host');
+const API_BASE_URL = isDev ? '/api' : '/hub-api';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string, public data?: any) {
