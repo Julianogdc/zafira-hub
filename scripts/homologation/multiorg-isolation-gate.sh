@@ -56,8 +56,9 @@ if ! echo "${COOKIE_HEADER_A}" | grep -qi "Secure"; then
 fi
 echo "COOKIE_A_SECURE=PASS"
 
-if ! echo "${COOKIE_HEADER_A}" | grep -qi "SameSite="; then
-  echo "[-] FALHA: Cookie A não possui flag SameSite!" >&2
+SAMESITE_VAL_A=$(echo "${COOKIE_HEADER_A}" | grep -oiE 'SameSite=(Lax|Strict|None)' | head -n 1 || true)
+if [ -z "${SAMESITE_VAL_A}" ]; then
+  echo "[-] FALHA: Cookie A não possui SameSite com valor válido (Lax|Strict|None)!" >&2
   exit 1
 fi
 echo "COOKIE_A_SAMESITE=PASS"
@@ -103,8 +104,9 @@ if ! echo "${COOKIE_HEADER_B}" | grep -qi "Secure"; then
 fi
 echo "COOKIE_B_SECURE=PASS"
 
-if ! echo "${COOKIE_HEADER_B}" | grep -qi "SameSite="; then
-  echo "[-] FALHA: Cookie B não possui flag SameSite!" >&2
+SAMESITE_VAL_B=$(echo "${COOKIE_HEADER_B}" | grep -oiE 'SameSite=(Lax|Strict|None)' | head -n 1 || true)
+if [ -z "${SAMESITE_VAL_B}" ]; then
+  echo "[-] FALHA: Cookie B não possui SameSite com valor válido (Lax|Strict|None)!" >&2
   exit 1
 fi
 echo "COOKIE_B_SAMESITE=PASS"
@@ -377,11 +379,25 @@ if [ -z "${LOGOUT_COOKIE_A}" ]; then
   exit 1
 fi
 
-# Validar se o cookie de logout contém indicação explícita de expiração/remoção (Max-Age=0 ou Expires no passado)
-if ! echo "${LOGOUT_COOKIE_A}" | grep -qiE '(max-age=0|expires=thu, 01 jan 1970|token=;)'; then
-  echo "[-] FALHA: Set-Cookie no logout de A não expirou/removeu o token!" >&2
+# Assertion 1: token deve estar vazio (token=;)
+if ! echo "${LOGOUT_COOKIE_A}" | grep -qE '[Tt]oken=;'; then
+  echo "[-] FALHA: Logout A — cookie token não está vazio (esperado token=;)!" >&2
   exit 1
 fi
+echo "[+] Logout A: token vazio confirmado (token=;)"
+
+# Assertion 2: expiração explícita (Max-Age=0 OU Expires no passado)
+LOGOUT_A_EXPIRED=false
+if echo "${LOGOUT_COOKIE_A}" | grep -qiE 'max-age=0'; then
+  LOGOUT_A_EXPIRED=true
+elif echo "${LOGOUT_COOKIE_A}" | grep -qiE 'expires=thu, 01 jan 1970'; then
+  LOGOUT_A_EXPIRED=true
+fi
+if [ "${LOGOUT_A_EXPIRED}" != "true" ]; then
+  echo "[-] FALHA: Logout A — cookie sem expiração válida (esperado Max-Age=0 ou Expires no passado)!" >&2
+  exit 1
+fi
+echo "[+] Logout A: expiração confirmada"
 echo "LOGOUT_A_COOKIE_CLEAR=PASS"
 
 echo "[*] Encerrando sessão de User B e validando limpeza de cookie..."
@@ -400,41 +416,29 @@ if [ -z "${LOGOUT_COOKIE_B}" ]; then
   exit 1
 fi
 
-if ! echo "${LOGOUT_COOKIE_B}" | grep -qiE '(max-age=0|expires=thu, 01 jan 1970|token=;)'; then
-  echo "[-] FALHA: Set-Cookie no logout de B não expirou/removeu o token!" >&2
+# Assertion 1: token deve estar vazio (token=;)
+if ! echo "${LOGOUT_COOKIE_B}" | grep -qE '[Tt]oken=;'; then
+  echo "[-] FALHA: Logout B — cookie token não está vazio (esperado token=;)!" >&2
   exit 1
 fi
+echo "[+] Logout B: token vazio confirmado (token=;)"
+
+# Assertion 2: expiração explícita (Max-Age=0 OU Expires no passado)
+LOGOUT_B_EXPIRED=false
+if echo "${LOGOUT_COOKIE_B}" | grep -qiE 'max-age=0'; then
+  LOGOUT_B_EXPIRED=true
+elif echo "${LOGOUT_COOKIE_B}" | grep -qiE 'expires=thu, 01 jan 1970'; then
+  LOGOUT_B_EXPIRED=true
+fi
+if [ "${LOGOUT_B_EXPIRED}" != "true" ]; then
+  echo "[-] FALHA: Logout B — cookie sem expiração válida (esperado Max-Age=0 ou Expires no passado)!" >&2
+  exit 1
+fi
+echo "[+] Logout B: expiração confirmada"
 echo "LOGOUT_B_COOKIE_CLEAR=PASS"
 echo "LOGOUT_COOKIE_CLEAR=PASS"
 
 echo "=================================================="
-echo "COOKIE_A_HTTPONLY=PASS"
-echo "COOKIE_A_SECURE=PASS"
-echo "COOKIE_A_SAMESITE=PASS"
-echo "COOKIE_B_HTTPONLY=PASS"
-echo "COOKIE_B_SECURE=PASS"
-echo "COOKIE_B_SAMESITE=PASS"
-echo "COOKIE_FLAGS=PASS"
-echo "ORG_A_LOGIN=PASS"
-echo "ORG_B_LOGIN=PASS"
-echo "FOREIGN_ORG_LOGIN_A=403_PASS"
-echo "FOREIGN_ORG_LOGIN_B=403_PASS"
-echo "SESSION_A=PASS"
-echo "SESSION_B=PASS"
-echo "CLIENT_A_CREATE=PASS"
-echo "CLIENT_B_CREATE=PASS"
-echo "LIST_ISOLATION_A=PASS"
-echo "LIST_ISOLATION_B=PASS"
-echo "CROSS_GET_A_TO_B=404_PASS"
-echo "CROSS_GET_B_TO_A=404_PASS"
-echo "CROSS_PATCH_A_TO_B=404_PASS"
-echo "CROSS_PATCH_B_TO_A=404_PASS"
-echo "TENANT_HEADER_TAMPERING=PASS"
-echo "LOGOUT_A_COOKIE_CLEAR=PASS"
-echo "LOGOUT_B_COOKIE_CLEAR=PASS"
-echo "LOGOUT_COOKIE_CLEAR=PASS"
-echo "CI_GATE_PASSWORD_LITERAL_SCAN=PASS"
-echo "CI_GATE_PASSWORD_LOG_SCAN=PASS"
 echo "MULTIORG_GATE=PASS"
 echo "=================================================="
 echo "[+] Ensaio do Portão Multi-Organização concluído com 100% de sucesso!"
