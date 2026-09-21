@@ -76,7 +76,7 @@ export GATE_PASSWORD_B="<SENHA_SEGURA_B>"
 
 ## 4. Critérios de Aceite Obrigatórios
 
-1. **Login Same-Origin (Org A e Org B):** Retornam HTTP 200 com cookie HTTP-only emitido.
+1. **Login Same-Origin (Org A e Org B):** Retornam HTTP 200 com validação de cookies (`HttpOnly`, `Secure` e `SameSite` presentes e válidos).
 2. **Rejeição de Login Cruzado:** User A tentando logar em Org B retorna **HTTP 403** (e vice-versa).
 3. **Sessão Estrita:** `/auth/session` retorna exclusivamente a organização ativa vinculada ao usuário.
 4. **Criação de Clientes:** Criados sob cada tenant sem interferência mútua.
@@ -84,4 +84,5 @@ export GATE_PASSWORD_B="<SENHA_SEGURA_B>"
 6. **Isolamento por ID (GET):** `GET /clients/:idB` por User A retorna **HTTP 404** (e vice-versa).
 7. **Isolamento de Mutação (PATCH):** `PATCH /clients/:idB` por User A retorna **HTTP 404**, mantendo o registro de B intacto (e vice-versa).
 8. **Injeção de Header (`x-organization-id`):** Enviar header apontando para o tenant alheio em sessão autenticada não vaza nem comuta o tenant do usuário.
-9. **Resultado Final:** O script emite `MULTIORG_GATE=PASS`.
+9. **Limpeza de Cookie no Logout:** `/auth/logout` retorna HTTP 200 e emite `Set-Cookie` com expiração/remoção do token.
+10. **Resultado Final:** O script emite `MULTIORG_GATE=PASS`.

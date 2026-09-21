@@ -19,7 +19,7 @@ Para garantir que o portão de homologação física futura seja executado de fo
 3. **Duas Organizações Independentes:** São criadas duas organizações com IDs fixos (`ORG_A_ID` e `ORG_B_ID`) e slugs distintos.
 4. **Dois Usuários Humanos ACTIVE:** São provisionados dois usuários humanos com status `ACTIVE` (`USER_A_ID` e `USER_B_ID`) com credenciais geradas dinamicamente via Argon2id.
 5. **Memberships Estritas:** Cada usuário possui membership `ADMIN` com status `ACTIVE` estritamente vinculada à sua respectiva organização. Nenhum usuário possui membership ou associação com a organização alheia.
-6. **Sessão JWT e Cookies de Produção:** O fluxo de autenticação utiliza o endpoint oficial `/auth/login`, gerando cookies HTTP-only assinados e avaliando as flags de segurança (`HttpOnly`, `Secure`, `SameSite`).
+6. **Sessão JWT e Cookies de Produção:** O fluxo de autenticação utiliza o endpoint oficial `/auth/login`, gerando cookies assinados e avaliando rigorosamente as flags de segurança (`HttpOnly`, `Secure`, `SameSite`) para ambos os usuários.
 7. **Criação de Recursos via HTTP:** Os recursos (como clientes/clientes da agência) não são injetados diretamente no banco de dados durante o teste, mas criados via `POST /hub-api/clients` sob as sessões autenticadas de cada usuário.
 8. **Isolamento de Leitura e Listagem:** O usuário da Organização A deve visualizar exclusivamente os recursos da Organização A em `GET /hub-api/clients`. Recursos da Organização B não devem aparecer na listagem. O mesmo aplica-se reciprocamente ao usuário da Organização B.
 9. **Isolamento de Acesso Direto (GET/PATCH por ID):** Tentativas de acesso ou modificação de recursos cross-organization (`GET /hub-api/clients/:foreignId` e `PATCH /hub-api/clients/:foreignId`) devem retornar obrigatoriamente **HTTP 404 Not Found**, impedindo enumeração e vazamento de metadados.
@@ -27,9 +27,10 @@ Para garantir que o portão de homologação física futura seja executado de fo
 11. **Resistência a Header Tampering:** Enviar headers como `x-organization-id` com valor de organização alheia em uma sessão válida com `activeOrganizationId` fixado no token não altera o tenant resolvido.
 12. **Idempotência e Segurança de Banco:** O script de fixture deve ser idempotente (usando upserts seguros) e validar previamente que a variável `DATABASE_URL` não aponta para banco de produção (`zafira_hub_v2`).
 13. **Execução no Container Publicado:** Os scripts de seed e bootstrap devem rodar dentro da imagem Docker publicada da API por digest (`API_IMAGE_REF`), sem depender do ambiente Node/Prisma do host.
-14. **Zero Vazamento de Credenciais:** Nenhuma senha ou token JWT pode ser exposto em logs ou salvo como artefato.
-15. **Rehearsal CI != Homologação Física:** O sucesso deste ensaio em CI não substitui a execução física do portão em ambiente de homologação nem autoriza o fechamento automático da Fase 1.
-16. **Zero Dados Reais:** São utilizados exclusivamente identificadores e dados sintéticos fictícios.
+14. **Zero Vazamento de Credenciais e Geração Efêmera:** Nenhuma senha ou token JWT pode ser exposto em logs ou salvo como artefato. Em ambiente de CI, credenciais sintéticas são geradas em runtime (`openssl rand -hex 24`), imediatamente mascaradas via `::add-mask::` e repassadas sem valores literais nos arquivos de workflow.
+15. **Comprovação de Limpeza no Logout:** O encerramento de sessão via `POST /auth/logout` deve comprovar HTTP 200 e a emissão de `Set-Cookie` de expiração/remoção do token (`Max-Age=0` ou `Expires` no passado).
+16. **Rehearsal CI != Homologação Física:** O sucesso deste ensaio em CI não substitui a execução física do portão em ambiente de homologação nem autoriza o fechamento automático da Fase 1.
+17. **Zero Dados Reais:** São utilizados exclusivamente identificadores e dados sintéticos fictícios.
 
 ## Consequências
 - A mecânica do portão multi-organização passa a ser executada e verificada de forma determinística a cada pipeline de CI.

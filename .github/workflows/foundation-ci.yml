@@ -577,6 +577,16 @@ jobs:
           fi
           echo "Contagem de migrations = 14 (PASS)"
 
+      - name: Generate Ephemeral Multi-Org Gate Credentials
+        run: |
+          GATE_PASS_A="$(openssl rand -hex 24)"
+          GATE_PASS_B="$(openssl rand -hex 24)"
+          echo "::add-mask::${GATE_PASS_A}"
+          echo "::add-mask::${GATE_PASS_B}"
+          echo "GATE_PASSWORD_A=${GATE_PASS_A}" >> "$GITHUB_ENV"
+          echo "GATE_PASSWORD_B=${GATE_PASS_B}" >> "$GITHUB_ENV"
+          echo "Ephemeral Multi-Org Gate Credentials Generated and Masked: PASS"
+
       - name: Seed Multi-Org Fixture using Published API Image
         run: |
           API_REF="${{ needs.publish-images.outputs.api_ref }}"
@@ -586,8 +596,8 @@ jobs:
           docker run --rm \
             --network zafira-hub-hml-ci \
             -e DATABASE_URL="${DATABASE_URL}" \
-            -e GATE_PASSWORD_A="GatePassSecretA#2026Secure!" \
-            -e GATE_PASSWORD_B="GatePassSecretB#2026Secure!" \
+            -e GATE_PASSWORD_A \
+            -e GATE_PASSWORD_B \
             -v "$GITHUB_WORKSPACE/scripts/homologation/seed-multiorg-gate.mjs:/app/seed-multiorg-gate.mjs:ro" \
             "${API_REF}" \
             node /app/seed-multiorg-gate.mjs
@@ -696,8 +706,6 @@ jobs:
           export ORG_B_ID="22222222-2222-4222-8222-222222222222"
           export GATE_EMAIL_A="gate-a@zafira.invalid"
           export GATE_EMAIL_B="gate-b@zafira.invalid"
-          export GATE_PASSWORD_A="GatePassSecretA#2026Secure!"
-          export GATE_PASSWORD_B="GatePassSecretB#2026Secure!"
 
           bash scripts/homologation/multiorg-isolation-gate.sh
 

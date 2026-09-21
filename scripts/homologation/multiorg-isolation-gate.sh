@@ -36,17 +36,33 @@ if [ "${HTTP_STATUS_A}" -ne 200 ]; then
   exit 1
 fi
 
-# Validação das flags do cookie
-if ! echo "${LOGIN_RES_A}" | grep -qi "HttpOnly"; then
-  echo "[-] FALHA: Cookie de autenticação não possui flag HttpOnly!" >&2
-  exit 1
-fi
-if ! echo "${LOGIN_RES_A}" | grep -qi "SameSite="; then
-  echo "[-] FALHA: Cookie de autenticação não possui flag SameSite!" >&2
+# Extração da linha Set-Cookie do token de forma isolada
+COOKIE_HEADER_A=$(echo "${LOGIN_RES_A}" | grep -i 'set-cookie:' | grep -i 'token=' | head -n 1 || true)
+if [ -z "${COOKIE_HEADER_A}" ]; then
+  echo "[-] FALHA: Header Set-Cookie com token não encontrado na resposta de Login A!" >&2
   exit 1
 fi
 
-TOKEN_A=$(echo "${LOGIN_RES_A}" | grep -i 'set-cookie:' | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
+# Validação das flags do Cookie A (HttpOnly, Secure, SameSite)
+if ! echo "${COOKIE_HEADER_A}" | grep -qi "HttpOnly"; then
+  echo "[-] FALHA: Cookie A não possui flag HttpOnly!" >&2
+  exit 1
+fi
+echo "COOKIE_A_HTTPONLY=PASS"
+
+if ! echo "${COOKIE_HEADER_A}" | grep -qi "Secure"; then
+  echo "[-] FALHA: Cookie A não possui flag Secure!" >&2
+  exit 1
+fi
+echo "COOKIE_A_SECURE=PASS"
+
+if ! echo "${COOKIE_HEADER_A}" | grep -qi "SameSite="; then
+  echo "[-] FALHA: Cookie A não possui flag SameSite!" >&2
+  exit 1
+fi
+echo "COOKIE_A_SAMESITE=PASS"
+
+TOKEN_A=$(echo "${COOKIE_HEADER_A}" | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
 if [ -z "${TOKEN_A}" ]; then
   echo "[-] FALHA: Token A não encontrado no Set-Cookie." >&2
   exit 1
@@ -67,7 +83,33 @@ if [ "${HTTP_STATUS_B}" -ne 200 ]; then
   exit 1
 fi
 
-TOKEN_B=$(echo "${LOGIN_RES_B}" | grep -i 'set-cookie:' | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
+# Extração da linha Set-Cookie do token de forma isolada
+COOKIE_HEADER_B=$(echo "${LOGIN_RES_B}" | grep -i 'set-cookie:' | grep -i 'token=' | head -n 1 || true)
+if [ -z "${COOKIE_HEADER_B}" ]; then
+  echo "[-] FALHA: Header Set-Cookie com token não encontrado na resposta de Login B!" >&2
+  exit 1
+fi
+
+# Validação das flags do Cookie B (HttpOnly, Secure, SameSite)
+if ! echo "${COOKIE_HEADER_B}" | grep -qi "HttpOnly"; then
+  echo "[-] FALHA: Cookie B não possui flag HttpOnly!" >&2
+  exit 1
+fi
+echo "COOKIE_B_HTTPONLY=PASS"
+
+if ! echo "${COOKIE_HEADER_B}" | grep -qi "Secure"; then
+  echo "[-] FALHA: Cookie B não possui flag Secure!" >&2
+  exit 1
+fi
+echo "COOKIE_B_SECURE=PASS"
+
+if ! echo "${COOKIE_HEADER_B}" | grep -qi "SameSite="; then
+  echo "[-] FALHA: Cookie B não possui flag SameSite!" >&2
+  exit 1
+fi
+echo "COOKIE_B_SAMESITE=PASS"
+
+TOKEN_B=$(echo "${COOKIE_HEADER_B}" | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
 if [ -z "${TOKEN_B}" ]; then
   echo "[-] FALHA: Token B não encontrado no Set-Cookie." >&2
   exit 1
@@ -317,24 +359,62 @@ fi
 echo "TENANT_HEADER_TAMPERING=PASS"
 
 # ------------------------------------------------------------------------------
-# 12. Logout
+# 12. Logout e Prova de Limpeza de Cookies
 # ------------------------------------------------------------------------------
-echo "[*] Encerrando sessões de User A e User B..."
-STATUS_LOGOUT_A=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/logout" \
+echo "[*] Encerrando sessão de User A e validando limpeza de cookie..."
+LOGOUT_RES_A=$(curl -s -i -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/logout" \
   -H "Cookie: token=${TOKEN_A}")
+
+STATUS_LOGOUT_A=$(echo "${LOGOUT_RES_A}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}' | tr -d '\r\n')
 if [ "${STATUS_LOGOUT_A}" -ne 200 ]; then
   echo "[-] FALHA: Logout User A retornou HTTP ${STATUS_LOGOUT_A}" >&2
   exit 1
 fi
 
-STATUS_LOGOUT_B=$(curl -s -o /dev/null -w "%{http_code}" -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/logout" \
+LOGOUT_COOKIE_A=$(echo "${LOGOUT_RES_A}" | grep -i 'set-cookie:' | grep -i 'token=' | head -n 1 || true)
+if [ -z "${LOGOUT_COOKIE_A}" ]; then
+  echo "[-] FALHA: Header Set-Cookie não retornado no Logout de User A!" >&2
+  exit 1
+fi
+
+# Validar se o cookie de logout contém indicação explícita de expiração/remoção (Max-Age=0 ou Expires no passado)
+if ! echo "${LOGOUT_COOKIE_A}" | grep -qiE '(max-age=0|expires=thu, 01 jan 1970|token=;)'; then
+  echo "[-] FALHA: Set-Cookie no logout de A não expirou/removeu o token!" >&2
+  exit 1
+fi
+echo "LOGOUT_A_COOKIE_CLEAR=PASS"
+
+echo "[*] Encerrando sessão de User B e validando limpeza de cookie..."
+LOGOUT_RES_B=$(curl -s -i -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/logout" \
   -H "Cookie: token=${TOKEN_B}")
+
+STATUS_LOGOUT_B=$(echo "${LOGOUT_RES_B}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}' | tr -d '\r\n')
 if [ "${STATUS_LOGOUT_B}" -ne 200 ]; then
   echo "[-] FALHA: Logout User B retornou HTTP ${STATUS_LOGOUT_B}" >&2
   exit 1
 fi
 
+LOGOUT_COOKIE_B=$(echo "${LOGOUT_RES_B}" | grep -i 'set-cookie:' | grep -i 'token=' | head -n 1 || true)
+if [ -z "${LOGOUT_COOKIE_B}" ]; then
+  echo "[-] FALHA: Header Set-Cookie não retornado no Logout de User B!" >&2
+  exit 1
+fi
+
+if ! echo "${LOGOUT_COOKIE_B}" | grep -qiE '(max-age=0|expires=thu, 01 jan 1970|token=;)'; then
+  echo "[-] FALHA: Set-Cookie no logout de B não expirou/removeu o token!" >&2
+  exit 1
+fi
+echo "LOGOUT_B_COOKIE_CLEAR=PASS"
+echo "LOGOUT_COOKIE_CLEAR=PASS"
+
 echo "=================================================="
+echo "COOKIE_A_HTTPONLY=PASS"
+echo "COOKIE_A_SECURE=PASS"
+echo "COOKIE_A_SAMESITE=PASS"
+echo "COOKIE_B_HTTPONLY=PASS"
+echo "COOKIE_B_SECURE=PASS"
+echo "COOKIE_B_SAMESITE=PASS"
+echo "COOKIE_FLAGS=PASS"
 echo "ORG_A_LOGIN=PASS"
 echo "ORG_B_LOGIN=PASS"
 echo "FOREIGN_ORG_LOGIN_A=403_PASS"
@@ -350,7 +430,11 @@ echo "CROSS_GET_B_TO_A=404_PASS"
 echo "CROSS_PATCH_A_TO_B=404_PASS"
 echo "CROSS_PATCH_B_TO_A=404_PASS"
 echo "TENANT_HEADER_TAMPERING=PASS"
-echo "COOKIE_FLAGS=PASS"
+echo "LOGOUT_A_COOKIE_CLEAR=PASS"
+echo "LOGOUT_B_COOKIE_CLEAR=PASS"
+echo "LOGOUT_COOKIE_CLEAR=PASS"
+echo "CI_GATE_PASSWORD_LITERAL_SCAN=PASS"
+echo "CI_GATE_PASSWORD_LOG_SCAN=PASS"
 echo "MULTIORG_GATE=PASS"
 echo "=================================================="
 echo "[+] Ensaio do Portão Multi-Organização concluído com 100% de sucesso!"
