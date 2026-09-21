@@ -39,8 +39,12 @@ export class FeatureFlagService {
    * Consulta se uma feature flag específica está habilitada para a organização.
    */
   async isEnabled(organizationId: string, key: string): Promise<boolean> {
-    if (!organizationId || !isValidFeatureFlagKey(key)) {
-      return false;
+    if (!organizationId) {
+      throw new Error('organizationId é obrigatório para consultar feature flag');
+    }
+
+    if (!isValidFeatureFlagKey(key)) {
+      throw new Error(`Chave de feature flag inválida ou desconhecida: "${key}"`);
     }
 
     const flag = await this.prisma.organizationFeatureFlag.findUnique({

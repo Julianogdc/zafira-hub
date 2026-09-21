@@ -275,4 +275,24 @@ test('--- Canonical Auth Suite ---', async (t) => {
     assert.equal(tokenCookie?.maxAge, 0); // clearCookie sets maxAge to 0
     assert.equal(tokenCookie?.value, '');
   });
+
+  await t.test('13. API key de máquina (x-api-key) retorna 403 MACHINE_CREDENTIAL_NOT_ALLOWED em /api/v1/auth/session', async () => {
+    const originalApiKey = process.env.HUB_INTERNAL_API_KEY;
+    process.env.HUB_INTERNAL_API_KEY = 'secret_internal_auth_key';
+
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/auth/session',
+        headers: { 'x-api-key': 'secret_internal_auth_key' }
+      });
+
+      assert.equal(response.statusCode, 403);
+      const body = response.json();
+      assert.equal(body.code, 'MACHINE_CREDENTIAL_NOT_ALLOWED');
+      assert.equal(body.status, 'error');
+    } finally {
+      process.env.HUB_INTERNAL_API_KEY = originalApiKey;
+    }
+  });
 });

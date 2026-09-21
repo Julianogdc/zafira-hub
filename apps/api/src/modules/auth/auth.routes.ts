@@ -94,10 +94,11 @@ export async function authRoutes(app: FastifyInstance) {
         }
 
         if (auth.type === 'api_key') {
-          return reply.status(200).send({
-            type: 'api_key',
-            service: 'zafira-hub-internal',
-            role: 'ADMIN',
+          return reply.status(403).send({
+            status: 'error',
+            error: 'forbidden',
+            code: 'MACHINE_CREDENTIAL_NOT_ALLOWED',
+            message: 'Credencial de máquina não pode acessar sessão de usuário humano',
           });
         }
 

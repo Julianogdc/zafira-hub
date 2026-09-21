@@ -6,10 +6,64 @@ import { isValidFeatureFlagKey } from '@zafira/domain';
 
 function getOrganizationContext(req: FastifyRequest, reply: FastifyReply): string | null {
   const auth = req.authContext;
-  const headerOrg = req.headers['x-organization-id'] as string | undefined;
-  const organizationId = (auth?.type === 'user' ? auth.activeOrganizationId : null) || headerOrg;
 
-  if (!organizationId) {
+  if (!auth) {
+    reply.status(401).send({ error: 'unauthorized' });
+    return null;
+  }
+
+  if (auth.type === 'api_key') {
+    reply.status(403).send({
+      status: 'error',
+      error: 'forbidden',
+      code: 'MACHINE_CREDENTIAL_NOT_ALLOWED',
+      message: 'Credencial de máquina não tem permissão para acessar recursos de usuário humano.',
+    });
+    return null;
+  }
+
+  const memberships = auth.memberships || [];
+  const headerOrg = req.headers['x-organization-id'] as string | undefined;
+
+  // 1. activeOrganizationId tem prioridade
+  if (auth.activeOrganizationId) {
+    const match = memberships.find(
+      (m) => m.organizationId === auth.activeOrganizationId || m.organizationSlug === auth.activeOrganizationId
+    );
+    if (!match) {
+      reply.status(403).send({
+        status: 'error',
+        error: 'forbidden',
+        message: 'Organização ativa não pertence às memberships do usuário.',
+      });
+      return null;
+    }
+    return match.organizationId;
+  }
+
+  // 2. Se activeOrganizationId for null e houver x-organization-id
+  if (headerOrg) {
+    const match = memberships.find(
+      (m) => m.organizationId === headerOrg || m.organizationSlug === headerOrg
+    );
+    if (!match) {
+      reply.status(403).send({
+        status: 'error',
+        error: 'forbidden',
+        message: 'Organização informada no cabeçalho não pertence às memberships do usuário.',
+      });
+      return null;
+    }
+    return match.organizationId;
+  }
+
+  // 3. Se não houver activeOrganizationId nem header: exatamente 1 membership resolve ela
+  if (memberships.length === 1) {
+    return memberships[0].organizationId;
+  }
+
+  // 4. Múltiplas memberships sem contexto explícito => 400
+  if (memberships.length > 1) {
     reply.status(400).send({
       status: 'error',
       error: 'ORGANIZATION_CONTEXT_REQUIRED',
@@ -18,7 +72,13 @@ function getOrganizationContext(req: FastifyRequest, reply: FastifyReply): strin
     return null;
   }
 
-  return organizationId;
+  // 5. Nenhuma membership => 403
+  reply.status(403).send({
+    status: 'error',
+    error: 'forbidden',
+    message: 'Usuário não possui organizações associadas.',
+  });
+  return null;
 }
 
 export const organizationConfigRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {

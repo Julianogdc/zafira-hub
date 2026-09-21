@@ -190,16 +190,28 @@ test('OrganizationConfig & FeatureFlag Unit Tests', async (t) => {
     assert.strictEqual(financial?.enabled, false);
   });
 
-  // Feature flags: 11. Chave desconhecida rejeitada
-  await t.test('11. setFlag e isEnabled com chave desconhecida são rejeitados', async () => {
+  // Feature flags: 11. Chave desconhecida ou organizationId ausente são rejeitados
+  await t.test('11. setFlag e isEnabled com chave desconhecida ou sem organizationId lançam erro seguro', async () => {
     const service = new FeatureFlagService({} as any);
 
-    const isEnabledResult = await service.isEnabled('org_1', 'UNKNOWN_MODULE_XYZ');
-    assert.strictEqual(isEnabledResult, false);
+    await assert.rejects(
+      service.isEnabled('org_1', 'UNKNOWN_MODULE_XYZ'),
+      /Chave de feature flag inválida ou desconhecida/
+    );
+
+    await assert.rejects(
+      service.isEnabled('', 'FINANCIAL'),
+      /organizationId é obrigatório/
+    );
 
     await assert.rejects(
       service.setFlag('org_1', 'usr_admin', 'UNKNOWN_MODULE_XYZ', true),
       /Chave de feature flag inválida ou desconhecida/
+    );
+
+    await assert.rejects(
+      service.setFlag('', 'usr_admin', 'FINANCIAL', true),
+      /organizationId é obrigatório/
     );
   });
 
