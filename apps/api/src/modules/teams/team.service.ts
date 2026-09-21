@@ -23,7 +23,8 @@ export class TeamError extends Error {
 
 export interface TeamServiceContext {
   organizationId: string;
-  actorId: string;
+  actorUserId?: string;
+  actorId?: string;
   ipAddress?: string;
   userAgent?: string;
 }
@@ -154,7 +155,7 @@ export class TeamService {
       const auditService = new AuditService(tx);
       await auditService.record({
         organizationId: ctx.organizationId,
-        actorUserId: ctx.actorId,
+        actorUserId: ctx.actorUserId || ctx.actorId,
         action: 'team.created',
         entityType: 'Team',
         entityId: team.id,
@@ -229,7 +230,7 @@ export class TeamService {
       const auditService = new AuditService(tx);
       await auditService.record({
         organizationId: ctx.organizationId,
-        actorUserId: ctx.actorId,
+        actorUserId: ctx.actorUserId || ctx.actorId,
         action: 'team.updated',
         entityType: 'Team',
         entityId: updated.id,
@@ -307,7 +308,7 @@ export class TeamService {
       const auditService = new AuditService(tx);
       await auditService.record({
         organizationId: ctx.organizationId,
-        actorUserId: ctx.actorId,
+        actorUserId: ctx.actorUserId || ctx.actorId,
         action: 'team.members_changed',
         entityType: 'Team',
         entityId: team.id,
@@ -371,7 +372,7 @@ export class TeamService {
       const auditService = new AuditService(tx);
       await auditService.record({
         organizationId: ctx.organizationId,
-        actorUserId: ctx.actorId,
+        actorUserId: ctx.actorUserId || ctx.actorId,
         action: 'team.clients_changed',
         entityType: 'Team',
         entityId: team.id,

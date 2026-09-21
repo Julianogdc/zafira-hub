@@ -266,40 +266,77 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     const adminBUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_b@zafira.test' } });
     const adminBMemId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: orgB.id, userId: adminBUser.id } } })).id;
 
-    // 1. Admin A lista apenas Clients A
-    let clients = await svc.listClients({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, {});
-    assert.ok(clients.length > 0);
-    assert.ok(clients.every(c => c.organizationId === orgA.id));
-
-    // 2. Manager A lista apenas Clients A
-    clients = await svc.listClients({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, {});
-    assert.ok(clients.length > 0);
-    assert.ok(clients.every(c => c.organizationId === orgA.id));
-
-    // 3. Admin B lista apenas Client B
-    clients = await svc.listClients({ organizationId: orgB.id, membershipId: adminBMemId, role: 'ADMIN' }, {});
-    assert.ok(clients.length > 0);
-    assert.ok(clients.every(c => c.organizationId === orgB.id));
-
-    // 4. Member A lista somente Client A Assigned
-    clients = await svc.listClients({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, {});
-    assert.strictEqual(clients.length, 1);
-    assert.strictEqual(clients[0].name, 'Client A Assigned');
-
-    // 7. Admin A não lê Client B pelo clientId
-    const clientB = await prisma.client.findFirstOrThrow({ where: { organizationId: orgB.id } });
-    await assert.rejects(svc.getClientById({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, clientB.id));
-
-    // 8. Manager A não edita Client B pelo clientId
-    await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, clientB.id, { name: 'xxx' }));
-
+    // Fixtures dedicadas ao teste N
+    let clientDedicatedManager: any = null;
+    let clientDedicatedUnassigned: any = null;
     let newClient: any = null;
     let clientAAssigned: any = null;
 
     try {
+      // Cria client dedicado e atribui ao Manager A via UserClientAssignment
+      clientDedicatedManager = await prisma.client.create({
+        data: {
+          organizationId: orgA.id,
+          name: 'Client Manager Dedicated N',
+          status: 'ACTIVE',
+        },
+      });
+      await prisma.userClientAssignment.create({
+        data: {
+          organizationId: orgA.id,
+          organizationMemberId: managerMemId,
+          clientId: clientDedicatedManager.id,
+        },
+      });
+
+      clientDedicatedUnassigned = await prisma.client.create({
+        data: {
+          organizationId: orgA.id,
+          name: 'Client Manager Unassigned N',
+          status: 'ACTIVE',
+        },
+      });
+
+      // 1. Admin A lista todos os Clients de Org A (organization-wide)
+      let clients = await svc.listClients({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, {});
+      assert.ok(clients.length > 0);
+      assert.ok(clients.every(c => c.organizationId === orgA.id));
+      const adminClientNames = clients.map(c => c.name);
+      assert.ok(adminClientNames.includes('Client Manager Dedicated N'));
+      assert.ok(adminClientNames.includes('Client Manager Unassigned N'));
+
+      // 2. Manager A lista apenas Clients atribuídos a ele (direct assignment)
+      clients = await svc.listClients({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, {});
+      assert.ok(clients.length > 0);
+      assert.ok(clients.every(c => c.organizationId === orgA.id));
+      const managerClientNames = clients.map(c => c.name);
+      assert.ok(managerClientNames.includes('Client Manager Dedicated N'), 'Manager deve enxergar cliente atribuído');
+      assert.strictEqual(managerClientNames.includes('Client Manager Unassigned N'), false, 'Manager NÃO deve enxergar cliente não atribuído');
+
+      // 3. Admin B lista apenas Client B
+      clients = await svc.listClients({ organizationId: orgB.id, membershipId: adminBMemId, role: 'ADMIN' }, {});
+      assert.ok(clients.length > 0);
+      assert.ok(clients.every(c => c.organizationId === orgB.id));
+
+      // 4. Member A lista somente Client A Assigned
+      clients = await svc.listClients({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, {});
+      assert.strictEqual(clients.length, 1);
+      assert.strictEqual(clients[0].name, 'Client A Assigned');
+
+      // 7. Admin A não lê Client B pelo clientId
+      const clientB = await prisma.client.findFirstOrThrow({ where: { organizationId: orgB.id } });
+      await assert.rejects(svc.getClientById({ organizationId: orgA.id, membershipId: adminMemId, role: 'ADMIN' }, clientB.id));
+
+      // 8. Manager A não edita Client B pelo clientId
+      await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, clientB.id, { name: 'xxx' }));
+
+      // 8.1 Manager A não edita Client não atribuído dentro da mesma Org A
+      await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: managerMemId, role: 'MANAGER' }, clientDedicatedUnassigned.id, { name: 'xxx' }));
+
       // 9. Member A com override clients.edit=true pode editar Client A Assigned
       clientAAssigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Assigned' } });
       await svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAAssigned.id, { name: 'Client A Assigned Edited' });
+
       // 10. O mesmo Member A NÃO pode editar Client A Unassigned
       const clientAUnassigned = await prisma.client.findFirstOrThrow({ where: { organizationId: orgA.id, name: 'Client A Unassigned' } });
       await assert.rejects(svc.updateClient({ organizationId: orgA.id, membershipId: memberMemId, role: 'MEMBER' }, clientAUnassigned.id, { name: 'xxx' }));
@@ -329,6 +366,13 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       // Remove o cliente temporário criado no teste N
       if (newClient) {
         await prisma.client.deleteMany({ where: { id: newClient.id } });
+      }
+      if (clientDedicatedManager) {
+        await prisma.userClientAssignment.deleteMany({ where: { clientId: clientDedicatedManager.id } });
+        await prisma.client.deleteMany({ where: { id: clientDedicatedManager.id } });
+      }
+      if (clientDedicatedUnassigned) {
+        await prisma.client.deleteMany({ where: { id: clientDedicatedUnassigned.id } });
       }
     }
   });

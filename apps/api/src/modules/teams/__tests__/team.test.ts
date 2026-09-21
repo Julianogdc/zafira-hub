@@ -25,8 +25,11 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
   const originalDeleteManyTeamClient = (prisma as any).teamClientAssignment.deleteMany;
   const originalCreateManyTeamClient = (prisma as any).teamClientAssignment.createMany;
   const originalFindManyClient = (prisma as any).client.findMany;
+  const originalFindFirstClient = (prisma as any).client.findFirst;
   const originalCreateAudit = (prisma as any).auditLog.create;
   const originalTransaction = prisma.$transaction;
+
+  const capturedAudits: any[] = [];
 
   t.after(async () => {
     process.env.HUB_INTERNAL_API_KEY = previousApiKey;
@@ -43,6 +46,7 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     (prisma as any).teamClientAssignment.deleteMany = originalDeleteManyTeamClient;
     (prisma as any).teamClientAssignment.createMany = originalCreateManyTeamClient;
     (prisma as any).client.findMany = originalFindManyClient;
+    (prisma as any).client.findFirst = originalFindFirstClient;
     (prisma as any).auditLog.create = originalCreateAudit;
     prisma.$transaction = originalTransaction;
     await app.close();
@@ -146,11 +150,17 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     if (role === 'MANAGER' && perm === 'teams.view') {
       return { role: 'MANAGER', permissionCode: 'teams.view' };
     }
+    if (role === 'MEMBER' && perm === 'clients.view') {
+      return { role: 'MEMBER', permissionCode: 'clients.view' };
+    }
     return null;
   }) as any;
 
   prisma.$transaction = (async (fn: any) => fn(prisma)) as any;
-  (prisma as any).auditLog.create = (async () => ({ id: 'aud_test_1' })) as any;
+  (prisma as any).auditLog.create = (async (args: any) => {
+    capturedAudits.push(args);
+    return { id: `aud_${capturedAudits.length}` };
+  }) as any;
 
   await t.test('1. GET /api/v1/teams sem autenticação retorna 401', async () => {
     const res = await app.inject({
@@ -231,7 +241,8 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     assert.strictEqual(body.error, 'forbidden');
   });
 
-  await t.test('6. ADMIN com teams.manage cria equipe (POST /api/v1/teams) retorna 201', async () => {
+  await t.test('6. ADMIN com teams.manage cria equipe (POST /api/v1/teams) retorna 201 e grava AuditLog com actorUserId', async () => {
+    capturedAudits.length = 0;
     (prisma as any).team.create = (async () => ({
       id: 'team_created_1',
       name: 'Squad Growth',
@@ -255,6 +266,15 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     const body = JSON.parse(res.body);
     assert.strictEqual(body.status, 'success');
     assert.strictEqual(body.data.name, 'Squad Growth');
+
+    // Asserção do AuditLog
+    assert.strictEqual(capturedAudits.length, 1);
+    const audit = capturedAudits[0].data;
+    assert.strictEqual(audit.organizationId, orgId);
+    assert.strictEqual(audit.actorUserId, adminUserId, 'actorUserId deve ser exatamente o id do usuário autenticado');
+    assert.notStrictEqual(audit.actorUserId, null);
+    assert.strictEqual(audit.action, 'team.created');
+    assert.strictEqual(audit.entityType, 'Team');
   });
 
   await t.test('7. POST /api/v1/teams com payload inválido retorna 400 VALIDATION_ERROR', async () => {
@@ -273,7 +293,8 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     assert.strictEqual(body.code, 'VALIDATION_ERROR');
   });
 
-  await t.test('8. PUT /api/v1/teams/:teamId/members atualiza membros e retorna 200', async () => {
+  await t.test('8. PUT /api/v1/teams/:teamId/members atualiza membros e grava AuditLog com actorUserId', async () => {
+    capturedAudits.length = 0;
     (prisma as any).team.findFirst = (async () => ({ id: 'team_1', organizationId: orgId })) as any;
     (prisma as any).organizationMember.findMany = (async () => [{ id: 'mem_admin' }, { id: 'mem_manager' }]) as any;
     (prisma as any).teamMember.deleteMany = (async () => ({ count: 1 })) as any;
@@ -292,9 +313,16 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     assert.strictEqual(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.strictEqual(body.status, 'success');
+
+    assert.strictEqual(capturedAudits.length, 1);
+    const audit = capturedAudits[0].data;
+    assert.strictEqual(audit.organizationId, orgId);
+    assert.strictEqual(audit.actorUserId, adminUserId, 'actorUserId deve ser preenchido');
+    assert.strictEqual(audit.action, 'team.members_changed');
   });
 
-  await t.test('9. PUT /api/v1/teams/:teamId/clients atualiza clientes e retorna 200', async () => {
+  await t.test('9. PUT /api/v1/teams/:teamId/clients atualiza clientes e grava AuditLog com actorUserId', async () => {
+    capturedAudits.length = 0;
     (prisma as any).team.findFirst = (async () => ({ id: 'team_1', organizationId: orgId })) as any;
     (prisma as any).client.findMany = (async () => [{ id: 'cli_1' }, { id: 'cli_2' }]) as any;
     (prisma as any).teamClientAssignment.deleteMany = (async () => ({ count: 1 })) as any;
@@ -313,5 +341,79 @@ test('Módulo de Equipes (Teams) - Testes de Unidade e HTTP', async (t) => {
     assert.strictEqual(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.strictEqual(body.status, 'success');
+
+    assert.strictEqual(capturedAudits.length, 1);
+    const audit = capturedAudits[0].data;
+    assert.strictEqual(audit.organizationId, orgId);
+    assert.strictEqual(audit.actorUserId, adminUserId, 'actorUserId deve ser preenchido');
+    assert.strictEqual(audit.action, 'team.clients_changed');
+  });
+
+  await t.test('10. PATCH /api/v1/teams/:teamId atualiza equipe e grava AuditLog com actorUserId', async () => {
+    capturedAudits.length = 0;
+    (prisma as any).team.findFirst = (async () => ({ id: 'team_1', name: 'Old Name', isActive: true, organizationId: orgId, _count: { members: 0, clientAssignments: 0 } })) as any;
+    (prisma as any).team.update = (async () => ({ id: 'team_1', name: 'New Name', isActive: false, createdAt: new Date(), updatedAt: new Date(), _count: { members: 0, clientAssignments: 0 } })) as any;
+
+    const res = await app.inject({
+      method: 'PATCH',
+      url: '/api/v1/teams/team_1',
+      headers: {
+        authorization: `Bearer ${adminToken}`,
+      },
+      payload: {
+        name: 'New Name',
+        isActive: false,
+      },
+    });
+    assert.strictEqual(res.statusCode, 200);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.status, 'success');
+
+    assert.strictEqual(capturedAudits.length, 1);
+    const audit = capturedAudits[0].data;
+    assert.strictEqual(audit.organizationId, orgId);
+    assert.strictEqual(audit.actorUserId, adminUserId);
+    assert.strictEqual(audit.action, 'team.updated');
+  });
+
+  await t.test('11. Team NÃO concede permission via HTTP: MEMBER em Team com Client X, mas com override clients.view=false, recebe 403 ao fazer GET /clients/:id', async () => {
+    // Configura override individual clients.view = false para o membro
+    prisma.organizationMember.findUnique = (async ({ where }: any) => {
+      const uid = where.organizationId_userId?.userId || where.id;
+      if (uid === memberUserId || uid === 'mem_member') {
+        return {
+          id: 'mem_member',
+          organizationId: orgId,
+          userId: memberUserId,
+          role: 'MEMBER',
+          status: 'ACTIVE',
+          organization: { id: orgId, slug: 'org-teams' },
+          user: { id: memberUserId, name: 'Member Test', email: 'member@teams.test', status: 'ACTIVE' },
+          permissions: [
+            {
+              permissionCode: 'clients.view',
+              allowed: false, // Override individual explícito de negação
+            },
+          ],
+          clientAssignments: [],
+        };
+      }
+      return null;
+    }) as any;
+
+    // Executa GET /clients/cli_team_x
+    const res = await app.inject({
+      method: 'GET',
+      url: '/clients/cli_team_x',
+      headers: {
+        authorization: `Bearer ${memberToken}`,
+      },
+    });
+
+    // Deve ser bloqueado pelo middleware requirePermission('clients.view') com 403 FORBIDDEN
+    assert.strictEqual(res.statusCode, 403);
+    const body = JSON.parse(res.body);
+    assert.strictEqual(body.error, 'forbidden');
+    assert.strictEqual(body.message, 'Permissao insuficiente para executar esta acao');
   });
 });

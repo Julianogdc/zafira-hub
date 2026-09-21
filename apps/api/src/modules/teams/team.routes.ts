@@ -24,6 +24,18 @@ function handleControllerError(err: any, reply: FastifyReply) {
   });
 }
 
+function getActorUserId(request: FastifyRequest, reply: FastifyReply): string | null {
+  if (request.authContext?.type === 'user' && request.authContext.userId) {
+    return request.authContext.userId;
+  }
+  reply.status(401).send({
+    status: 'error',
+    code: 'UNAUTHORIZED',
+    message: 'Usuário autenticado obrigatório para esta operação',
+  });
+  return null;
+}
+
 export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   /**
    * GET /api/v1/teams
@@ -85,7 +97,8 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const organizationId = request.authorizationResult!.organizationId;
-      const actorId = request.authorizationResult!.userId!;
+      const actorUserId = getActorUserId(request, reply);
+      if (!actorUserId) return;
 
       const parseResult = CreateTeamRequestSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -101,7 +114,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         const team = await teamService.createTeam(
           {
             organizationId,
-            actorId,
+            actorUserId,
             ipAddress: request.ip,
             userAgent: request.headers['user-agent'] as string | undefined,
           },
@@ -129,7 +142,9 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
     async (request, reply) => {
       const organizationId = request.authorizationResult!.organizationId;
-      const actorId = request.authorizationResult!.userId!;
+      const actorUserId = getActorUserId(request, reply);
+      if (!actorUserId) return;
+
       const { teamId } = request.params;
 
       const parseResult = UpdateTeamRequestSchema.safeParse(request.body);
@@ -146,7 +161,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         const team = await teamService.updateTeam(
           {
             organizationId,
-            actorId,
+            actorUserId,
             ipAddress: request.ip,
             userAgent: request.headers['user-agent'] as string | undefined,
           },
@@ -175,7 +190,9 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
     async (request, reply) => {
       const organizationId = request.authorizationResult!.organizationId;
-      const actorId = request.authorizationResult!.userId!;
+      const actorUserId = getActorUserId(request, reply);
+      if (!actorUserId) return;
+
       const { teamId } = request.params;
 
       const parseResult = ReplaceTeamMembersRequestSchema.safeParse(request.body);
@@ -192,7 +209,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         await teamService.replaceMembers(
           {
             organizationId,
-            actorId,
+            actorUserId,
             ipAddress: request.ip,
             userAgent: request.headers['user-agent'] as string | undefined,
           },
@@ -221,7 +238,9 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
     },
     async (request, reply) => {
       const organizationId = request.authorizationResult!.organizationId;
-      const actorId = request.authorizationResult!.userId!;
+      const actorUserId = getActorUserId(request, reply);
+      if (!actorUserId) return;
+
       const { teamId } = request.params;
 
       const parseResult = ReplaceTeamClientsRequestSchema.safeParse(request.body);
@@ -238,7 +257,7 @@ export const teamRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
         await teamService.replaceClients(
           {
             organizationId,
-            actorId,
+            actorUserId,
             ipAddress: request.ip,
             userAgent: request.headers['user-agent'] as string | undefined,
           },
