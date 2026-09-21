@@ -121,11 +121,14 @@ async function main() {
     });
 
     // 4. Upsert Memberships (User A -> Org A [ADMIN, ACTIVE]; User B -> Org B [ADMIN, ACTIVE])
-    await tx.membership.upsert({
-      where: { id: USER_A.membershipId },
+    await tx.organizationMember.upsert({
+      where: {
+        organizationId_userId: {
+          organizationId: ORG_A.id,
+          userId: USER_A.id,
+        },
+      },
       update: {
-        userId: USER_A.id,
-        organizationId: ORG_A.id,
         role: 'ADMIN',
         status: 'ACTIVE',
       },
@@ -138,11 +141,14 @@ async function main() {
       },
     });
 
-    await tx.membership.upsert({
-      where: { id: USER_B.membershipId },
+    await tx.organizationMember.upsert({
+      where: {
+        organizationId_userId: {
+          organizationId: ORG_B.id,
+          userId: USER_B.id,
+        },
+      },
       update: {
-        userId: USER_B.id,
-        organizationId: ORG_B.id,
         role: 'ADMIN',
         status: 'ACTIVE',
       },
