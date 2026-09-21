@@ -577,6 +577,40 @@ jobs:
           fi
           echo "Contagem de migrations = 14 (PASS)"
 
+      - name: Seed Multi-Org Fixture using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando seed de fixture multi-organização via imagem publicada..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            -e GATE_PASSWORD_A="GatePassSecretA#2026Secure!" \
+            -e GATE_PASSWORD_B="GatePassSecretB#2026Secure!" \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/seed-multiorg-gate.mjs:/app/seed-multiorg-gate.mjs:ro" \
+            "${API_REF}" \
+            node /app/seed-multiorg-gate.mjs
+
+      - name: Bootstrap RBAC Permissions (First & Second Pass Idempotency)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando 1º bootstrap de RBAC..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run rbac:bootstrap --workspace=@zafira/api
+
+          echo "Executando 2º bootstrap de RBAC (teste de idempotência)..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run rbac:bootstrap --workspace=@zafira/api
+
       - name: Launch Staging API Container
         run: |
           API_REF="${{ needs.publish-images.outputs.api_ref }}"
@@ -653,6 +687,19 @@ jobs:
           export WEB_BASE_URL="http://127.0.0.1:8082"
           export HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123"
           bash scripts/homologation/smoke.sh
+
+      - name: Rehearse Multi-Organization Final Gate via HTTP
+        run: |
+          echo "Iniciando bateria de testes do portão de isolamento multi-organização via HTTP..."
+          export WEB_BASE_URL="http://127.0.0.1:8082"
+          export ORG_A_ID="11111111-1111-4111-8111-111111111111"
+          export ORG_B_ID="22222222-2222-4222-8222-222222222222"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export GATE_PASSWORD_A="GatePassSecretA#2026Secure!"
+          export GATE_PASSWORD_B="GatePassSecretB#2026Secure!"
+
+          bash scripts/homologation/multiorg-isolation-gate.sh
 
       - name: Rehearsal Rollback Mechanics (Baseline Pair)
         run: |
