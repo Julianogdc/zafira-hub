@@ -112,7 +112,7 @@ test('--- Canonical Auth Suite ---', async (t) => {
 
   await t.test('1. login válido, uma membership resolve organização', async () => {
     mockUser = { id: 'usr-1', email: 'test@zafira.com.br', name: 'Test', status: 'ACTIVE' };
-    mockMemberships = [{ organizationId: 'org-1', organization: { id: 'org-1', name: 'Org 1', slug: 'org-1' }, role: 'ADMIN' }];
+    mockMemberships = [{ organizationId: 'org-1', organization: { id: 'org-1', name: 'Org 1', slug: 'org-1' }, role: 'ADMIN', status: 'ACTIVE' }];
 
     const response = await app.inject({
       method: 'POST',
@@ -174,8 +174,8 @@ test('--- Canonical Auth Suite ---', async (t) => {
   await t.test('6. múltiplas memberships não escolhem primeira silenciosamente', async () => {
     mockUser = { id: 'usr-mult', email: 'mult@zafira.com.br', name: 'Mult', status: 'ACTIVE' };
     mockMemberships = [
-      { organizationId: 'org-A', organization: { id: 'org-A', name: 'Org A', slug: 'org-a' }, role: 'ADMIN' },
-      { organizationId: 'org-B', organization: { id: 'org-B', name: 'Org B', slug: 'org-b' }, role: 'MEMBER' }
+      { organizationId: 'org-A', organization: { id: 'org-A', name: 'Org A', slug: 'org-a' }, role: 'ADMIN', status: 'ACTIVE' },
+      { organizationId: 'org-B', organization: { id: 'org-B', name: 'Org B', slug: 'org-b' }, role: 'MEMBER', status: 'ACTIVE' }
     ];
 
     const response = await app.inject({
@@ -192,8 +192,8 @@ test('--- Canonical Auth Suite ---', async (t) => {
   await t.test('7. organizationId válido aceito para membership correspondente', async () => {
     mockUser = { id: 'usr-mult', email: 'mult@zafira.com.br', name: 'Mult', status: 'ACTIVE' };
     mockMemberships = [
-      { organizationId: 'org-A', organization: { id: 'org-A', name: 'Org A', slug: 'org-a' }, role: 'ADMIN' },
-      { organizationId: 'org-B', organization: { id: 'org-B', name: 'Org B', slug: 'org-b' }, role: 'MEMBER' }
+      { organizationId: 'org-A', organization: { id: 'org-A', name: 'Org A', slug: 'org-a' }, role: 'ADMIN', status: 'ACTIVE' },
+      { organizationId: 'org-B', organization: { id: 'org-B', name: 'Org B', slug: 'org-b' }, role: 'MEMBER', status: 'ACTIVE' }
     ];
 
     const response = await app.inject({
@@ -219,7 +219,7 @@ test('--- Canonical Auth Suite ---', async (t) => {
 
   await t.test('9. session válida retorna usuário seguro', async () => {
     mockUser = { id: 'usr-sess', email: 'sess@zafira.com.br', name: 'Sess', status: 'ACTIVE' };
-    mockMemberships = [{ organizationId: 'org-1', organization: { id: 'org-1', name: 'Org 1', slug: 'org-1' }, role: 'ADMIN' }];
+    mockMemberships = [{ organizationId: 'org-1', organization: { id: 'org-1', name: 'Org 1', slug: 'org-1' }, role: 'ADMIN', status: 'ACTIVE' }];
 
     const token = await app.jwt.sign({ sub: mockUser.id, email: mockUser.email, activeOrganizationId: 'org-1' });
 

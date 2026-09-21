@@ -32,25 +32,25 @@ export class AuthService {
       throw new AppError(401, 'Credenciais inválidas');
     }
 
-    // Zero memberships: reject
-    if (user.memberships.length === 0) {
-      throw new AppError(403, 'Usuário não possui organizações associadas.');
+    const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
+
+    // Zero memberships ACTIVE: reject
+    if (activeMemberships.length === 0) {
+      throw new AppError(403, 'Usuário não possui organizações ativas associadas.');
     }
 
     let activeOrganizationId: string | null = null;
 
-    if (user.memberships.length === 1) {
-      activeOrganizationId = user.memberships[0].organizationId;
-    } else {
-      if (input.organizationId) {
-        const hasOrg = user.memberships.find(m => m.organizationId === input.organizationId);
-        if (!hasOrg) {
-          throw new AppError(403, 'Organização inválida ou não autorizada.');
-        }
-        activeOrganizationId = input.organizationId;
+    if (input.organizationId) {
+      const hasOrg = activeMemberships.find(m => m.organizationId === input.organizationId);
+      if (!hasOrg) {
+        throw new AppError(403, 'Organização inválida ou não autorizada.');
       }
-      // If organizationId not provided, leave activeOrganizationId = null
+      activeOrganizationId = input.organizationId;
+    } else if (activeMemberships.length === 1) {
+      activeOrganizationId = activeMemberships[0].organizationId;
     }
+    // Se não informou organizationId e há múltiplas memberships ativas: activeOrganizationId permanece null
 
     // Atualiza data do último login
     await prisma.user.update({
@@ -69,7 +69,7 @@ export class AuthService {
         avatarUrl: user.avatarUrl,
         status: user.status,
       },
-      organizations: user.memberships.map((m) => ({
+      organizations: activeMemberships.map((m) => ({
         id: m.organization.id,
         name: m.organization.name,
         slug: m.organization.slug,
@@ -104,18 +104,24 @@ export class AuthService {
       throw new AppError(401, 'Usuário inativo ou não encontrado');
     }
 
+    const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
+
+    if (activeMemberships.length === 0) {
+      throw new AppError(403, 'Usuário não possui organizações ativas associadas.');
+    }
+
     let activeOrganizationId: string | null = null;
 
-    if (user.memberships.length === 1) {
-      activeOrganizationId = user.memberships[0].organizationId;
+    if (activeMemberships.length === 1) {
+      activeOrganizationId = activeMemberships[0].organizationId;
     } else if (activeOrganizationIdFromToken) {
-      const hasOrg = user.memberships.find(m => m.organizationId === activeOrganizationIdFromToken);
+      const hasOrg = activeMemberships.find(m => m.organizationId === activeOrganizationIdFromToken);
       if (hasOrg) {
         activeOrganizationId = activeOrganizationIdFromToken;
       }
     }
 
-    const organizations = user.memberships.map((m) => ({
+    const organizations = activeMemberships.map((m) => ({
       id: m.organization.id,
       name: m.organization.name,
       slug: m.organization.slug,

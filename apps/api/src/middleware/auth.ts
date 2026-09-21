@@ -78,12 +78,13 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       });
 
       if (user && user.status === 'ACTIVE') {
+        const activeMemberships = user.memberships.filter((m) => !m.status || m.status === 'ACTIVE');
         request.authContext = {
           type: 'user',
           userId: user.id,
           email: user.email,
           activeOrganizationId: decoded.activeOrganizationId || null,
-          memberships: user.memberships.map((m) => ({
+          memberships: activeMemberships.map((m) => ({
             organizationId: m.organization.id,
             organizationSlug: m.organization.slug,
             role: m.role as any,

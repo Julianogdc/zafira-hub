@@ -28,7 +28,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
   await t.test('J - Testes Reais de Migration', async () => {
     const migrations = await prisma.$queryRaw<any[]>`SELECT * FROM _prisma_migrations`;
-    assert.strictEqual(migrations.length, 11, 'Deve haver exatamente 11 migrations aplicadas');
+    assert.strictEqual(migrations.length, 12, 'Deve haver exatamente 12 migrations aplicadas');
     for (const mig of migrations) {
       assert.ok(mig.finished_at, `Migration ${mig.migration_name} não foi finalizada`);
     }
@@ -495,5 +495,70 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     await prisma.organizationFeatureFlag.deleteMany({
       where: { organizationId: { in: [orgA.id, orgB.id] } },
     });
+  });
+
+  await t.test('R - Membership Lifecycle e Suspensão Organization-Scoped com PostgreSQL Real', async () => {
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+
+    // Criar usuário dedicado com 2 memberships no banco real
+    const multiUser = await prisma.user.create({
+      data: {
+        name: 'Multi Lifecycle User',
+        email: 'multi_lifecycle@zafira.test',
+        status: 'ACTIVE',
+        memberships: {
+          create: [
+            { organizationId: orgA.id, role: 'ADMIN', status: 'SUSPENDED' },
+            { organizationId: orgB.id, role: 'ADMIN', status: 'ACTIVE' },
+          ],
+        },
+      },
+      include: {
+        memberships: true,
+      },
+    });
+
+    try {
+      // 1. Resolver acesso na Org A (membership SUSPENDED) => DENY MEMBERSHIP_NOT_ACTIVE
+      const resA = await resolveAuthorizationContext({
+        userId: multiUser.id,
+        activeOrganizationId: orgA.id,
+        permissionCode: 'clients.view',
+      });
+      assert.strictEqual(resA.allowed, false, 'Acesso à Org A com membership SUSPENDED deve ser negado');
+      assert.strictEqual(resA.reason, 'MEMBERSHIP_NOT_ACTIVE');
+
+      // 2. Resolver acesso na Org B (membership ACTIVE) => ALLOW por RolePermission
+      const resB = await resolveAuthorizationContext({
+        userId: multiUser.id,
+        activeOrganizationId: orgB.id,
+        permissionCode: 'clients.view',
+      });
+      assert.strictEqual(resB.allowed, true, 'Acesso à Org B com membership ACTIVE deve ser permitido');
+      assert.strictEqual(resB.reason, 'GRANTED_BY_ROLE_PERMISSION');
+
+      // 3. Confirmar que no banco o status global do User PERMANECEU ACTIVE
+      const userInDb = await prisma.user.findUniqueOrThrow({ where: { id: multiUser.id } });
+      assert.strictEqual(userInDb.status, 'ACTIVE', 'User.status global deve permanecer ACTIVE mesmo com membership suspensa em Org A');
+
+      // 4. Testar membership com status INVITED
+      await prisma.organizationMember.update({
+        where: { organizationId_userId: { organizationId: orgA.id, userId: multiUser.id } },
+        data: { status: 'INVITED' },
+      });
+
+      const resAInvited = await resolveAuthorizationContext({
+        userId: multiUser.id,
+        activeOrganizationId: orgA.id,
+        permissionCode: 'clients.view',
+      });
+      assert.strictEqual(resAInvited.allowed, false, 'Acesso à Org A com membership INVITED deve ser negado');
+      assert.strictEqual(resAInvited.reason, 'MEMBERSHIP_NOT_ACTIVE');
+    } finally {
+      // Cleanup do usuário de teste
+      await prisma.organizationMember.deleteMany({ where: { userId: multiUser.id } });
+      await prisma.user.delete({ where: { id: multiUser.id } });
+    }
   });
 });

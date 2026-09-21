@@ -74,7 +74,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'user@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_1', role: 'MEMBER', organization: { id: orgId, slug: 'org-1' } }],
+      memberships: [{ id: 'mem_1', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-1' } }],
     })) as any;
 
     (prisma as any).organizationConfig.findUnique = (async () => ({
@@ -108,7 +108,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'user_hdr@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_h1', role: 'MEMBER', organization: { id: orgId, slug: 'org-h-a' } }],
+      memberships: [{ id: 'mem_h1', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-h-a' } }],
     })) as any;
 
     (prisma as any).organizationConfig.findUnique = (async () => ({
@@ -146,7 +146,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'user_cross@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_cross', role: 'MEMBER', organization: { id: userOrgId, slug: 'org-mine' } }],
+      memberships: [{ id: 'mem_cross', role: 'MEMBER', status: 'ACTIVE', organization: { id: userOrgId, slug: 'org-mine' } }],
     })) as any;
 
     (prisma as any).organizationConfig.findUnique = (async () => {
@@ -178,8 +178,8 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       email: 'multi@zafira.com',
       status: 'ACTIVE',
       memberships: [
-        { id: 'mem_m1', role: 'MEMBER', organization: { id: 'org_m1', slug: 'org-m1' } },
-        { id: 'mem_m2', role: 'MEMBER', organization: { id: 'org_m2', slug: 'org-m2' } },
+        { id: 'mem_m1', role: 'MEMBER', status: 'ACTIVE', organization: { id: 'org_m1', slug: 'org-m1' } },
+        { id: 'mem_m2', role: 'MEMBER', status: 'ACTIVE', organization: { id: 'org_m2', slug: 'org-m2' } },
       ],
     })) as any;
 
@@ -205,7 +205,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'single@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_s1', role: 'MEMBER', organization: { id: orgId, slug: 'org-s1' } }],
+      memberships: [{ id: 'mem_s1', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-s1' } }],
     })) as any;
 
     (prisma as any).organizationConfig.findUnique = (async () => ({
@@ -267,7 +267,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'user_fcross@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_fcross', role: 'MEMBER', organization: { id: userOrgId, slug: 'org-fmine' } }],
+      memberships: [{ id: 'mem_fcross', role: 'MEMBER', status: 'ACTIVE', organization: { id: userOrgId, slug: 'org-fmine' } }],
     })) as any;
 
     (prisma as any).organizationFeatureFlag.findMany = (async () => {
@@ -299,7 +299,7 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'user_flags@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_f1', role: 'MEMBER', organization: { id: orgId, slug: 'org-f1' } }],
+      memberships: [{ id: 'mem_f1', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-f1' } }],
     })) as any;
 
     (prisma as any).organizationFeatureFlag.findMany = (async () => [
@@ -333,12 +333,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'member@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_2', role: 'MEMBER', organization: { id: orgId, slug: 'org-1' } }],
+      memberships: [{ id: 'mem_2', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-1' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_2',
       role: 'MEMBER',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
       permissions: [],
@@ -367,12 +368,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'admin@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_adm', role: 'ADMIN', organization: { id: orgId, slug: 'org-1' } }],
+      memberships: [{ id: 'mem_adm', role: 'ADMIN', status: 'ACTIVE', organization: { id: orgId, slug: 'org-1' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_adm',
       role: 'ADMIN',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
       permissions: [],
@@ -427,12 +429,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'admin2@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_adm2', role: 'ADMIN', organization: { id: orgIdAuth, slug: 'org-safe' } }],
+      memberships: [{ id: 'mem_adm2', role: 'ADMIN', status: 'ACTIVE', organization: { id: orgIdAuth, slug: 'org-safe' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_adm2',
       role: 'ADMIN',
+      status: 'ACTIVE',
       organizationId: orgIdAuth,
       userId,
       permissions: [],
@@ -481,12 +484,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'member_f2@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_f2', role: 'MEMBER', organization: { id: orgId, slug: 'org-f1' } }],
+      memberships: [{ id: 'mem_f2', role: 'MEMBER', status: 'ACTIVE', organization: { id: orgId, slug: 'org-f1' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_f2',
       role: 'MEMBER',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
       permissions: [],
@@ -515,12 +519,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'admin_flag@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_af', role: 'ADMIN', organization: { id: orgId, slug: 'org-f1' } }],
+      memberships: [{ id: 'mem_af', role: 'ADMIN', status: 'ACTIVE', organization: { id: orgId, slug: 'org-f1' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_af',
       role: 'ADMIN',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
       permissions: [],
@@ -568,12 +573,13 @@ test('Organization Config & Feature Flags HTTP Routes', async (t) => {
       id: userId,
       email: 'admin_flag@zafira.com',
       status: 'ACTIVE',
-      memberships: [{ id: 'mem_af', role: 'ADMIN', organization: { id: orgId, slug: 'org-f1' } }],
+      memberships: [{ id: 'mem_af', role: 'ADMIN', status: 'ACTIVE', organization: { id: orgId, slug: 'org-f1' } }],
     })) as any;
 
     prisma.organizationMember.findUnique = (async () => ({
       id: 'mem_af',
       role: 'ADMIN',
+      status: 'ACTIVE',
       organizationId: orgId,
       userId,
       permissions: [],

@@ -19,6 +19,12 @@ enum Role {
   MEMBER
 }
 
+enum OrganizationMemberStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
 enum ClientStatus {
   LEAD
   ACTIVE
@@ -96,12 +102,13 @@ model User {
 }
 
 model OrganizationMember {
-  id             String   @id @default(uuid())
+  id             String                   @id @default(uuid())
   organizationId String
   userId         String
-  role           Role     @default(MEMBER)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  role           Role                     @default(MEMBER)
+  status         OrganizationMemberStatus @default(ACTIVE)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
 
   organization      Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user              User                           @relation(fields: [userId], references: [id], onDelete: Cascade)

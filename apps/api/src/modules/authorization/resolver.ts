@@ -43,6 +43,16 @@ export async function resolveAuthorizationContext({
     return { allowed: false, reason: 'NO_MEMBERSHIP_IN_ACTIVE_ORGANIZATION' };
   }
 
+  if (membership.status && membership.status !== 'ACTIVE') {
+    return {
+      allowed: false,
+      reason: 'MEMBERSHIP_NOT_ACTIVE',
+      membershipId: membership.id,
+      organizationId: membership.organizationId,
+      role: membership.role as RoleType,
+    };
+  }
+
   const role = membership.role as RoleType;
   const override = membership.permissions.length > 0 ? membership.permissions[0].allowed : undefined;
 
