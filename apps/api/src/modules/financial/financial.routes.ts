@@ -3,6 +3,7 @@ import { prisma } from '../../lib/prisma.js';
 import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { FinancialService } from './financial.service.js';
 import { FinancialCategoryService } from './financial-category.service.js';
+import { auditService } from '../audit/audit.service.js';
 import { FinancialReconciliationService } from './financial-reconciliation.service.js';
 import { AsaasService } from '../integrations/asaas/asaas.service.js';
 import { InterService } from '../integrations/inter/inter.service.js';
@@ -215,6 +216,19 @@ export async function financialRoutes(app: FastifyInstance) {
         type: body.type || 'EXPENSE',
         color: body.color,
       });
+
+      // Gravação de auditoria operacional (Etapa J)
+      await auditService.record({
+        organizationId,
+        actorUserId: req.authContext?.type === 'user' ? req.authContext.userId : null,
+        action: 'financial_category.created',
+        entityType: 'FinancialCategory',
+        entityId: category.id,
+        after: category,
+      }).catch((auditErr) => {
+        req.log?.warn?.({ err: auditErr }, 'Falha ao registrar AuditLog para financial_category.created');
+      });
+
       return reply.status(201).send(category);
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -236,6 +250,19 @@ export async function financialRoutes(app: FastifyInstance) {
 
     try {
       const updated = await categoryService.updateCategory(organizationId, id, body);
+
+      // Gravação de auditoria operacional (Etapa J)
+      await auditService.record({
+        organizationId,
+        actorUserId: req.authContext?.type === 'user' ? req.authContext.userId : null,
+        action: 'financial_category.updated',
+        entityType: 'FinancialCategory',
+        entityId: updated.id,
+        after: updated,
+      }).catch((auditErr) => {
+        req.log?.warn?.({ err: auditErr }, 'Falha ao registrar AuditLog para financial_category.updated');
+      });
+
       return reply.send(updated);
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });
@@ -256,6 +283,19 @@ export async function financialRoutes(app: FastifyInstance) {
 
     try {
       const archived = await categoryService.archiveCategory(organizationId, id);
+
+      // Gravação de auditoria operacional (Etapa J)
+      await auditService.record({
+        organizationId,
+        actorUserId: req.authContext?.type === 'user' ? req.authContext.userId : null,
+        action: 'financial_category.archived',
+        entityType: 'FinancialCategory',
+        entityId: id,
+        after: archived,
+      }).catch((auditErr) => {
+        req.log?.warn?.({ err: auditErr }, 'Falha ao registrar AuditLog para financial_category.archived');
+      });
+
       return reply.send({ success: true, category: archived });
     } catch (err: any) {
       return reply.status(400).send({ error: err.message });

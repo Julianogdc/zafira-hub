@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import { PrismaClient } from '@prisma/client';
 import { resolveAuthorizationContext } from '../modules/authorization/resolver.js';
 import { ClientsService } from '../modules/clients/clients.service.js';
+import { AuditService } from '../modules/audit/audit.service.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 
 // --- GUARD DE SEGURANÇA (ETAPA F) ---
@@ -332,5 +333,92 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       assert.strictEqual(e.statusCode, 404); // Should be not found instead of leaking existence
     }
     assert.ok(caughtError, 'O acesso de Org A para recurso da Org B deve ser negado (404 seguro)');
+  });
+
+  await t.test('P - AuditLog com PostgreSQL Real e Isolamento Multi-tenant', async () => {
+    const auditService = new AuditService(prisma);
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+    const adminAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
+    const adminBUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_b@zafira.test' } });
+
+    // 1. Criar AuditLog para Org A com dados sensíveis e não-sensíveis
+    const logA1 = await auditService.record({
+      organizationId: orgA.id,
+      actorUserId: adminAUser.id,
+      action: 'financial_category.created',
+      entityType: 'FinancialCategory',
+      entityId: 'cat_ci_a1',
+      before: null,
+      after: { name: 'Marketing Org A', passwordHash: 'secret_hash_a', apiKey: 'secret_key_a' },
+      metadata: { ip: '127.0.0.1', token: 'bearer_token_a' },
+    });
+
+    const logA2 = await auditService.record({
+      organizationId: orgA.id,
+      actorUserId: adminAUser.id,
+      action: 'user.suspended',
+      entityType: 'User',
+      entityId: 'usr_ci_a2',
+      after: { status: 'SUSPENDED' },
+    });
+
+    // 2. Criar AuditLog para Org B
+    const logB1 = await auditService.record({
+      organizationId: orgB.id,
+      actorUserId: adminBUser.id,
+      action: 'financial_category.created',
+      entityType: 'FinancialCategory',
+      entityId: 'cat_ci_b1',
+      after: { name: 'TI Org B', clientSecret: 'cs_secret_b' },
+    });
+
+    try {
+      // 3. list Org A retorna SOMENTE registros de Org A
+      const listA = await auditService.list({ organizationId: orgA.id });
+      assert.ok(listA.items.length >= 2, 'Org A deve conter ao menos os 2 logs criados');
+      const allOrgA = listA.items.every((item: any) => item.organizationId === orgA.id);
+      assert.strictEqual(allOrgA, true, 'Todos os itens retornados para Org A devem pertencer a Org A');
+      const hasLogBInA = listA.items.some((item: any) => item.id === logB1.id);
+      assert.strictEqual(hasLogBInA, false, 'Org A NUNCA deve ver logs de Org B');
+
+      // 4. list Org B retorna SOMENTE registros de Org B
+      const listB = await auditService.list({ organizationId: orgB.id });
+      assert.ok(listB.items.length >= 1, 'Org B deve conter ao menos o log criado');
+      const allOrgB = listB.items.every((item: any) => item.organizationId === orgB.id);
+      assert.strictEqual(allOrgB, true, 'Todos os itens retornados para Org B devem pertencer a Org B');
+      const hasLogAInB = listB.items.some((item: any) => item.id === logA1.id || item.id === logA2.id);
+      assert.strictEqual(hasLogAInB, false, 'Org B NUNCA deve ver logs de Org A');
+
+      // 5. Filtro por action funciona
+      const listAFiltered = await auditService.list({
+        organizationId: orgA.id,
+        action: 'user.suspended',
+      });
+      assert.strictEqual(listAFiltered.items.length, 1);
+      assert.strictEqual(listAFiltered.items[0].id, logA2.id);
+
+      // 6. Ator e entidade persistem corretamente
+      const fetchedA1 = listA.items.find((item: any) => item.id === logA1.id);
+      assert.ok(fetchedA1);
+      assert.strictEqual(fetchedA1.actorUserId, adminAUser.id);
+      assert.strictEqual(fetchedA1.entityType, 'FinancialCategory');
+      assert.strictEqual(fetchedA1.entityId, 'cat_ci_a1');
+      assert.strictEqual(fetchedA1.actorUser?.email, 'admin_a@zafira.test');
+
+      // 7. Payload sanitizado no banco não contém segredos originais
+      const afterPayload = fetchedA1.after as any;
+      const metadataPayload = fetchedA1.metadata as any;
+      assert.strictEqual(afterPayload.name, 'Marketing Org A');
+      assert.strictEqual(afterPayload.passwordHash, '[REDACTED]');
+      assert.strictEqual(afterPayload.apiKey, '[REDACTED]');
+      assert.strictEqual(metadataPayload.token, '[REDACTED]');
+      assert.strictEqual(metadataPayload.ip, '127.0.0.1');
+    } finally {
+      // Cleanup de registros criados
+      await prisma.auditLog.deleteMany({
+        where: { id: { in: [logA1.id, logA2.id, logB1.id] } },
+      });
+    }
   });
 });
