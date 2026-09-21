@@ -30,7 +30,7 @@ LOGIN_RES_A=$(curl -s -i -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"${GATE_EMAIL_A}\",\"password\":\"${GATE_PASSWORD_A}\",\"organizationId\":\"${ORG_A_ID}\"}")
 
-HTTP_STATUS_A=$(echo "${LOGIN_RES_A}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}')
+HTTP_STATUS_A=$(echo "${LOGIN_RES_A}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}' | tr -d '\r\n')
 if [ "${HTTP_STATUS_A}" -ne 200 ]; then
   echo "[-] FALHA: Login User A retornou HTTP ${HTTP_STATUS_A} (esperado 200)" >&2
   exit 1
@@ -46,7 +46,7 @@ if ! echo "${LOGIN_RES_A}" | grep -qi "SameSite="; then
   exit 1
 fi
 
-TOKEN_A=$(echo "${LOGIN_RES_A}" | grep -i '^Set-Cookie:' | sed -E 's/^Set-Cookie:[[:space:]]*token=([^;]+).*/\1/' | tr -d '\r\n')
+TOKEN_A=$(echo "${LOGIN_RES_A}" | grep -i 'set-cookie:' | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
 if [ -z "${TOKEN_A}" ]; then
   echo "[-] FALHA: Token A não encontrado no Set-Cookie." >&2
   exit 1
@@ -61,13 +61,13 @@ LOGIN_RES_B=$(curl -s -i -X POST "${WEB_BASE_URL}/hub-api/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"${GATE_EMAIL_B}\",\"password\":\"${GATE_PASSWORD_B}\",\"organizationId\":\"${ORG_B_ID}\"}")
 
-HTTP_STATUS_B=$(echo "${LOGIN_RES_B}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}')
+HTTP_STATUS_B=$(echo "${LOGIN_RES_B}" | grep -E '^HTTP/' | tail -n 1 | awk '{print $2}' | tr -d '\r\n')
 if [ "${HTTP_STATUS_B}" -ne 200 ]; then
   echo "[-] FALHA: Login User B retornou HTTP ${HTTP_STATUS_B} (esperado 200)" >&2
   exit 1
 fi
 
-TOKEN_B=$(echo "${LOGIN_RES_B}" | grep -i '^Set-Cookie:' | sed -E 's/^Set-Cookie:[[:space:]]*token=([^;]+).*/\1/' | tr -d '\r\n')
+TOKEN_B=$(echo "${LOGIN_RES_B}" | grep -i 'set-cookie:' | sed -E 's/.*[Tt]oken=([^;[:space:]]+).*/\1/' | head -n 1 | tr -d '\r\n[:space:]')
 if [ -z "${TOKEN_B}" ]; then
   echo "[-] FALHA: Token B não encontrado no Set-Cookie." >&2
   exit 1
@@ -115,8 +115,8 @@ echo "[*] Validando sessão de User A..."
 SESSION_A=$(curl -s -X GET "${WEB_BASE_URL}/hub-api/api/v1/auth/session" \
   -H "Cookie: token=${TOKEN_A}")
 
-if ! echo "${SESSION_A}" | grep -q "\"authenticated\":true"; then
-  echo "[-] FALHA: Sessão A não autenticada." >&2
+if ! echo "${SESSION_A}" | grep -qE '"authenticated"[[:space:]]*:[[:space:]]*true'; then
+  echo "[-] FALHA: Sessão A não autenticada. Resposta: ${SESSION_A}" >&2
   exit 1
 fi
 if ! echo "${SESSION_A}" | grep -q "${ORG_A_ID}"; then
@@ -133,8 +133,8 @@ echo "[*] Validando sessão de User B..."
 SESSION_B=$(curl -s -X GET "${WEB_BASE_URL}/hub-api/api/v1/auth/session" \
   -H "Cookie: token=${TOKEN_B}")
 
-if ! echo "${SESSION_B}" | grep -q "\"authenticated\":true"; then
-  echo "[-] FALHA: Sessão B não autenticada." >&2
+if ! echo "${SESSION_B}" | grep -qE '"authenticated"[[:space:]]*:[[:space:]]*true'; then
+  echo "[-] FALHA: Sessão B não autenticada. Resposta: ${SESSION_B}" >&2
   exit 1
 fi
 if ! echo "${SESSION_B}" | grep -q "${ORG_B_ID}"; then
@@ -156,7 +156,7 @@ CREATE_CLIENT_A_RES=$(curl -s -w "\n%{http_code}" -X POST "${WEB_BASE_URL}/hub-a
   -H "Cookie: token=${TOKEN_A}" \
   -d '{"name":"Gate Client A","status":"ACTIVE"}')
 
-STATUS_CREATE_A=$(echo "${CREATE_CLIENT_A_RES}" | tail -n 1)
+STATUS_CREATE_A=$(echo "${CREATE_CLIENT_A_RES}" | tail -n 1 | tr -d '\r\n')
 BODY_CREATE_A=$(echo "${CREATE_CLIENT_A_RES}" | sed '$d')
 
 if [ "${STATUS_CREATE_A}" -ne 201 ]; then
@@ -164,8 +164,8 @@ if [ "${STATUS_CREATE_A}" -ne 201 ]; then
   exit 1
 fi
 
-CLIENT_A_ID=$(echo "${BODY_CREATE_A}" | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-if [ -z "${CLIENT_A_ID}" ] || [ "${CLIENT_A_ID}" = "${BODY_CREATE_A}" ]; then
+CLIENT_A_ID=$(echo "${BODY_CREATE_A}" | sed -nE 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1 | tr -d '\r\n[:space:]')
+if [ -z "${CLIENT_A_ID}" ]; then
   echo "[-] FALHA: ID do Client A não pôde ser extraído." >&2
   exit 1
 fi
@@ -180,7 +180,7 @@ CREATE_CLIENT_B_RES=$(curl -s -w "\n%{http_code}" -X POST "${WEB_BASE_URL}/hub-a
   -H "Cookie: token=${TOKEN_B}" \
   -d '{"name":"Gate Client B","status":"ACTIVE"}')
 
-STATUS_CREATE_B=$(echo "${CREATE_CLIENT_B_RES}" | tail -n 1)
+STATUS_CREATE_B=$(echo "${CREATE_CLIENT_B_RES}" | tail -n 1 | tr -d '\r\n')
 BODY_CREATE_B=$(echo "${CREATE_CLIENT_B_RES}" | sed '$d')
 
 if [ "${STATUS_CREATE_B}" -ne 201 ]; then
@@ -188,8 +188,8 @@ if [ "${STATUS_CREATE_B}" -ne 201 ]; then
   exit 1
 fi
 
-CLIENT_B_ID=$(echo "${BODY_CREATE_B}" | sed -E 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-if [ -z "${CLIENT_B_ID}" ] || [ "${CLIENT_B_ID}" = "${BODY_CREATE_B}" ]; then
+CLIENT_B_ID=$(echo "${BODY_CREATE_B}" | sed -nE 's/.*"id"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/p' | head -n 1 | tr -d '\r\n[:space:]')
+if [ -z "${CLIENT_B_ID}" ]; then
   echo "[-] FALHA: ID do Client B não pôde ser extraído." >&2
   exit 1
 fi
