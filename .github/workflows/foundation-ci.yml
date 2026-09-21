@@ -260,3 +260,217 @@ jobs:
           docker rm -f api web || true
           docker network rm zafira-hub-smoke || true
           echo "Cleanup concluído."
+
+  publish-images:
+    name: Publish Images
+    runs-on: ubuntu-latest
+    needs: [quality, postgres-integration, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/hub-2.1'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Define Image Tags
+        id: tags
+        run: |
+          TAG="git-${{ github.sha }}-run-${{ github.run_id }}"
+          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "API Image: ghcr.io/julianogdc/zafira-hub-api:$TAG"
+          echo "Web Image: ghcr.io/julianogdc/zafira-hub-web:$TAG"
+
+      - name: Build and Push API Image
+        id: build-api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ghcr.io/julianogdc/zafira-hub-api:${{ steps.tags.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and Push Web Image
+        id: build-web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ghcr.io/julianogdc/zafira-hub-web:${{ steps.tags.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Generate Deployment Manifest
+        id: manifest
+        run: |
+          API_DIGEST="${{ steps.build-api.outputs.digest }}"
+          WEB_DIGEST="${{ steps.build-web.outputs.digest }}"
+          TAG="${{ steps.tags.outputs.image_tag }}"
+
+          API_IMMUTABLE_REF="ghcr.io/julianogdc/zafira-hub-api@${API_DIGEST}"
+          WEB_IMMUTABLE_REF="ghcr.io/julianogdc/zafira-hub-web@${WEB_DIGEST}"
+
+          cat <<EOF > deployment-manifest.json
+          {
+            "gitSha": "${{ github.sha }}",
+            "workflowRunId": "${{ github.run_id }}",
+            "publishedAt": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "api": {
+              "image": "ghcr.io/julianogdc/zafira-hub-api",
+              "tag": "${TAG}",
+              "digest": "${API_DIGEST}",
+              "immutableRef": "${API_IMMUTABLE_REF}"
+            },
+            "web": {
+              "image": "ghcr.io/julianogdc/zafira-hub-web",
+              "tag": "${TAG}",
+              "digest": "${WEB_DIGEST}",
+              "immutableRef": "${WEB_IMMUTABLE_REF}"
+            }
+          }
+          EOF
+
+          echo "Deployment Manifest Gerado:"
+          cat deployment-manifest.json
+
+          echo "### 🚀 Zafira Hub 2.1 — Immutable Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Git Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Workflow Run:** \`${{ github.run_id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Tag | Immutable Reference |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| :--- | :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **API** | \`${TAG}\` | \`${API_IMMUTABLE_REF}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Web** | \`${TAG}\` | \`${WEB_IMMUTABLE_REF}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Deployment Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zafira-hub-deployment-manifest-${{ github.sha }}
+          path: deployment-manifest.json
+          retention-days: 90
+
+      - name: Verify Published Images via Digest Pull & Smoke Test
+        run: |
+          API_DIGEST="${{ steps.build-api.outputs.digest }}"
+          WEB_DIGEST="${{ steps.build-web.outputs.digest }}"
+          API_REF="ghcr.io/julianogdc/zafira-hub-api@${API_DIGEST}"
+          WEB_REF="ghcr.io/julianogdc/zafira-hub-web@${WEB_DIGEST}"
+
+          echo "1. Efetuando pull das imagens publicadas por digest sha256..."
+          docker pull "${API_REF}"
+          docker pull "${WEB_REF}"
+
+          echo "2. Validando OCI revision das imagens publicadas..."
+          API_REV=$(docker inspect "${API_REF}" | grep '"org.opencontainers.image.revision"' | head -n 1)
+          WEB_REV=$(docker inspect "${WEB_REF}" | grep '"org.opencontainers.image.revision"' | head -n 1)
+          echo "API OCI Revision: $API_REV"
+          echo "Web OCI Revision: $WEB_REV"
+
+          echo "$API_REV" | grep -q "${{ github.sha }}" || {
+            echo "FALHA: Revision da API não corresponde ao Git SHA!"
+            exit 1
+          }
+          echo "$WEB_REV" | grep -q "${{ github.sha }}" || {
+            echo "FALHA: Revision do Web não corresponde ao Git SHA!"
+            exit 1
+          }
+
+          echo "3. Criando rede temporária de smoke para imagens publicadas..."
+          docker network create zafira-hub-registry-smoke
+
+          echo "4. Iniciando container API a partir do digest publicado..."
+          docker run -d \
+            --name api-published \
+            --network zafira-hub-registry-smoke \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
+            -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
+            "${API_REF}"
+
+          echo "5. Aguardando container API publicado atingir status healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-published 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API container publicado is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          API_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-published)
+          if [ "$API_STATUS" != "healthy" ]; then
+            echo "FALHA: Container API publicado não atingiu status healthy ($API_STATUS)"
+            docker logs api-published
+            exit 1
+          fi
+
+          echo "6. Testando endpoint GET /health na API publicada..."
+          docker exec api-published node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log(data); if (data.status !== 'ok') process.exit(1); })"
+          echo "API Published GET /health: PASS"
+
+          echo "7. Iniciando container Web a partir do digest publicado..."
+          docker run -d \
+            --name web-published \
+            --network zafira-hub-registry-smoke \
+            -p 8081:80 \
+            -e API_UPSTREAM="http://api-published:3001" \
+            "${WEB_REF}"
+
+          echo "8. Aguardando container Web publicado atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-published 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Web container publicado is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          WEB_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-published)
+          if [ "$WEB_STATUS" != "healthy" ]; then
+            echo "FALHA: Container Web publicado não atingiu status healthy ($WEB_STATUS)"
+            docker logs web-published
+            exit 1
+          fi
+
+          echo "9. Testando endpoint raiz do Web publicado (GET /)..."
+          curl -fsS http://127.0.0.1:8081/ > /dev/null
+          echo "Web Published Root GET /: PASS"
+
+          echo "10. Testando reverse proxy Web -> API via imagens publicadas (GET /hub-api/health)..."
+          PUB_RESP=$(curl -fsS http://127.0.0.1:8081/hub-api/health)
+          echo "Resposta recebida da imagem publicada via proxy: $PUB_RESP"
+          echo "$PUB_RESP" | grep -q '"status":"ok"' || echo "$PUB_RESP" | grep -q '"status": "ok"' || {
+            echo "FALHA: Resposta inesperada de /hub-api/health da imagem publicada!"
+            exit 1
+          }
+          echo "Reverse Proxy Published Smoke (/hub-api/health): PASS"
+
+      - name: Cleanup Registry Smoke Containers
+        if: always()
+        run: |
+          echo "Limpando containers e rede de smoke de registry..."
+          docker rm -f api-published web-published || true
+          docker network rm zafira-hub-registry-smoke || true
+          echo "Cleanup de registry smoke concluído."
