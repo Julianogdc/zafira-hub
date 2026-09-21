@@ -37,6 +37,9 @@ jobs:
       - name: Typecheck Domain
         run: npm run typecheck:domain
 
+      - name: Build Internal Packages
+        run: npm run build:internal
+
       - name: Typecheck API
         run: npm run typecheck:api
 
@@ -92,6 +95,9 @@ jobs:
 
       - name: Generate Prisma Client
         run: npm run prisma:generate
+
+      - name: Build Internal Packages
+        run: npm run build:internal
 
       - name: Apply Migrations
         run: npm run prisma:migrate:deploy
