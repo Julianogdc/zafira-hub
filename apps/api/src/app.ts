@@ -15,6 +15,7 @@ import { financialRoutes } from './modules/financial/financial.routes.js';
 import { auditRoutes } from './modules/audit/audit.routes.js';
 import { organizationConfigRoutes } from './modules/organization-config/organization-config.routes.js';
 import { usersRoutes } from './modules/users/users.routes.js';
+import { invitationsRoutes } from './modules/users/invitations.routes.js';
 
 export function buildApp(): FastifyInstance {
   const app = fastify({
@@ -122,6 +123,9 @@ export function buildApp(): FastifyInstance {
 
   // 14. Rotas de Gestão Administrativa de Usuários da Organização
   app.register(usersRoutes);
+
+  // 15. Rotas Públicas de Convites e Ativação
+  app.register(invitationsRoutes);
 
   return app;
 }

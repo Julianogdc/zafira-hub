@@ -1,7 +1,13 @@
+import argon2 from 'argon2';
 import { PrismaClient } from '@prisma/client';
 import { prisma as globalPrisma } from '../../lib/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
 import { isValidPermissionCode } from '@zafira/domain';
+import {
+  generateInvitationToken,
+  hashInvitationToken,
+  calculateInvitationExpiry,
+} from './invitation-token.js';
 import {
   ListUsersQuery,
   InviteUserRequest,
@@ -167,16 +173,19 @@ export class UsersService {
       throw new UserAdminError(404, 'USER_NOT_FOUND', 'Membro não encontrado nesta organização');
     }
 
-    const [allPermissions, rolePermissions] = await Promise.all([
-      this.db.permission.findMany({ orderBy: { code: 'asc' } }),
-      this.db.rolePermission.findMany({ where: { role: member.role } }),
-    ]);
+    const allPermissions = await this.db.permission.findMany({
+      orderBy: [{ area: 'asc' }, { code: 'asc' }],
+    });
+
+    const rolePermissions = await this.db.rolePermission.findMany({
+      where: { role: member.role },
+    });
 
     const rolePermissionCodes = new Set(rolePermissions.map((rp) => rp.permissionCode));
 
     const memberOverrideMap = new Map<string, boolean>();
-    for (const p of member.permissions) {
-      memberOverrideMap.set(p.permissionCode, p.allowed);
+    for (const op of member.permissions) {
+      memberOverrideMap.set(op.permissionCode, op.allowed);
     }
 
     const permissionsMatrix = allPermissions.map((p) => {
@@ -232,6 +241,10 @@ export class UsersService {
         },
       });
 
+      const rawToken = generateInvitationToken();
+      const tokenHash = hashInvitationToken(rawToken);
+      const expiresAt = calculateInvitationExpiry();
+
       if (existingUser) {
         if (existingUser.status === 'INACTIVE') {
           throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Usuário inativo globalmente no sistema');
@@ -259,6 +272,16 @@ export class UsersService {
           },
         });
 
+        await tx.organizationInvitation.create({
+          data: {
+            organizationId,
+            organizationMemberId: membership.id,
+            tokenHash,
+            expiresAt,
+            createdByUserId: actorUserId,
+          },
+        });
+
         await auditService.record({
           organizationId,
           actorUserId,
@@ -274,6 +297,18 @@ export class UsersService {
           },
         });
 
+        await auditService.record({
+          organizationId,
+          actorUserId,
+          action: 'user.invitation_issued',
+          entityType: 'OrganizationMember',
+          entityId: membership.id,
+          before: null,
+          after: {
+            expiresAt: expiresAt.toISOString(),
+          },
+        });
+
         return {
           membershipId: membership.id,
           userId: existingUser.id,
@@ -282,6 +317,11 @@ export class UsersService {
           role: membership.role,
           membershipStatus: membership.status,
           createdAt: membership.createdAt.toISOString(),
+          invitation: {
+            token: rawToken,
+            expiresAt: expiresAt.toISOString(),
+            acceptPath: `/invite?token=${rawToken}`,
+          },
         };
       }
 
@@ -303,6 +343,16 @@ export class UsersService {
         },
       });
 
+      await tx.organizationInvitation.create({
+        data: {
+          organizationId,
+          organizationMemberId: membership.id,
+          tokenHash,
+          expiresAt,
+          createdByUserId: actorUserId,
+        },
+      });
+
       await auditService.record({
         organizationId,
         actorUserId,
@@ -318,6 +368,18 @@ export class UsersService {
         },
       });
 
+      await auditService.record({
+        organizationId,
+        actorUserId,
+        action: 'user.invitation_issued',
+        entityType: 'OrganizationMember',
+        entityId: membership.id,
+        before: null,
+        after: {
+          expiresAt: expiresAt.toISOString(),
+        },
+      });
+
       return {
         membershipId: membership.id,
         userId: newUser.id,
@@ -326,6 +388,11 @@ export class UsersService {
         role: membership.role,
         membershipStatus: membership.status,
         createdAt: membership.createdAt.toISOString(),
+        invitation: {
+          token: rawToken,
+          expiresAt: expiresAt.toISOString(),
+          acceptPath: `/invite?token=${rawToken}`,
+        },
       };
     });
   }
@@ -809,6 +876,359 @@ export class UsersService {
       });
 
       return { success: true };
+    });
+  }
+
+  async reissueInvitation(
+    organizationId: string,
+    actorUserId: string | null,
+    membershipId: string
+  ) {
+    return await this.db.$transaction(async (tx) => {
+      const auditService = new AuditService(tx as PrismaClient);
+
+      const member = await tx.organizationMember.findUnique({
+        where: {
+          organizationId_id: {
+            organizationId,
+            id: membershipId,
+          },
+        },
+        include: {
+          user: true,
+          invitation: true,
+        },
+      });
+
+      if (!member) {
+        throw new UserAdminError(404, 'USER_NOT_FOUND', 'Membro não encontrado nesta organização');
+      }
+
+      if (member.status === 'ACTIVE') {
+        throw new UserAdminError(409, 'USER_ALREADY_MEMBER', 'Usuário já é membro ativo desta organização');
+      }
+
+      if (member.status === 'SUSPENDED') {
+        throw new UserAdminError(409, 'USER_MEMBERSHIP_SUSPENDED', 'A participação deste usuário nesta organização está suspensa');
+      }
+
+      if (member.user.status === 'INACTIVE') {
+        throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Usuário inativo globalmente no sistema');
+      }
+
+      if (member.status !== 'INVITED') {
+        throw new UserAdminError(409, 'INVITATION_NOT_PENDING', 'Participação do usuário não está pendente de convite');
+      }
+
+      const rawToken = generateInvitationToken();
+      const tokenHash = hashInvitationToken(rawToken);
+      const expiresAt = calculateInvitationExpiry();
+
+      if (member.invitation) {
+        const previousExpiry = member.invitation.expiresAt;
+        await tx.organizationInvitation.update({
+          where: { id: member.invitation.id },
+          data: {
+            tokenHash,
+            expiresAt,
+            acceptedAt: null,
+            createdByUserId: actorUserId,
+          },
+        });
+
+        await auditService.record({
+          organizationId,
+          actorUserId,
+          action: 'user.invitation_reissued',
+          entityType: 'OrganizationMember',
+          entityId: member.id,
+          before: {
+            expiresAt: previousExpiry.toISOString(),
+          },
+          after: {
+            expiresAt: expiresAt.toISOString(),
+          },
+        });
+      } else {
+        await tx.organizationInvitation.create({
+          data: {
+            organizationId,
+            organizationMemberId: member.id,
+            tokenHash,
+            expiresAt,
+            createdByUserId: actorUserId,
+          },
+        });
+
+        await auditService.record({
+          organizationId,
+          actorUserId,
+          action: 'user.invitation_issued',
+          entityType: 'OrganizationMember',
+          entityId: member.id,
+          before: null,
+          after: {
+            expiresAt: expiresAt.toISOString(),
+          },
+        });
+      }
+
+      return {
+        membershipId: member.id,
+        invitation: {
+          token: rawToken,
+          expiresAt: expiresAt.toISOString(),
+          acceptPath: `/invite?token=${rawToken}`,
+        },
+      };
+    });
+  }
+
+  async inspectInvitation(token: string) {
+    const trimmedToken = (token || '').trim();
+    if (!trimmedToken) {
+      throw new UserAdminError(400, 'INVALID_INVITATION_TOKEN', 'Token de convite inválido ou ausente');
+    }
+
+    const tokenHash = hashInvitationToken(trimmedToken);
+
+    const invitation = await this.db.organizationInvitation.findUnique({
+      where: { tokenHash },
+      include: {
+        organization: true,
+        member: {
+          include: {
+            user: true,
+          },
+        },
+      },
+    });
+
+    if (!invitation) {
+      throw new UserAdminError(400, 'INVALID_INVITATION_TOKEN', 'Token de convite inválido');
+    }
+
+    if (invitation.acceptedAt !== null) {
+      throw new UserAdminError(409, 'INVITATION_ALREADY_ACCEPTED', 'Este convite já foi aceito anteriormente');
+    }
+
+    if (invitation.expiresAt < new Date()) {
+      throw new UserAdminError(410, 'INVITATION_EXPIRED', 'Este convite expirou');
+    }
+
+    if (invitation.member.status !== 'INVITED') {
+      throw new UserAdminError(409, 'INVITATION_NOT_PENDING', 'A participação associada a este convite não está pendente');
+    }
+
+    if (invitation.member.user.status === 'INACTIVE') {
+      throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Usuário inativo globalmente no sistema');
+    }
+
+    return {
+      valid: true as const,
+      organization: {
+        name: invitation.organization.name,
+        slug: invitation.organization.slug,
+      },
+      invitedUser: {
+        name: invitation.member.user.name,
+        email: invitation.member.user.email,
+      },
+      role: invitation.member.role,
+      expiresAt: invitation.expiresAt.toISOString(),
+      requiresPassword: invitation.member.user.status === 'INVITED',
+    };
+  }
+
+  async acceptInvitation(token: string, password?: string) {
+    const trimmedToken = (token || '').trim();
+    if (!trimmedToken) {
+      throw new UserAdminError(400, 'INVALID_INVITATION_TOKEN', 'Token de convite inválido ou ausente');
+    }
+
+    return await this.db.$transaction(async (tx) => {
+      const auditService = new AuditService(tx as PrismaClient);
+      const tokenHash = hashInvitationToken(trimmedToken);
+
+      const invitation = await tx.organizationInvitation.findUnique({
+        where: { tokenHash },
+        include: {
+          member: {
+            include: {
+              user: true,
+            },
+          },
+        },
+      });
+
+      if (!invitation) {
+        throw new UserAdminError(400, 'INVALID_INVITATION_TOKEN', 'Token de convite inválido');
+      }
+
+      if (invitation.acceptedAt !== null) {
+        throw new UserAdminError(409, 'INVITATION_ALREADY_ACCEPTED', 'Este convite já foi aceito anteriormente');
+      }
+
+      if (invitation.expiresAt < new Date()) {
+        throw new UserAdminError(410, 'INVITATION_EXPIRED', 'Este convite expirou');
+      }
+
+      if (invitation.member.status !== 'INVITED') {
+        throw new UserAdminError(409, 'INVITATION_NOT_PENDING', 'A participação associada a este convite não está pendente');
+      }
+
+      const user = invitation.member.user;
+
+      if (user.status === 'INACTIVE') {
+        throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Usuário inativo globalmente no sistema');
+      }
+
+      if (user.status === 'INVITED') {
+        // CASO A: Novo usuário — senha obrigatória
+        if (!password || password.length < 8) {
+          throw new UserAdminError(
+            400,
+            'PASSWORD_REQUIRED',
+            'Senha obrigatória com no mínimo 8 caracteres para ativação de novo usuário'
+          );
+        }
+
+        const hashedPassword = await argon2.hash(password);
+
+        // Update condicional race-safe do convite
+        const invUpdate = await tx.organizationInvitation.updateMany({
+          where: {
+            id: invitation.id,
+            acceptedAt: null,
+          },
+          data: {
+            acceptedAt: new Date(),
+          },
+        });
+
+        if (invUpdate.count !== 1) {
+          throw new UserAdminError(409, 'INVITATION_ALREADY_ACCEPTED', 'Este convite já foi aceito anteriormente');
+        }
+
+        // Update condicional race-safe da membership
+        const memUpdate = await tx.organizationMember.updateMany({
+          where: {
+            id: invitation.organizationMemberId,
+            organizationId: invitation.organizationId,
+            status: 'INVITED',
+          },
+          data: {
+            status: 'ACTIVE',
+          },
+        });
+
+        if (memUpdate.count !== 1) {
+          throw new UserAdminError(409, 'INVITATION_NOT_PENDING', 'A participação associada a este convite não está pendente');
+        }
+
+        // Update condicional race-safe do usuário global
+        const userUpdate = await tx.user.updateMany({
+          where: {
+            id: user.id,
+            status: 'INVITED',
+          },
+          data: {
+            status: 'ACTIVE',
+            passwordHash: hashedPassword,
+          },
+        });
+
+        if (userUpdate.count !== 1) {
+          throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Estado do usuário global foi modificado');
+        }
+
+        await auditService.record({
+          organizationId: invitation.organizationId,
+          actorUserId: user.id,
+          action: 'user.invitation_accepted',
+          entityType: 'OrganizationMember',
+          entityId: invitation.organizationMemberId,
+          before: {
+            membershipStatus: 'INVITED',
+            accountStatus: 'INVITED',
+          },
+          after: {
+            membershipStatus: 'ACTIVE',
+            accountStatus: 'ACTIVE',
+          },
+          metadata: {
+            authMethod: 'invitation_token',
+          },
+        });
+      } else if (user.status === 'ACTIVE') {
+        // CASO B: Usuário já ativo — senha NÃO é permitida
+        if (password !== undefined && password !== null && password !== '') {
+          throw new UserAdminError(
+            400,
+            'PASSWORD_NOT_ALLOWED_FOR_EXISTING_USER',
+            'Não é permitido informar senha para ativação de usuário que já possui conta ativa'
+          );
+        }
+
+        // Update condicional race-safe do convite
+        const invUpdate = await tx.organizationInvitation.updateMany({
+          where: {
+            id: invitation.id,
+            acceptedAt: null,
+          },
+          data: {
+            acceptedAt: new Date(),
+          },
+        });
+
+        if (invUpdate.count !== 1) {
+          throw new UserAdminError(409, 'INVITATION_ALREADY_ACCEPTED', 'Este convite já foi aceito anteriormente');
+        }
+
+        // Update condicional race-safe da membership
+        const memUpdate = await tx.organizationMember.updateMany({
+          where: {
+            id: invitation.organizationMemberId,
+            organizationId: invitation.organizationId,
+            status: 'INVITED',
+          },
+          data: {
+            status: 'ACTIVE',
+          },
+        });
+
+        if (memUpdate.count !== 1) {
+          throw new UserAdminError(409, 'INVITATION_NOT_PENDING', 'A participação associada a este convite não está pendente');
+        }
+
+        // O usuário global NUNCA é alterado
+
+        await auditService.record({
+          organizationId: invitation.organizationId,
+          actorUserId: user.id,
+          action: 'user.invitation_accepted',
+          entityType: 'OrganizationMember',
+          entityId: invitation.organizationMemberId,
+          before: {
+            membershipStatus: 'INVITED',
+            accountStatus: 'ACTIVE',
+          },
+          after: {
+            membershipStatus: 'ACTIVE',
+            accountStatus: 'ACTIVE',
+          },
+          metadata: {
+            authMethod: 'invitation_token',
+          },
+        });
+      } else {
+        throw new UserAdminError(409, 'USER_GLOBALLY_INACTIVE', 'Usuário inativo globalmente no sistema');
+      }
+
+      return {
+        success: true,
+        message: 'Convite aceito com sucesso',
+      };
     });
   }
 }

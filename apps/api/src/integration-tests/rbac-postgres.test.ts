@@ -7,6 +7,8 @@ import { AuditService } from '../modules/audit/audit.service.js';
 import { OrganizationConfigService } from '../modules/organization-config/organization-config.service.js';
 import { FeatureFlagService } from '../modules/organization-config/feature-flag.service.js';
 import { UsersService, UserAdminError } from '../modules/users/users.service.js';
+import argon2 from 'argon2';
+import { hashInvitationToken } from '../modules/users/invitation-token.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 
 // --- GUARD DE SEGURANÇA (ETAPA F) ---
@@ -29,7 +31,7 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
   await t.test('J - Testes Reais de Migration', async () => {
     const migrations = await prisma.$queryRaw<any[]>`SELECT * FROM _prisma_migrations`;
-    assert.strictEqual(migrations.length, 12, 'Deve haver exatamente 12 migrations aplicadas');
+    assert.strictEqual(migrations.length, 13, 'Deve haver exatamente 13 migrations aplicadas');
     for (const mig of migrations) {
       assert.ok(mig.finished_at, `Migration ${mig.migration_name} não foi finalizada`);
     }
@@ -801,6 +803,222 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       await prisma.organizationMember.deleteMany({ where: { id: inviteRes.membershipId } });
       await prisma.user.deleteMany({ where: { id: inviteRes.userId } });
       await prisma.client.deleteMany({ where: { id: { in: [clientSOrgA.id, clientSOrgB.id] } } });
+    }
+  });
+
+  await t.test('T - Convites Seguros e Ativação com PostgreSQL Real', async () => {
+    const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
+    const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
+    const adminAUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
+
+    const usersService = new UsersService(prisma);
+    const auditService = new AuditService(prisma);
+
+    const createdUserIds: string[] = [];
+    const createdMemberIds: string[] = [];
+
+    try {
+      // 1 a 11. Fluxo completo de Novo Usuário (INVITED -> ACTIVE)
+      const inviteNew = await usersService.inviteUser(orgA.id, adminAUser.id, {
+        name: 'CI New User T',
+        email: 'ci_new_user_t@zafira.test',
+      });
+      createdUserIds.push(inviteNew.userId);
+      createdMemberIds.push(inviteNew.membershipId);
+
+      const rawTokenNew = inviteNew.invitation.token;
+      assert.ok(rawTokenNew, 'Invite deve retornar token bruto');
+      assert.strictEqual(inviteNew.invitation.acceptPath, `/invite?token=${rawTokenNew}`);
+
+      // Prova de armazenamento seguro: banco armazena apenas SHA-256 hash
+      const tokenHashNew = hashInvitationToken(rawTokenNew);
+      const storedInv = await prisma.organizationInvitation.findUniqueOrThrow({
+        where: { tokenHash: tokenHashNew },
+      });
+      assert.strictEqual(storedInv.organizationMemberId, inviteNew.membershipId);
+      assert.strictEqual(storedInv.acceptedAt, null);
+      assert.notStrictEqual(storedInv.tokenHash, rawTokenNew);
+
+      // Inspect público
+      const inspectRes = await usersService.inspectInvitation(rawTokenNew);
+      assert.strictEqual(inspectRes.valid, true);
+      assert.strictEqual(inspectRes.requiresPassword, true);
+      assert.strictEqual(inspectRes.invitedUser.email, 'ci_new_user_t@zafira.test');
+
+      // Tentativa de aceitar sem senha => falha 400
+      await assert.rejects(
+        usersService.acceptInvitation(rawTokenNew),
+        (err: any) => err instanceof UserAdminError && err.code === 'PASSWORD_REQUIRED' && err.statusCode === 400
+      );
+
+      // Aceite com senha válida
+      const acceptRes = await usersService.acceptInvitation(rawTokenNew, 'SenhaSegura123!');
+      assert.strictEqual(acceptRes.success, true);
+
+      // Prova de ativação do User global e validação do hash Argon2
+      const userAfterAccept = await prisma.user.findUniqueOrThrow({ where: { id: inviteNew.userId } });
+      assert.strictEqual(userAfterAccept.status, 'ACTIVE');
+      assert.ok(userAfterAccept.passwordHash);
+      const validPass = await argon2.verify(userAfterAccept.passwordHash, 'SenhaSegura123!');
+      assert.strictEqual(validPass, true, 'Senha Argon2 deve ser verificável');
+
+      // Prova de ativação da Membership
+      const memAfterAccept = await prisma.organizationMember.findUniqueOrThrow({ where: { id: inviteNew.membershipId } });
+      assert.strictEqual(memAfterAccept.status, 'ACTIVE');
+
+      // Prova de acceptedAt preenchido
+      const invAfterAccept = await prisma.organizationInvitation.findUniqueOrThrow({ where: { tokenHash: tokenHashNew } });
+      assert.ok(invAfterAccept.acceptedAt, 'acceptedAt deve ser preenchido');
+
+      // Prova de uso único: segunda tentativa => 409
+      await assert.rejects(
+        usersService.acceptInvitation(rawTokenNew, 'SenhaSegura123!'),
+        (err: any) => err instanceof UserAdminError && err.code === 'INVITATION_ALREADY_ACCEPTED' && err.statusCode === 409
+      );
+
+      // 12. Usuário ACTIVE existente preserva passwordHash e proíbe senha no aceite
+      const originalPasswordHash = await argon2.hash('SenhaOriginalIntacta123!');
+      const existingActiveUser = await prisma.user.create({
+        data: {
+          name: 'CI Existing Active T',
+          email: 'ci_existing_active_t@zafira.test',
+          status: 'ACTIVE',
+          passwordHash: originalPasswordHash,
+        },
+      });
+      createdUserIds.push(existingActiveUser.id);
+
+      const inviteExisting = await usersService.inviteUser(orgA.id, adminAUser.id, {
+        name: 'Ignorado',
+        email: 'ci_existing_active_t@zafira.test',
+      });
+      createdMemberIds.push(inviteExisting.membershipId);
+
+      const rawTokenExisting = inviteExisting.invitation.token;
+
+      // Inspect indica que não requer senha
+      const inspectExisting = await usersService.inspectInvitation(rawTokenExisting);
+      assert.strictEqual(inspectExisting.requiresPassword, false);
+
+      // Proíbe senha no aceite
+      await assert.rejects(
+        usersService.acceptInvitation(rawTokenExisting, 'TentativaMudarSenha123!'),
+        (err: any) => err instanceof UserAdminError && err.code === 'PASSWORD_NOT_ALLOWED_FOR_EXISTING_USER' && err.statusCode === 400
+      );
+
+      // Aceita sem senha
+      await usersService.acceptInvitation(rawTokenExisting);
+      const userExistingCheck = await prisma.user.findUniqueOrThrow({ where: { id: existingActiveUser.id } });
+      assert.strictEqual(userExistingCheck.status, 'ACTIVE');
+      assert.strictEqual(userExistingCheck.passwordHash, originalPasswordHash, 'passwordHash DEVE ser preservado intacto');
+
+      const memExistingCheck = await prisma.organizationMember.findUniqueOrThrow({ where: { id: inviteExisting.membershipId } });
+      assert.strictEqual(memExistingCheck.status, 'ACTIVE');
+
+      // 13. Multi-org: User aceita Org A com senha, depois aceita Org B sem senha
+      const multiInviteUser = await usersService.inviteUser(orgA.id, adminAUser.id, {
+        name: 'CI Multi Org T',
+        email: 'ci_multi_org_t@zafira.test',
+      });
+      createdUserIds.push(multiInviteUser.userId);
+      createdMemberIds.push(multiInviteUser.membershipId);
+
+      const multiInviteOrgB = await usersService.inviteUser(orgB.id, adminAUser.id, {
+        name: 'CI Multi Org T',
+        email: 'ci_multi_org_t@zafira.test',
+      });
+      createdMemberIds.push(multiInviteOrgB.membershipId);
+
+      // Aceita Org A com senha
+      await usersService.acceptInvitation(multiInviteUser.invitation.token, 'SenhaMultiOrg123!');
+      const memACheck = await prisma.organizationMember.findUniqueOrThrow({ where: { id: multiInviteUser.membershipId } });
+      const memBCheck = await prisma.organizationMember.findUniqueOrThrow({ where: { id: multiInviteOrgB.membershipId } });
+      assert.strictEqual(memACheck.status, 'ACTIVE');
+      assert.strictEqual(memBCheck.status, 'INVITED', 'Membership B deve permanecer INVITED');
+
+      // Aceita Org B sem senha (usuário agora é ACTIVE)
+      await usersService.acceptInvitation(multiInviteOrgB.invitation.token);
+      const memBAfter = await prisma.organizationMember.findUniqueOrThrow({ where: { id: multiInviteOrgB.membershipId } });
+      assert.strictEqual(memBAfter.status, 'ACTIVE');
+
+      // 14. Rotação invalida token anterior e renova expiry
+      const inviteRot = await usersService.inviteUser(orgA.id, adminAUser.id, {
+        name: 'CI Rotation T',
+        email: 'ci_rotation_t@zafira.test',
+      });
+      createdUserIds.push(inviteRot.userId);
+      createdMemberIds.push(inviteRot.membershipId);
+
+      const tokenRotA = inviteRot.invitation.token;
+      const reissueRes = await usersService.reissueInvitation(orgA.id, adminAUser.id, inviteRot.membershipId);
+      const tokenRotB = reissueRes.invitation.token;
+
+      assert.notStrictEqual(tokenRotA, tokenRotB);
+
+      // Token A falha
+      await assert.rejects(
+        usersService.inspectInvitation(tokenRotA),
+        (err: any) => err instanceof UserAdminError && err.code === 'INVALID_INVITATION_TOKEN' && err.statusCode === 400
+      );
+
+      // Token B funciona
+      const inspectB = await usersService.inspectInvitation(tokenRotB);
+      assert.strictEqual(inspectB.valid, true);
+
+      // 15. Expiração bloqueia inspect e accept
+      const inviteExp = await usersService.inviteUser(orgA.id, adminAUser.id, {
+        name: 'CI Expiration T',
+        email: 'ci_expiration_t@zafira.test',
+      });
+      createdUserIds.push(inviteExp.userId);
+      createdMemberIds.push(inviteExp.membershipId);
+
+      const tokenExp = inviteExp.invitation.token;
+      await prisma.organizationInvitation.update({
+        where: { tokenHash: hashInvitationToken(tokenExp) },
+        data: { expiresAt: new Date('2020-01-01') },
+      });
+
+      await assert.rejects(
+        usersService.inspectInvitation(tokenExp),
+        (err: any) => err instanceof UserAdminError && err.code === 'INVITATION_EXPIRED' && err.statusCode === 410
+      );
+      await assert.rejects(
+        usersService.acceptInvitation(tokenExp, 'SenhaValida123!'),
+        (err: any) => err instanceof UserAdminError && err.code === 'INVITATION_EXPIRED' && err.statusCode === 410
+      );
+
+      // 16. Remoção de membership remove invitation por FK cascade
+      await usersService.removeMember(orgA.id, adminAUser.id, inviteExp.membershipId);
+      const invRemovedCheck = await prisma.organizationInvitation.findUnique({
+        where: { tokenHash: hashInvitationToken(tokenExp) },
+      });
+      assert.strictEqual(invRemovedCheck, null, 'Invitation deve ser removida em cascata');
+
+      // 17 & 18. AuditLogs não contêm segredos e são tenant-scoped
+      const logsA = await auditService.list({ organizationId: orgA.id });
+      const issuedLog = logsA.items.find((l: any) => l.action === 'user.invitation_issued');
+      const acceptedLog = logsA.items.find((l: any) => l.action === 'user.invitation_accepted');
+
+      assert.ok(issuedLog, 'Log de emissão deve existir');
+      assert.ok(acceptedLog, 'Log de aceite deve existir');
+
+      // Prova de que NENHUM log contém token bruto ou tokenHash
+      const logsAStr = JSON.stringify(logsA);
+      assert.strictEqual(logsAStr.includes(rawTokenNew), false, 'AuditLog NUNCA deve conter raw token');
+      assert.strictEqual(logsAStr.includes(tokenHashNew), false, 'AuditLog NUNCA deve conter tokenHash');
+    } finally {
+      // Cleanup das fixtures criadas no subteste T
+      for (const mId of createdMemberIds) {
+        await prisma.organizationInvitation.deleteMany({ where: { organizationMemberId: mId } });
+        await prisma.userClientAssignment.deleteMany({ where: { organizationMemberId: mId } });
+        await prisma.organizationMemberPermission.deleteMany({ where: { organizationMemberId: mId } });
+        await prisma.organizationMember.deleteMany({ where: { id: mId } });
+      }
+      for (const uId of createdUserIds) {
+        await prisma.organizationMember.deleteMany({ where: { userId: uId } });
+        await prisma.user.deleteMany({ where: { id: uId } });
+      }
     }
   });
 });

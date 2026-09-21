@@ -136,12 +136,20 @@ test('Users Routes - HTTP Integration Tests', async (t) => {
         return {
           role: 'ADMIN',
           permissionCode: where.role_permissionCode.permissionCode,
-          granted: true,
         };
       }
       // MEMBER não tem permissões administrativas
       return null;
     }) as any;
+
+    (prisma as any).organizationInvitation = {
+      create: async ({ data }: any) => ({
+        id: 'inv_mock_1',
+        ...data,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    };
   }
 
   // 1. GET /users sem auth => 401

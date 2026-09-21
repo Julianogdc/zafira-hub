@@ -122,6 +122,33 @@ export const usersRoutes: FastifyPluginAsync = async (app: FastifyInstance) => {
   );
 
   /**
+   * POST /api/v1/users/:membershipId/invitation
+   * Permissão: users.invite
+   * Emite ou rotaciona token para membro com convite pendente (INVITED)
+   */
+  app.post(
+    '/api/v1/users/:membershipId/invitation',
+    {
+      preHandler: [authenticate, requirePermission('users.invite')],
+    },
+    async (request: FastifyRequest<{ Params: { membershipId: string } }>, reply: FastifyReply) => {
+      const organizationId = request.authorizationResult!.organizationId;
+      const actorUserId = request.authContext?.type === 'user' ? request.authContext.userId : null;
+      const { membershipId } = request.params;
+
+      try {
+        const result = await usersService.reissueInvitation(organizationId, actorUserId, membershipId);
+        return reply.send({
+          status: 'success',
+          data: result,
+        });
+      } catch (err: any) {
+        return handleControllerError(err, reply);
+      }
+    }
+  );
+
+  /**
    * PATCH /api/v1/users/:membershipId/role
    * Permissão: users.edit_role
    */
