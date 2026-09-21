@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { resolveAuthorizationContext } from '../../modules/authorization/resolver.js';
-import { evaluatePermission } from '@zafira/domain';
+import { evaluatePermission, roleHasDefaultPermission } from '@zafira/domain';
 
 test('RBAC Backend Resolver e Engine Puros', async (t) => {
   await t.test('usuário sem activeOrganizationId é negado', async () => {
@@ -15,48 +15,50 @@ test('RBAC Backend Resolver e Engine Puros', async (t) => {
     assert.strictEqual(result.reason, 'NO_ACTIVE_ORGANIZATION');
   });
 
-  await t.test('ADMIN recebe clients.edit default', () => {
-    const result = evaluatePermission({
-      role: 'ADMIN',
-      permission: 'clients.edit'
-    });
-    assert.strictEqual(result.allowed, true);
-    assert.strictEqual(result.reason, 'GRANTED_BY_ROLE_DEFAULT');
+  await t.test('ADMIN possui clients.edit na matriz de defaults', () => {
+    const hasDefault = roleHasDefaultPermission('ADMIN', 'clients.edit');
+    assert.strictEqual(hasDefault, true);
   });
 
-  await t.test('MANAGER recebe clients.edit default', () => {
-    const result = evaluatePermission({
-      role: 'MANAGER',
-      permission: 'clients.edit'
-    });
-    assert.strictEqual(result.allowed, true);
-    assert.strictEqual(result.reason, 'GRANTED_BY_ROLE_DEFAULT');
+  await t.test('MANAGER possui clients.edit na matriz de defaults', () => {
+    const hasDefault = roleHasDefaultPermission('MANAGER', 'clients.edit');
+    assert.strictEqual(hasDefault, true);
   });
 
-  await t.test('MEMBER não recebe clients.edit default', () => {
+  await t.test('MEMBER não possui clients.edit na matriz de defaults', () => {
+    const hasDefault = roleHasDefaultPermission('MEMBER', 'clients.edit');
+    assert.strictEqual(hasDefault, false);
+  });
+
+  await t.test('evaluatePermission com roleGrant true concede acesso', () => {
     const result = evaluatePermission({
-      role: 'MEMBER',
-      permission: 'clients.edit'
+      roleGrant: true
+    });
+    assert.strictEqual(result.allowed, true);
+    assert.strictEqual(result.reason, 'GRANTED_BY_ROLE_PERMISSION');
+  });
+
+  await t.test('evaluatePermission com roleGrant false nega acesso por default', () => {
+    const result = evaluatePermission({
+      roleGrant: false
     });
     assert.strictEqual(result.allowed, false);
     assert.strictEqual(result.reason, 'DENIED_BY_DEFAULT');
   });
 
-  await t.test('override grant para MEMBER funciona', () => {
+  await t.test('override grant funciona mesmo com roleGrant false', () => {
     const result = evaluatePermission({
-      role: 'MEMBER',
-      permission: 'clients.edit',
-      override: true
+      override: true,
+      roleGrant: false
     });
     assert.strictEqual(result.allowed, true);
     assert.strictEqual(result.reason, 'GRANTED_BY_OVERRIDE');
   });
 
-  await t.test('override deny para ADMIN/MANAGER funciona', () => {
+  await t.test('override deny funciona mesmo com roleGrant true', () => {
     const result = evaluatePermission({
-      role: 'ADMIN',
-      permission: 'clients.edit',
-      override: false
+      override: false,
+      roleGrant: true
     });
     assert.strictEqual(result.allowed, false);
     assert.strictEqual(result.reason, 'DENIED_BY_OVERRIDE');

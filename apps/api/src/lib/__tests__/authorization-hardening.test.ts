@@ -201,9 +201,11 @@ test('DINAMICO / HARDENING: 2. Rota HUMAN com API key valida => 403 MACHINE_CRED
   await app.close();
 });
 
-test('DINAMICO / HARDENING: 3. Rota HUMAN com JWT + Permission => alcanca handler (200)', async () => {
+test('DINAMICO / HARDENING: 3. Rota HUMAN com authContext de usuário + Permission => alcanca handler (200)', async () => {
   const _gp = globalThis as any;
   const originalMember = _gp.prisma?.organizationMember;
+  const originalRolePermission = _gp.prisma?.rolePermission;
+
   if (_gp.prisma) {
     _gp.prisma.organizationMember = {
       findUnique: async () => ({
@@ -212,6 +214,12 @@ test('DINAMICO / HARDENING: 3. Rota HUMAN com JWT + Permission => alcanca handle
         userId: 'usr_1',
         role: 'ADMIN',
         permissions: [],
+      }),
+    };
+    _gp.prisma.rolePermission = {
+      findUnique: async () => ({
+        role: 'ADMIN',
+        permissionCode: 'financial.view_summary',
       }),
     };
   }
@@ -246,8 +254,9 @@ test('DINAMICO / HARDENING: 3. Rota HUMAN com JWT + Permission => alcanca handle
   assert.strictEqual(res.statusCode, 200);
   assert.deepStrictEqual(res.json(), { data: 'success_payload' });
 
-  if (_gp.prisma && originalMember) {
-    _gp.prisma.organizationMember = originalMember;
+  if (_gp.prisma) {
+    if (originalMember) _gp.prisma.organizationMember = originalMember;
+    if (originalRolePermission) _gp.prisma.rolePermission = originalRolePermission;
   }
   await app.close();
 });

@@ -19,36 +19,43 @@ test('--- Postiz Lab Integration Suite ---', async (t) => {
   // ============================================================
   // MOCK DO PRISMA: autentica requisicoes de teste sem banco real
   // auth.ts e resolver.ts usam o mesmo singleton prisma.
-  // PrismaClient permite atribuicao direta de propriedades.
   // ============================================================
-  {
-    const _gp = globalThis as any;
-    if (_gp.prisma) {
-      // Mock de user.findUnique para authenticate()
-      _gp.prisma.user = {
-        findUnique: async () => ({
-          id: 'user_test',
-          email: 'test@zafira.com',
-          status: 'ACTIVE',
-          memberships: [{
-            organization: { id: 'org_1', slug: 'zafira' },
-            role: 'ADMIN',
-          }],
-        }),
-      };
-      // Mock de organizationMember.findUnique para resolveAuthorizationContext()
-      // permissions com allowed=true ativa GRANTED_BY_OVERRIDE para qualquer permissao
-      _gp.prisma.organizationMember = {
-        findUnique: async () => ({
-          id: 'mem_test',
-          organizationId: 'org_1',
-          userId: 'user_test',
+  const _gp = globalThis as any;
+  const originalUser = _gp.prisma?.user;
+  const originalOrgMember = _gp.prisma?.organizationMember;
+
+  if (_gp.prisma) {
+    // Mock de user.findUnique para authenticate()
+    _gp.prisma.user = {
+      findUnique: async () => ({
+        id: 'user_test',
+        email: 'test@zafira.com',
+        status: 'ACTIVE',
+        memberships: [{
+          organization: { id: 'org_1', slug: 'zafira' },
           role: 'ADMIN',
-          permissions: [{ allowed: true }],
-        }),
-      };
-    }
+        }],
+      }),
+    };
+    // Mock de organizationMember.findUnique para resolveAuthorizationContext()
+    // permissions com allowed=true ativa GRANTED_BY_OVERRIDE para qualquer permissao
+    _gp.prisma.organizationMember = {
+      findUnique: async () => ({
+        id: 'mem_test',
+        organizationId: 'org_1',
+        userId: 'user_test',
+        role: 'ADMIN',
+        permissions: [{ allowed: true }],
+      }),
+    };
   }
+
+  t.after(() => {
+    if (_gp.prisma) {
+      if (originalUser) _gp.prisma.user = originalUser;
+      if (originalOrgMember) _gp.prisma.organizationMember = originalOrgMember;
+    }
+  });
 
   await t.test('1. PostizClient valida obrigatoriedade de POSTIZ_URL e POSTIZ_API_KEY', async () => {
     delete process.env.POSTIZ_URL;

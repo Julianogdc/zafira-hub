@@ -128,30 +128,62 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     await prisma.team.delete({ where: { id: teamA.id } });
   });
 
-  await t.test('M - Policy Resolver com Prisma Real', async () => {
+  await t.test('M - Policy Resolver com Prisma Real (RolePermission como autoridade persistente)', async () => {
     const orgA = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-a' } });
     const adminUser = await prisma.user.findUniqueOrThrow({ where: { email: 'admin_a@zafira.test' } });
     const managerUser = await prisma.user.findUniqueOrThrow({ where: { email: 'manager_a@zafira.test' } });
     const memberUser = await prisma.user.findUniqueOrThrow({ where: { email: 'member_a@zafira.test' } });
     const memId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: orgA.id, userId: memberUser.id } } })).id;
+    const mgrMemId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: orgA.id, userId: managerUser.id } } })).id;
 
-    // 1. ADMIN A recebe clients.view
+    // 1. ADMIN A recebe clients.view por RolePermission persistida
     let res = await resolveAuthorizationContext({ userId: adminUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.view' });
     assert.ok(res.allowed);
+    assert.strictEqual(res.reason, 'GRANTED_BY_ROLE_PERMISSION');
 
-    // 2. MANAGER A recebe clients.edit
+    // 2. MANAGER A recebe clients.edit por RolePermission persistida
     res = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.ok(res.allowed);
+    assert.strictEqual(res.reason, 'GRANTED_BY_ROLE_PERMISSION');
 
-    // 3. MEMBER A recebe clients.view
+    // 2.B PROVA PRINCIPAL: Remoção de RolePermission no banco transforma em DENY (sem fallback estático!)
+    await prisma.rolePermission.delete({
+      where: {
+        role_permissionCode: {
+          role: 'MANAGER',
+          permissionCode: 'clients.edit'
+        }
+      }
+    });
+
+    const resRemoved = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
+    assert.strictEqual(resRemoved.allowed, false, 'Sem RolePermission no banco, o acesso DEVE ser negado (sem fallback estático)');
+    assert.strictEqual(resRemoved.reason, 'DENIED_BY_DEFAULT');
+
+    // RESTAURAÇÃO OBRIGATÓRIA da RolePermission
+    await prisma.rolePermission.create({
+      data: {
+        role: 'MANAGER',
+        permissionCode: 'clients.edit'
+      }
+    });
+
+    // Confirmação de restauração
+    const resRestored = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
+    assert.ok(resRestored.allowed, 'Após restauração da RolePermission, o acesso deve voltar a ser permitido');
+    assert.strictEqual(resRestored.reason, 'GRANTED_BY_ROLE_PERMISSION');
+
+    // 3. MEMBER A recebe clients.view por RolePermission persistida
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.view' });
     assert.ok(res.allowed);
+    assert.strictEqual(res.reason, 'GRANTED_BY_ROLE_PERMISSION');
 
-    // 4. MEMBER A não recebe clients.edit default
+    // 4. MEMBER A não recebe clients.edit (sem grant de RolePermission para MEMBER)
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'DENIED_BY_DEFAULT');
 
-    // 5. override allowed=true concede clients.edit ao MEMBER A
+    // 5. Override allowed=true sem RolePermission concede clients.edit ao MEMBER A
     await prisma.organizationMemberPermission.create({
       data: {
         organizationId: orgA.id,
@@ -162,22 +194,23 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     });
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.ok(res.allowed);
+    assert.strictEqual(res.reason, 'GRANTED_BY_OVERRIDE');
 
-    // 6. remover/alterar override para false bloqueia
+    // 6. Override allowed=false bloqueia MEMBER A
     await prisma.organizationMemberPermission.update({
       where: { organizationMemberId_permissionCode: { organizationMemberId: memId, permissionCode: 'clients.edit' } },
       data: { allowed: false }
     });
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'DENIED_BY_OVERRIDE');
 
-    // limpar
+    // Limpar override do MEMBER
     await prisma.organizationMemberPermission.delete({
       where: { organizationMemberId_permissionCode: { organizationMemberId: memId, permissionCode: 'clients.edit' } }
     });
 
-    // 7. override false bloqueia MANAGER mesmo quando role default concede
-    const mgrMemId = (await prisma.organizationMember.findUniqueOrThrow({ where: { organizationId_userId: { organizationId: orgA.id, userId: managerUser.id } } })).id;
+    // 7. Override allowed=false bloqueia MANAGER mesmo quando RolePermission persistida existe
     await prisma.organizationMemberPermission.create({
       data: {
         organizationId: orgA.id,
@@ -188,23 +221,28 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
     });
     res = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
     assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'DENIED_BY_OVERRIDE');
+
+    // Limpar override do MANAGER
     await prisma.organizationMemberPermission.delete({
       where: { organizationMemberId_permissionCode: { organizationMemberId: mgrMemId, permissionCode: 'clients.edit' } }
     });
 
-    // 8. membership A não pode ser usada em activeOrganizationId B
+    // 8. Membership A não pode ser usada em activeOrganizationId B
     const orgB = await prisma.organization.findUniqueOrThrow({ where: { slug: 'ci-org-b' } });
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgB.id, permissionCode: 'clients.view' });
     assert.strictEqual(res.allowed, false);
     assert.strictEqual(res.reason, 'NO_MEMBERSHIP_IN_ACTIVE_ORGANIZATION');
 
-    // 9. ausência de membership = deny
+    // 9. Ausência de membership = deny
     res = await resolveAuthorizationContext({ userId: 'nao-existe', activeOrganizationId: orgA.id, permissionCode: 'clients.view' });
     assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'NO_MEMBERSHIP_IN_ACTIVE_ORGANIZATION');
 
-    // 10. ausência de permission = deny
+    // 10. Ausência de permission cadastrada = deny
     res = await resolveAuthorizationContext({ userId: memberUser.id, activeOrganizationId: orgA.id, permissionCode: 'outra.nao.existe' as any });
     assert.strictEqual(res.allowed, false);
+    assert.strictEqual(res.reason, 'DENIED_BY_DEFAULT');
   });
 
   await t.test('N - ClientService com Postgres Real', async () => {

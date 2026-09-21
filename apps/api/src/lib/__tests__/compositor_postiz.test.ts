@@ -13,32 +13,45 @@ test('--- Compositor Zafira de Conteúdo (Admin & Manager) Suite ---', async (t)
   const originalFetch = globalThis.fetch;
   const originalEnv = { ...process.env };
 
+  t.afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env = { ...originalEnv };
+  });
+
   // Mock do prisma para authenticate e resolveAuthorizationContext
-  {
-    const _gp = globalThis as any;
-    if (_gp.prisma) {
-      _gp.prisma.user = {
-        findUnique: async () => ({
-          id: 'user_test',
-          email: 'test@zafira.com',
-          status: 'ACTIVE',
-          memberships: [{
-            organization: { id: 'org_1', slug: 'zafira' },
-            role: 'ADMIN',
-          }],
-        }),
-      };
-      _gp.prisma.organizationMember = {
-        findUnique: async () => ({
-          id: 'mem_test',
-          organizationId: 'org_1',
-          userId: 'user_test',
+  const _gp = globalThis as any;
+  const originalUser = _gp.prisma?.user;
+  const originalOrgMember = _gp.prisma?.organizationMember;
+
+  if (_gp.prisma) {
+    _gp.prisma.user = {
+      findUnique: async () => ({
+        id: 'user_test',
+        email: 'test@zafira.com',
+        status: 'ACTIVE',
+        memberships: [{
+          organization: { id: 'org_1', slug: 'zafira' },
           role: 'ADMIN',
-          permissions: [{ allowed: true }],
-        }),
-      };
-    }
+        }],
+      }),
+    };
+    _gp.prisma.organizationMember = {
+      findUnique: async () => ({
+        id: 'mem_test',
+        organizationId: 'org_1',
+        userId: 'user_test',
+        role: 'ADMIN',
+        permissions: [{ allowed: true }],
+      }),
+    };
   }
+
+  t.after(() => {
+    if (_gp.prisma) {
+      if (originalUser) _gp.prisma.user = originalUser;
+      if (originalOrgMember) _gp.prisma.organizationMember = originalOrgMember;
+    }
+  });
 
   async function setupTestApp(serviceMock: any) {
     const app = fastify();

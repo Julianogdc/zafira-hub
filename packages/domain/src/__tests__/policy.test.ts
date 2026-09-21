@@ -6,6 +6,7 @@ import {
   isValidPermissionCode
 } from '../authorization/index.js';
 
+// --- Testes da Matriz Estática (Bootstrap / Catálogo Versionado) ---
 test('ADMIN possui todo catálogo default', () => {
   assert.strictEqual(roleHasDefaultPermission('ADMIN', 'admin.configure_organization'), true);
   assert.strictEqual(roleHasDefaultPermission('ADMIN', 'clients.edit'), true);
@@ -27,25 +28,44 @@ test('MEMBER não possui clients.edit', () => {
   assert.strictEqual(roleHasDefaultPermission('MEMBER', 'clients.edit'), false);
 });
 
-test('override true concede permissão não default', () => {
-  const result = evaluatePermission({ role: 'MEMBER', permission: 'clients.edit', override: true });
+test('permission code inválido não pode ser tratado como válido', () => {
+  assert.strictEqual(isValidPermissionCode('invalid.permission'), false);
+  assert.strictEqual(isValidPermissionCode('clients.edit'), true);
+});
+
+// --- Testes do Policy Engine Puro de Runtime ---
+test('evaluatePermission: override true + roleGrant false => ALLOW (GRANTED_BY_OVERRIDE)', () => {
+  const result = evaluatePermission({ override: true, roleGrant: false });
   assert.strictEqual(result.allowed, true);
   assert.strictEqual(result.reason, 'GRANTED_BY_OVERRIDE');
 });
 
-test('override false remove permissão default', () => {
-  const result = evaluatePermission({ role: 'ADMIN', permission: 'clients.edit', override: false });
+test('evaluatePermission: override false + roleGrant true => DENY (DENIED_BY_OVERRIDE)', () => {
+  const result = evaluatePermission({ override: false, roleGrant: true });
   assert.strictEqual(result.allowed, false);
   assert.strictEqual(result.reason, 'DENIED_BY_OVERRIDE');
 });
 
-test('ausência de grant = deny', () => {
-  const result = evaluatePermission({ role: 'MEMBER', permission: 'clients.edit' });
+test('evaluatePermission: sem override + roleGrant true => ALLOW (GRANTED_BY_ROLE_PERMISSION)', () => {
+  const result = evaluatePermission({ roleGrant: true });
+  assert.strictEqual(result.allowed, true);
+  assert.strictEqual(result.reason, 'GRANTED_BY_ROLE_PERMISSION');
+});
+
+test('evaluatePermission: sem override + roleGrant false => DENY (DENIED_BY_DEFAULT)', () => {
+  const result = evaluatePermission({ roleGrant: false });
   assert.strictEqual(result.allowed, false);
   assert.strictEqual(result.reason, 'DENIED_BY_DEFAULT');
 });
 
-test('permission code inválido não pode ser tratado como válido', () => {
-  assert.strictEqual(isValidPermissionCode('invalid.permission'), false);
-  assert.strictEqual(isValidPermissionCode('clients.edit'), true);
+test('evaluatePermission: false individual sempre ganha mesmo com roleGrant true', () => {
+  const result = evaluatePermission({ override: false, roleGrant: true });
+  assert.strictEqual(result.allowed, false);
+  assert.strictEqual(result.reason, 'DENIED_BY_OVERRIDE');
+});
+
+test('evaluatePermission: true individual sempre ganha mesmo com roleGrant false', () => {
+  const result = evaluatePermission({ override: true, roleGrant: false });
+  assert.strictEqual(result.allowed, true);
+  assert.strictEqual(result.reason, 'GRANTED_BY_OVERRIDE');
 });

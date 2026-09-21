@@ -52,7 +52,7 @@ Nenhum acesso pode ser autorizado apenas por ID ou externalId.
 O frontend poderá refletir permissões para experiência,
 mas o backend é a única autoridade de autorização.
 
-## Default roles
+## Default roles e autoridade de runtime
 
 ADMIN recebe todas as permissões do catálogo.
 
@@ -60,8 +60,11 @@ MANAGER recebe o conjunto gerencial aprovado no Passo 8C.
 
 MEMBER recebe apenas o conjunto operacional mínimo aprovado.
 
-A matriz inicial é bootstrap e poderá ser alterada futuramente
-por decisão versionada.
+A matriz estática de defaults é fonte versionada exclusivamente para bootstrap.
+No runtime, a tabela `RolePermission` persistida no PostgreSQL é a autoridade real:
+a ausência da respectiva `RolePermission` persistida resulta estritamente em deny.
+Nenhum fallback estático em memória pode conceder acesso em runtime.
+
 
 ## Fora de escopo
 

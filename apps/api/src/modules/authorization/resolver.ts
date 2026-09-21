@@ -18,7 +18,7 @@ export interface AuthorizationResult {
 export async function resolveAuthorizationContext({
   userId,
   activeOrganizationId,
-  permissionCode
+  permissionCode,
 }: ResolveAuthorizationContextParams): Promise<AuthorizationResult> {
   if (!activeOrganizationId) {
     return { allowed: false, reason: 'NO_ACTIVE_ORGANIZATION' };
@@ -29,14 +29,14 @@ export async function resolveAuthorizationContext({
     where: {
       organizationId_userId: {
         organizationId: activeOrganizationId,
-        userId: userId
-      }
+        userId: userId,
+      },
     },
     include: {
       permissions: {
-        where: { permissionCode }
-      }
-    }
+        where: { permissionCode },
+      },
+    },
   });
 
   if (!membership) {
@@ -46,10 +46,24 @@ export async function resolveAuthorizationContext({
   const role = membership.role as RoleType;
   const override = membership.permissions.length > 0 ? membership.permissions[0].allowed : undefined;
 
+  let roleGrant = false;
+
+  // Se não houver override individual, consulta a autoridade RolePermission persistida no banco
+  if (override === undefined) {
+    const rolePermission = await prisma.rolePermission.findUnique({
+      where: {
+        role_permissionCode: {
+          role: membership.role,
+          permissionCode,
+        },
+      },
+    });
+    roleGrant = Boolean(rolePermission);
+  }
+
   const evaluation = evaluatePermission({
-    role,
-    permission: permissionCode,
-    override
+    override,
+    roleGrant,
   });
 
   return {
@@ -57,6 +71,6 @@ export async function resolveAuthorizationContext({
     reason: evaluation.reason,
     membershipId: membership.id,
     organizationId: membership.organizationId,
-    role
+    role,
   };
 }
