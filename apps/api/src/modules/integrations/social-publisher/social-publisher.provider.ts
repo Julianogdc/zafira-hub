@@ -26,6 +26,7 @@ export interface SocialMediaUploadInput {
   filename: string;
   mimeType: string;
   buffer: Buffer;
+  idempotencyKey?: string;
 }
 
 /**

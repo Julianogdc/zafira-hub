@@ -25,6 +25,13 @@ export type SocialPostStatus =
   | 'FAILED'
   | 'CANCELLED';
 
+export interface SocialAccountCapabilities {
+  charLimit?: number | null;
+  escapedChars?: string | null;
+  needsTitle?: boolean | null;
+  supportsFirstComment?: boolean | null;
+}
+
 export interface SocialAccount {
   id: string;
   platform: SocialPlatform;
@@ -32,6 +39,9 @@ export interface SocialAccount {
   accountPicture?: string | null;
   profileUrl?: string | null;
   workspaceId?: string | null;
+  accountHandle?: string | null;
+  connectionStatus?: string | null;
+  capabilities?: SocialAccountCapabilities;
 }
 
 export type SocialMediaType = 'IMAGE' | 'VIDEO' | 'OTHER';
@@ -50,13 +60,15 @@ export interface SocialPlatformPostState {
   externalPostId?: string | null;
   permalink?: string | null;
   error?: string | null;
+  scheduledAt?: string | null;
+  publishedAt?: string | null;
 }
 
 export interface SocialPost {
   id: string;
   status: SocialPostStatus;
   content: string;
-  format: SocialContentFormat;
+  format?: SocialContentFormat | null;
   scheduledAt?: string | null;
   publishedAt?: string | null;
   createdAt: string;
@@ -64,12 +76,13 @@ export interface SocialPost {
 }
 
 export interface CreateSocialPostInput {
-  accountIds: string[];
+  accountId: string;
   format: SocialContentFormat;
   content: string;
   mediaIds: string[];
   isDraft?: boolean;
   scheduledAt?: string | null;
+  idempotencyKey?: string;
 }
 
 export interface ScheduleSocialPostInput {
