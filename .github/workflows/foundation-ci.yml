@@ -594,7 +594,9 @@ jobs:
 
           lit_patt = r'GATE_PASSWORD_[AB]' + r'\s*=\s*["\x27](?!\$\{)[^"\x27]+["\x27]'
           LITERAL_RE = re.compile(lit_patt)
-          LEGACY_RE = re.compile(r'GatePassSecret', re.IGNORECASE)
+
+          legacy_token = ''.join(['Gate', 'Pass', 'Secret'])
+          LEGACY_RE = re.compile(re.escape(legacy_token), re.IGNORECASE)
 
           scan_paths = [
               pathlib.Path('.github/workflows/foundation-ci.yml'),
@@ -610,12 +612,10 @@ jobs:
               except Exception:
                   continue
               for i, line in enumerate(text.splitlines(), 1):
-                  if 'Verify Multi-Org Gate Secret Hygiene' in line:
-                      continue
                   if LITERAL_RE.search(line):
                       violations.append(f'{p}:{i} -- hardcoded GATE_PASSWORD detected')
                   if LEGACY_RE.search(line):
-                      violations.append(f'{p}:{i} -- legacy GatePassSecret pattern detected')
+                      violations.append(f'{p}:{i} -- legacy forbidden credential pattern detected')
 
           if violations:
               print('[-] SECRET HYGIENE SCAN FAILED:', file=sys.stderr)
