@@ -39,6 +39,19 @@ enum IntegrationProvider {
   META
   GOOGLE_ADS
   ASAAS
+  BRIGHTBEAN
+}
+
+enum IntegrationAuthType {
+  API_KEY
+  OAUTH2
+  TOKEN
+}
+
+enum IntegrationConnectionStatus {
+  ACTIVE
+  DISCONNECTED
+  ERROR
 }
 
 enum AsaasPaymentStatus {
@@ -70,15 +83,16 @@ model Organization {
   financialTransactions  FinancialTransaction[]
   financialTransfers     FinancialTransfer[]
 
-  permissions           OrganizationMemberPermission[]
-  teams                 Team[]
-  auditLogs             AuditLog[]
-  teamMembers           TeamMember[]
-  userClientAssignments UserClientAssignment[]
-  teamClientAssignments TeamClientAssignment[]
-  config                OrganizationConfig?
-  featureFlags          OrganizationFeatureFlag[]
-  invitations           OrganizationInvitation[]
+  permissions            OrganizationMemberPermission[]
+  teams                  Team[]
+  auditLogs              AuditLog[]
+  teamMembers            TeamMember[]
+  userClientAssignments  UserClientAssignment[]
+  teamClientAssignments  TeamClientAssignment[]
+  config                 OrganizationConfig?
+  featureFlags           OrganizationFeatureFlag[]
+  invitations            OrganizationInvitation[]
+  integrationConnections IntegrationConnection[]
 
   @@map("organizations")
 }
@@ -173,12 +187,39 @@ model Client {
   financialCategoryRules FinancialCategoryRule[]
   assignedMembers        UserClientAssignment[]
   teamAssignments        TeamClientAssignment[]
+  integrationConnections IntegrationConnection[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
   @@index([status])
   @@index([responsibleUserId])
   @@map("clients")
+}
+
+model IntegrationConnection {
+  id                   String                      @id @default(uuid())
+  organizationId       String
+  clientId             String?
+  provider             IntegrationProvider
+  authType             IntegrationAuthType
+  externalScopeId      String?
+  displayName          String?
+  credentialCiphertext String?                     @db.Text
+  metadata             Json?
+  status               IntegrationConnectionStatus @default(ACTIVE)
+  lastValidatedAt      DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, externalScopeId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([status])
+  @@map("integration_connections")
 }
 
 model ClientIntegration {

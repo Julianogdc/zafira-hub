@@ -565,17 +565,22 @@ jobs:
             "${API_REF}" \
             npm run prisma:migrate:status --workspace=@zafira/api
 
-      - name: Verify Applied Migrations Count (Exact 14 Migrations)
+      - name: Verify Applied Migrations Count
         run: |
+          echo "Verificando contagem dinâmica de migrations no repositório..."
+          EXPECTED_COUNT=$(ls -1d apps/api/prisma/migrations/*/ 2>/dev/null | wc -l | tr -d ' ')
+          echo "Total de migrations no repositório: ${EXPECTED_COUNT}"
+
           echo "Verificando contagem de migrations aplicadas no PostgreSQL..."
           MIGRATION_COUNT=$(docker exec postgres-hml psql -U postgres_hml -d zafira_hub_21_staging -t -A -c "SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NULL AND finished_at IS NOT NULL;")
-          echo "Total de migrations aplicadas: ${MIGRATION_COUNT}"
-          if [ "${MIGRATION_COUNT}" -ne 14 ]; then
-            echo "FALHA: Esperado 14 migrations, encontrado ${MIGRATION_COUNT}!"
+          echo "Total de migrations aplicadas no banco: ${MIGRATION_COUNT}"
+
+          if [ "${MIGRATION_COUNT}" -ne "${EXPECTED_COUNT}" ]; then
+            echo "FALHA: Esperado ${EXPECTED_COUNT} migrations, encontrado ${MIGRATION_COUNT}!"
             docker exec postgres-hml psql -U postgres_hml -d zafira_hub_21_staging -c "SELECT migration_name, finished_at FROM _prisma_migrations;"
             exit 1
           fi
-          echo "Contagem de migrations = 14 (PASS)"
+          echo "Contagem dinâmica de migrations = ${MIGRATION_COUNT} (PASS)"
 
       - name: Generate Ephemeral Multi-Org Gate Credentials
         run: |
