@@ -31,8 +31,30 @@ const prisma = new PrismaClient();
 test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t) => {
 
   await t.test('J - Testes Reais de Migration', async () => {
-    const migrations = await prisma.$queryRaw<any[]>`SELECT * FROM _prisma_migrations`;
-    assert.strictEqual(migrations.length, 14, 'Deve haver exatamente 14 migrations aplicadas');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    // Determina o caminho exato do diretório de migrations de forma determinística
+    let migrationsDir = path.resolve(process.cwd(), 'prisma/migrations');
+    if (!fs.existsSync(migrationsDir)) {
+      migrationsDir = path.resolve(process.cwd(), 'apps/api/prisma/migrations');
+    }
+
+    const expectedCount = fs
+      .readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((dirent) => dirent.isDirectory()).length;
+
+    const migrations = await prisma.$queryRaw<any[]>`
+      SELECT * FROM _prisma_migrations 
+      WHERE rolled_back_at IS NULL AND finished_at IS NOT NULL
+    `;
+
+    assert.strictEqual(
+      migrations.length,
+      expectedCount,
+      `Esperadas ${expectedCount} migrations versionadas no repositório; encontradas ${migrations.length} migrations aplicadas e finalizadas no banco`
+    );
+
     for (const mig of migrations) {
       assert.ok(mig.finished_at, `Migration ${mig.migration_name} não foi finalizada`);
     }
