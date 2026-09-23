@@ -589,46 +589,43 @@ jobs:
 
       - name: Verify Multi-Org Gate Secret Hygiene
         run: |
-          python3 << 'PYEOF'
-          import re, sys, pathlib
+          cat > /tmp/secret_hygiene.py << 'PYEOF'
+import re, sys, pathlib
 
-          # Matches hardcoded password assignments like:
-          #   GATE_PASSWORD_A="literal"  GATE_PASSWORD_B='literal'
-          #   export GATE_PASSWORD_A="literal"  -e GATE_PASSWORD_A="literal"
-          # Does NOT match safe usage:
-          #   GATE_PASSWORD_A=${VAR}  -e GATE_PASSWORD_A  process.env.GATE_PASSWORD_A
-          LITERAL_RE = re.compile(
-              r'GATE_PASSWORD_[AB]\s*=\s*["\x27](?!\$\{)[^"\x27]+["\x27]'
-          )
-          LEGACY_RE = re.compile(r'GatePassSecret', re.IGNORECASE)
+lit_patt = r'GATE_PASSWORD_[AB]' + r'\s*=\s*["\x27](?!\$\{)[^"\x27]+["\x27]'
+LITERAL_RE = re.compile(lit_patt)
+LEGACY_RE = re.compile(r'GatePassSecret', re.IGNORECASE)
 
-          scan_paths = [
-              pathlib.Path('.github/workflows/foundation-ci.yml'),
-              *pathlib.Path('scripts/homologation').glob('**/*'),
-          ]
+scan_paths = [
+    pathlib.Path('.github/workflows/foundation-ci.yml'),
+    *pathlib.Path('scripts/homologation').glob('**/*'),
+]
 
-          violations = []
-          for p in scan_paths:
-              if not p.is_file():
-                  continue
-              try:
-                  text = p.read_text(encoding='utf-8', errors='replace')
-              except Exception:
-                  continue
-              for i, line in enumerate(text.splitlines(), 1):
-                  if LITERAL_RE.search(line):
-                      violations.append(f'{p}:{i} -- hardcoded GATE_PASSWORD detected')
-                  if LEGACY_RE.search(line):
-                      violations.append(f'{p}:{i} -- legacy GatePassSecret pattern detected')
+violations = []
+for p in scan_paths:
+    if not p.is_file():
+        continue
+    try:
+        text = p.read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        continue
+    for i, line in enumerate(text.splitlines(), 1):
+        if 'Verify Multi-Org Gate Secret Hygiene' in line:
+            continue
+        if LITERAL_RE.search(line):
+            violations.append(f'{p}:{i} -- hardcoded GATE_PASSWORD detected')
+        if LEGACY_RE.search(line):
+            violations.append(f'{p}:{i} -- legacy GatePassSecret pattern detected')
 
-          if violations:
-              print('[-] SECRET HYGIENE SCAN FAILED:', file=sys.stderr)
-              for v in violations:
-                  print(f'  {v}', file=sys.stderr)
-              sys.exit(1)
+if violations:
+    print('[-] SECRET HYGIENE SCAN FAILED:', file=sys.stderr)
+    for v in violations:
+        print(f'  {v}', file=sys.stderr)
+    sys.exit(1)
 
-          print('CI_GATE_PASSWORD_LITERAL_SCAN=PASS')
-          PYEOF
+print('CI_GATE_PASSWORD_LITERAL_SCAN=PASS')
+PYEOF
+          python3 /tmp/secret_hygiene.py
 
       - name: Seed Multi-Org Fixture using Published API Image
         run: |
