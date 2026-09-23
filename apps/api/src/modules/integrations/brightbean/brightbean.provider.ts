@@ -18,7 +18,12 @@ import {
 } from '../social-publisher/social-publisher.provider.js';
 import { IntegrationConnectionService } from '../connections/integration-connection.service.js';
 import { BrightBeanClient } from './brightbean.client.js';
-import { BrightBeanAccount, BrightBeanMediaAsset, BrightBeanPlatformPost } from './brightbean.types.js';
+import {
+  BrightBeanAccount,
+  BrightBeanDerivedMetric,
+  BrightBeanPlatformPost,
+  BrightBeanPostMetricTile,
+} from './brightbean.types.js';
 
 export class BrightBeanProviderError extends Error {
   readonly code: string;
@@ -34,19 +39,25 @@ export class BrightBeanProviderError extends Error {
 
 export interface BrightBeanProviderOptions {
   connectionService: IntegrationConnectionService;
-  apiBaseUrl?: string;
+  apiBaseUrl: string;
   fetchImpl?: typeof fetch;
 }
 
 export class BrightBeanProvider implements SocialPublisherProvider {
   private readonly connectionService: IntegrationConnectionService;
-  private readonly defaultApiBaseUrl: string;
+  private readonly apiBaseUrl: string;
   private readonly fetchImpl?: typeof fetch;
 
   constructor(options: BrightBeanProviderOptions) {
+    if (!options.apiBaseUrl) {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_CONFIG_ERROR',
+        'apiBaseUrl é obrigatório para o BrightBeanProvider',
+        500
+      );
+    }
     this.connectionService = options.connectionService;
-    this.defaultApiBaseUrl =
-      options.apiBaseUrl || 'https://brightbean.example/api/v1';
+    this.apiBaseUrl = options.apiBaseUrl;
     this.fetchImpl = options.fetchImpl;
   }
 
@@ -100,7 +111,7 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     );
 
     const client = new BrightBeanClient({
-      apiBaseUrl: this.defaultApiBaseUrl,
+      apiBaseUrl: this.apiBaseUrl,
       apiKey,
       fetchImpl: this.fetchImpl,
     });
@@ -260,7 +271,6 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       if (err instanceof BrightBeanProviderError) {
         throw err;
       }
-      // Se for erro de autenticação (401/403 de credencial), retorna connected: false
       if (err?.statusCode === 401 || err?.statusCode === 403) {
         return {
           connected: false,
@@ -273,7 +283,8 @@ export class BrightBeanProvider implements SocialPublisherProvider {
 
   async listAccounts(ctx: SocialPublisherContext): Promise<SocialAccount[]> {
     const { client, connection } = await this.resolveClientAndConnection(ctx);
-    const accounts = await client.listAccounts();
+    const response = await client.listAccounts();
+    const accounts = response.accounts || [];
 
     return accounts.map((acc: BrightBeanAccount) => ({
       id: acc.id,
@@ -317,7 +328,8 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     input: CreateSocialPostInput
   ): Promise<SocialPost> {
     const { client } = await this.resolveClientAndConnection(ctx);
-    const accounts = await client.listAccounts();
+    const response = await client.listAccounts();
+    const accounts = response.accounts || [];
     const targetAccount = accounts.find((a: BrightBeanAccount) => a.id === input.accountId);
 
     if (!targetAccount) {
@@ -457,19 +469,52 @@ export class BrightBeanProvider implements SocialPublisherProvider {
   ): Promise<SocialPostAnalytics | null> {
     const { client } = await this.resolveClientAndConnection(ctx);
     const res = await client.getPostAnalytics(postId);
-    if (!res) return null;
+
+    if (!res || !res.platform_posts || res.platform_posts.length === 0) {
+      return null;
+    }
+
+    if (res.platform_posts.length > 1) {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_MULTI_ACCOUNT_ANALYTICS_UNREPRESENTABLE',
+        'O contrato canônico atual não representa múltiplos platform_posts em analytics.',
+        422
+      );
+    }
+
+    const pp = res.platform_posts[0];
+    if (pp.analytics_available === false) {
+      return {
+        impressions: null,
+        reach: null,
+        likes: null,
+        comments: null,
+        shares: null,
+        saves: null,
+        clicks: null,
+        videoViews: null,
+        watchTime: null,
+        engagementRate: null,
+      };
+    }
+
+    const tiles = pp.metric_tiles || [];
+    const findTile = (key: string): number | null => {
+      const tile = tiles.find((t: BrightBeanPostMetricTile) => t.key === key);
+      return tile !== undefined && tile !== null ? tile.value : null;
+    };
 
     return {
-      impressions: res.impressions ?? null,
-      reach: res.reach ?? null,
-      likes: res.likes ?? null,
-      comments: res.comments ?? null,
-      shares: res.shares ?? null,
-      saves: res.saves ?? null,
-      clicks: res.clicks ?? null,
-      videoViews: res.views ?? null,
-      watchTime: res.watch_time ?? null,
-      engagementRate: res.engagement ?? null,
+      impressions: findTile('impressions'),
+      reach: findTile('reach'),
+      likes: findTile('likes'),
+      comments: findTile('comments'),
+      shares: findTile('shares'),
+      saves: findTile('saves'),
+      clicks: findTile('clicks'),
+      videoViews: findTile('views'),
+      watchTime: findTile('watch_time'),
+      engagementRate: findTile('engagement'),
     };
   }
 
@@ -493,11 +538,32 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     const res = await client.getAccountAnalytics(accountId, days);
     if (!res) return null;
 
+    if (res.analytics_available === false) {
+      return {
+        followerCount: null,
+        followingCount: null,
+        postCount: null,
+        profileViews: null,
+        websiteClicks: null,
+        periodStart: null,
+        periodEnd: null,
+      };
+    }
+
+    const heroMetrics = res.hero_metrics || [];
+    const findHero = (key: string): number | null => {
+      const metric = heroMetrics.find((m: BrightBeanDerivedMetric) => m.key === key);
+      return metric !== undefined && metric !== null ? metric.value : null;
+    };
+
     return {
-      profileViews: res.profile_views ?? null,
-      websiteClicks: res.website_clicks ?? null,
-      periodStart: res.period_start ?? null,
-      periodEnd: res.period_end ?? null,
+      followerCount: null, // NÃO mapear follower_growth para followerCount
+      followingCount: null,
+      postCount: null,
+      profileViews: findHero('profile_views'),
+      websiteClicks: findHero('website_clicks'),
+      periodStart: null,
+      periodEnd: null,
     };
   }
 }

@@ -1,11 +1,10 @@
 import {
-  BrightBeanAccount,
   BrightBeanAccountAnalyticsResponse,
+  BrightBeanAccountsListResponse,
   BrightBeanCreatePostPayload,
   BrightBeanErrorResponse,
   BrightBeanMediaAsset,
   BrightBeanMeResponse,
-  BrightBeanPlatformPost,
   BrightBeanPostAnalyticsResponse,
   BrightBeanPostResponse,
 } from './brightbean.types.js';
@@ -61,7 +60,6 @@ export class BrightBeanClient {
     if (!options.apiKey) {
       throw new Error('apiKey is required for BrightBeanClient');
     }
-    // Remove barras finais para garantir caminhos consistentes
     this.baseUrl = options.apiBaseUrl.replace(/\/+$/, '');
     this.apiKey = options.apiKey;
     this.fetcher = options.fetchImpl || globalThis.fetch;
@@ -95,7 +93,6 @@ export class BrightBeanClient {
     } = {}
   ): Promise<T> {
     const method = options.method || 'GET';
-    // Garante barra inicial no endpoint
     const formattedEndpoint = endpoint.startsWith('/')
       ? endpoint
       : `/${endpoint}`;
@@ -123,7 +120,7 @@ export class BrightBeanClient {
       try {
         errorBody = (await response.json()) as BrightBeanErrorResponse;
       } catch {
-        // Ignora falha de parse de JSON de erro
+        // Ignora falha de parse
       }
 
       let retryAfter: number | undefined;
@@ -135,19 +132,24 @@ export class BrightBeanClient {
         }
       }
 
+      const code =
+        errorBody?.error || errorBody?.code || `HTTP_${response.status}`;
+      const detail = errorBody?.detail || errorBody?.message;
+      const message =
+        errorBody?.detail ||
+        errorBody?.message ||
+        errorBody?.error ||
+        `Erro HTTP ${response.status} na API BrightBean`;
+
       throw new BrightBeanApiError({
         statusCode: response.status,
-        code: errorBody?.code || `HTTP_${response.status}`,
-        detail: errorBody?.detail || errorBody?.message,
-        message:
-          errorBody?.message ||
-          errorBody?.detail ||
-          `Erro HTTP ${response.status} na API BrightBean`,
+        code,
+        detail,
+        message,
         retryAfterSeconds: retryAfter,
       });
     }
 
-    // Trata respostas sem conteúdo (204 No Content)
     if (response.status === 204) {
       return {} as T;
     }
@@ -156,7 +158,12 @@ export class BrightBeanClient {
       const data = await response.json();
       return data as T;
     } catch {
-      return {} as T;
+      // Fail-closed em respostas 2xx com body inválido
+      throw new BrightBeanApiError({
+        statusCode: response.status,
+        code: 'BRIGHTBEAN_INVALID_RESPONSE',
+        message: 'Resposta inválida recebida da API BrightBean.',
+      });
     }
   }
 
@@ -164,8 +171,8 @@ export class BrightBeanClient {
     return this.request<BrightBeanMeResponse>('/me/');
   }
 
-  async listAccounts(): Promise<BrightBeanAccount[]> {
-    return this.request<BrightBeanAccount[]>('/accounts/');
+  async listAccounts(): Promise<BrightBeanAccountsListResponse> {
+    return this.request<BrightBeanAccountsListResponse>('/accounts/');
   }
 
   async getMedia(mediaId: string): Promise<BrightBeanMediaAsset> {

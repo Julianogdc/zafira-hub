@@ -21,6 +21,10 @@ export interface BrightBeanAccount {
   supports_first_comment?: boolean | null;
 }
 
+export interface BrightBeanAccountsListResponse {
+  accounts: BrightBeanAccount[];
+}
+
 export interface BrightBeanMediaAsset {
   id: string;
   url: string;
@@ -48,30 +52,69 @@ export interface BrightBeanPostResponse {
   platform_posts?: BrightBeanPlatformPost[];
 }
 
+export interface BrightBeanDerivedMetric {
+  key: string;
+  label: string;
+  kind: string;
+  value: number;
+  delta: number;
+  series: number[];
+}
+
+export interface BrightBeanEngagementCard {
+  rate: BrightBeanDerivedMetric;
+  parts: BrightBeanDerivedMetric[];
+}
+
 export interface BrightBeanAccountAnalyticsResponse {
-  profile_views?: number | null;
-  website_clicks?: number | null;
-  period_start?: string | null;
-  period_end?: string | null;
-  follower_growth?: number | null;
+  account_id: string;
+  platform: string;
+  account_name: string;
+  connection_status: string;
+  days: number;
+  analytics_available: boolean;
+  unavailable_reason?: string | null;
+  hero_metrics: BrightBeanDerivedMetric[];
+  engagement?: BrightBeanEngagementCard | null;
+  follower_growth?: BrightBeanDerivedMetric | null;
+  captured_at?: string | null;
+  next_sync_eta?: string | null;
+}
+
+export interface BrightBeanPostMetricTile {
+  key: string;
+  label: string;
+  kind: string;
+  value: number;
+  series: number[];
+  is_primary: boolean;
+}
+
+export interface BrightBeanPlatformPostAnalytics {
+  platform_post_id: string;
+  social_account_id: string;
+  platform: string;
+  status: string;
+  published_at?: string | null;
+  analytics_available: boolean;
+  unavailable_reason?: string | null;
+  metric_tiles: BrightBeanPostMetricTile[];
+  captured_at?: string | null;
+  next_sync_eta?: string | null;
 }
 
 export interface BrightBeanPostAnalyticsResponse {
-  impressions?: number | null;
-  reach?: number | null;
-  likes?: number | null;
-  comments?: number | null;
-  shares?: number | null;
-  saves?: number | null;
-  clicks?: number | null;
-  views?: number | null;
-  watch_time?: number | null;
-  engagement?: number | null;
+  post_id: string;
+  workspace_id: string;
+  title: string;
+  caption: string;
+  platform_posts: BrightBeanPlatformPostAnalytics[];
 }
 
 export interface BrightBeanErrorResponse {
-  code?: string;
+  error?: string;
   detail?: string;
+  code?: string;
   message?: string;
 }
 
