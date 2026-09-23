@@ -215,6 +215,7 @@ model IntegrationConnection {
   client       Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, provider, externalScopeId])
+  @@unique([clientId, provider])
   @@index([organizationId])
   @@index([clientId])
   @@index([provider])

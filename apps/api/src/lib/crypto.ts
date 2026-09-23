@@ -61,3 +61,60 @@ export function decryptToken(cipherText: string): string {
   const decrypted = Buffer.concat([decipher.update(encryptedText), decipher.final()]);
   return decrypted.toString('utf8');
 }
+
+/**
+ * Criptografia ESTRITA para novas IntegrationConnection.
+ * Exige INTEGRATION_ENCRYPTION_KEY obrigatoriamente (fail-closed sem chave/fallback).
+ * Utiliza formato: enc:v1:<iv_hex>:<tag_hex>:<ciphertext_hex>
+ */
+export function encryptIntegrationCredential(plainText: string): string {
+  if (!plainText || !plainText.trim()) {
+    throw new Error('Credencial inválida ou vazia para criptografia.');
+  }
+
+  const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
+  if (!secret || !secret.trim()) {
+    throw new Error('CRITICAL SECURITY ERROR: INTEGRATION_ENCRYPTION_KEY é obrigatória para IntegrationConnection.');
+  }
+
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = crypto.randomBytes(IV_LENGTH);
+
+  const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
+  const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return `${PREFIX}${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+/**
+ * Descriptografia ESTRITA para novas IntegrationConnection.
+ * Exige INTEGRATION_ENCRYPTION_KEY obrigatoriamente e rejeita plaintext ou payloads adulterados.
+ */
+export function decryptIntegrationCredential(cipherText: string): string {
+  if (!cipherText || typeof cipherText !== 'string' || !cipherText.startsWith(PREFIX)) {
+    throw new Error('Payload inválido ou não criptografado. Rejeitado pelo modo estrito.');
+  }
+
+  const secret = process.env.INTEGRATION_ENCRYPTION_KEY;
+  if (!secret || !secret.trim()) {
+    throw new Error('CRITICAL SECURITY ERROR: INTEGRATION_ENCRYPTION_KEY é obrigatória para decrypt de IntegrationConnection.');
+  }
+
+  const parts = cipherText.slice(PREFIX.length).split(':');
+  if (parts.length !== 3) {
+    throw new Error('Formato inválido do payload criptografado.');
+  }
+
+  const [ivHex, tagHex, encryptedHex] = parts;
+  const key = crypto.createHash('sha256').update(secret).digest();
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(tagHex, 'hex');
+  const encryptedText = Buffer.from(encryptedHex, 'hex');
+
+  const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAuthTag(authTag);
+
+  const decrypted = Buffer.concat([decipher.update(encryptedText), decipher.final()]);
+  return decrypted.toString('utf8');
+}

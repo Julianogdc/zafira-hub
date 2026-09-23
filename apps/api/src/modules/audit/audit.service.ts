@@ -15,6 +15,9 @@ const SENSITIVE_KEYS_SET = new Set([
   'clientsecret',
   'jwt',
   'privatekey',
+  'credential',
+  'credentialciphertext',
+  'integrationcredential',
 ]);
 
 /**
