@@ -1,4 +1,4 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { BrightBeanClient, BrightBeanApiError } from '../brightbean.client.js';
 import { BrightBeanProvider, BrightBeanProviderError } from '../brightbean.provider.js';
@@ -329,6 +329,7 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
             accounts: [
               { id: 'acc-ig', platform: 'instagram', account_name: 'IG' },
               { id: 'acc-fb', platform: 'facebook', account_name: 'FB' },
+              { id: 'acc-li', platform: 'linkedin', account_name: 'LI' },
             ],
           }),
           { status: 200 }
@@ -355,23 +356,23 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
       fetchImpl,
     });
 
-    it('STORY_IMAGE -> BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED', async () => {
+    it('Facebook + STORY_IMAGE -> BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED', async () => {
       await assert.rejects(
-        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-ig', format: 'STORY_IMAGE', content: 'S', mediaIds: ['img-1'] }),
+        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-fb', format: 'STORY_IMAGE', content: 'S', mediaIds: ['img-1'] }),
         (err: any) => err.code === 'BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED'
       );
     });
 
-    it('STORY_VIDEO -> BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED', async () => {
+    it('Facebook + STORY_VIDEO -> BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED', async () => {
       await assert.rejects(
-        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-ig', format: 'STORY_VIDEO', content: 'S', mediaIds: ['vid-1'] }),
+        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-fb', format: 'STORY_VIDEO', content: 'S', mediaIds: ['vid-1'] }),
         (err: any) => err.code === 'BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED'
       );
     });
 
-    it('Facebook + REEL -> BRIGHTBEAN_EXPLICIT_REEL_UNSUPPORTED', async () => {
+    it('LinkedIn + REEL -> BRIGHTBEAN_EXPLICIT_REEL_UNSUPPORTED', async () => {
       await assert.rejects(
-        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-fb', format: 'REEL', content: 'R', mediaIds: ['vid-1'] }),
+        async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-li', format: 'REEL', content: 'R', mediaIds: ['vid-1'] }),
         (err: any) => err.code === 'BRIGHTBEAN_EXPLICIT_REEL_UNSUPPORTED'
       );
     });
@@ -405,6 +406,157 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
         async () => provider.createPost({ organizationId: 'o', connectionId: 'c' }, { accountId: 'acc-ig', format: 'CAROUSEL', content: 'C', mediaIds: ['img-1'] }),
         (err: any) => err.code === 'BRIGHTBEAN_INVALID_CAROUSEL'
       );
+    });
+  });
+
+  // =========================================================================
+  // 8.1. Post Type Wire Format & Passo 2B5A Specifications
+  // =========================================================================
+  describe('8.1. Post Type Wire Format & Passo 2B5A Specifications', () => {
+    let capturedPayload: any = null;
+    let postFetchCalled = false;
+
+    const connService = createMockConnectionService();
+    const fetchImpl = createMockFetch((url, init) => {
+      if (url.includes('/accounts/')) {
+        return new Response(
+          JSON.stringify({
+            accounts: [
+              { id: 'acc-ig', platform: 'instagram', account_name: 'IG' },
+              { id: 'acc-fb', platform: 'facebook', account_name: 'FB' },
+            ],
+          }),
+          { status: 200 }
+        );
+      }
+      if (url.includes('/media/img-1')) {
+        return new Response(JSON.stringify({ id: 'img-1', url: 'http://cdn/i.png', mime_type: 'image/png', media_type: 'IMAGE' }), { status: 200 });
+      }
+      if (url.includes('/media/img-2')) {
+        return new Response(JSON.stringify({ id: 'img-2', url: 'http://cdn/i2.png', mime_type: 'image/png', media_type: 'IMAGE' }), { status: 200 });
+      }
+      if (url.includes('/media/vid-1')) {
+        return new Response(JSON.stringify({ id: 'vid-1', url: 'http://cdn/v.mp4', mime_type: 'video/mp4', media_type: 'VIDEO' }), { status: 200 });
+      }
+      if (url.includes('/posts/')) {
+        postFetchCalled = true;
+        capturedPayload = JSON.parse(init?.body as string);
+        return new Response(
+          JSON.stringify({
+            id: 'post-test',
+            status: 'draft',
+            caption: 'Test',
+            created_at: new Date().toISOString(),
+            platform_posts: [
+              {
+                social_account_id: capturedPayload.social_account_id,
+                platform: 'instagram',
+                status: 'draft',
+              },
+            ],
+          }),
+          { status: 201 }
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    const provider = new BrightBeanProvider({
+      connectionService: connService,
+      apiBaseUrl: 'https://api.brightbean.test/v1',
+      fetchImpl,
+    });
+
+    beforeEach(() => {
+      capturedPayload = null;
+      postFetchCalled = false;
+    });
+
+    // A. Instagram Story imagem: passa; POST /posts recebe post_type = "story"
+    it('A. Instagram Story imagem -> passa e payload recebe post_type = "story"', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-ig', format: 'STORY_IMAGE', content: 'Story Image', mediaIds: ['img-1'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, 'story');
+      assert.equal(capturedPayload.social_account_id, 'acc-ig');
+    });
+
+    // B. Instagram Story vídeo: passa; payload recebe story
+    it('B. Instagram Story vídeo -> passa e payload recebe post_type = "story"', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-ig', format: 'STORY_VIDEO', content: 'Story Video', mediaIds: ['vid-1'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, 'story');
+    });
+
+    // C. Facebook Story: fail-closed antes de POST /posts
+    it('C. Facebook Story -> fail-closed antes de POST /posts', async () => {
+      await assert.rejects(
+        async () => provider.createPost(
+          { organizationId: 'o', connectionId: 'c' },
+          { accountId: 'acc-fb', format: 'STORY_IMAGE', content: 'FB Story', mediaIds: ['img-1'] }
+        ),
+        (err: any) => err.code === 'BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED'
+      );
+      assert.equal(postFetchCalled, false, 'POST /posts NÃO deve ser chamado para Facebook Story');
+    });
+
+    // D. Instagram Reel vídeo: passa; payload recebe post_type = "reel"
+    it('D. Instagram Reel vídeo -> passa e payload recebe post_type = "reel"', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-ig', format: 'REEL', content: 'IG Reel Video', mediaIds: ['vid-1'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, 'reel');
+    });
+
+    // E. Facebook Reel vídeo: passa; payload recebe post_type = "reel"
+    it('E. Facebook Reel vídeo -> passa e payload recebe post_type = "reel"', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-fb', format: 'REEL', content: 'FB Reel Video', mediaIds: ['vid-1'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, 'reel');
+    });
+
+    // F. Reel imagem: falha antes do POST
+    it('F. Reel imagem -> falha antes do POST', async () => {
+      await assert.rejects(
+        async () => provider.createPost(
+          { organizationId: 'o', connectionId: 'c' },
+          { accountId: 'acc-ig', format: 'REEL', content: 'Reel Image', mediaIds: ['img-1'] }
+        ),
+        (err: any) => err.code === 'BRIGHTBEAN_INVALID_REEL_ASSET'
+      );
+      assert.equal(postFetchCalled, false, 'POST /posts NÃO deve ser chamado para Reel com imagem');
+    });
+
+    // G. FEED: payload NÃO contém post_type
+    it('G. FEED -> payload NÃO contém post_type', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-ig', format: 'FEED', content: 'Feed Post', mediaIds: ['img-1'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, undefined);
+      assert.equal('post_type' in capturedPayload, false);
+    });
+
+    // H. CAROUSEL: payload NÃO contém post_type
+    it('H. CAROUSEL -> payload NÃO contém post_type', async () => {
+      const res = await provider.createPost(
+        { organizationId: 'o', connectionId: 'c' },
+        { accountId: 'acc-ig', format: 'CAROUSEL', content: 'Carousel Post', mediaIds: ['img-1', 'img-2'] }
+      );
+      assert.equal(res.id, 'post-test');
+      assert.equal(capturedPayload.post_type, undefined);
+      assert.equal('post_type' in capturedPayload, false);
     });
   });
 

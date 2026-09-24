@@ -124,4 +124,5 @@ export interface BrightBeanCreatePostPayload {
   media_asset_ids: string[];
   action: 'draft' | 'schedule';
   scheduled_at?: string | null;
+  post_type?: 'story' | 'reel';
 }

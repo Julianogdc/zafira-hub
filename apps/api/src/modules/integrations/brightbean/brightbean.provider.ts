@@ -20,6 +20,7 @@ import { IntegrationConnectionService } from '../connections/integration-connect
 import { BrightBeanClient } from './brightbean.client.js';
 import {
   BrightBeanAccount,
+  BrightBeanCreatePostPayload,
   BrightBeanDerivedMetric,
   BrightBeanPlatformPost,
   BrightBeanPostMetricTile,
@@ -168,26 +169,50 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     const format = input.format;
     const mediaIds = input.mediaIds || [];
 
-    if (format === 'STORY_IMAGE' || format === 'STORY_VIDEO') {
-      throw new BrightBeanProviderError(
-        'BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED',
-        'REST v1 não expõe post_type/platform_extra necessário para solicitar Story explicitamente.',
-        422
-      );
+    if (format === 'STORY_IMAGE' || format === 'STORY_VIDEO' || (format as any) === 'STORY') {
+      if (platform !== 'INSTAGRAM') {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_EXPLICIT_STORY_UNSUPPORTED',
+          'Story é suportado apenas para Instagram na BrightBean.',
+          422
+        );
+      }
+      if (mediaIds.length !== 1) {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_INVALID_STORY_ASSET',
+          'Story no Instagram exige exatamente 1 mídia.',
+          422
+        );
+      }
+      const media = await client.getMedia(mediaIds[0]);
+      const isImage =
+        media.media_type === 'IMAGE' ||
+        (media.mime_type && media.mime_type.startsWith('image/'));
+      const isVideo =
+        media.media_type === 'VIDEO' ||
+        (media.mime_type && media.mime_type.startsWith('video/'));
+      if (!isImage && !isVideo) {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_INVALID_STORY_ASSET',
+          'Story no Instagram exige arquivo de imagem ou vídeo.',
+          422
+        );
+      }
+      return;
     }
 
     if (format === 'REEL') {
-      if (platform !== 'INSTAGRAM') {
+      if (platform !== 'INSTAGRAM' && platform !== 'FACEBOOK') {
         throw new BrightBeanProviderError(
           'BRIGHTBEAN_EXPLICIT_REEL_UNSUPPORTED',
-          'Facebook Reel não suportado sem hint explícito platform_extra.post_type=reel na REST v1.',
+          'Reel na BrightBean é suportado apenas no Instagram e Facebook.',
           422
         );
       }
       if (mediaIds.length !== 1) {
         throw new BrightBeanProviderError(
           'BRIGHTBEAN_INVALID_REEL_ASSET',
-          'Reel no Instagram exige exatamente 1 mídia de vídeo.',
+          `Reel no ${platform === 'FACEBOOK' ? 'Facebook' : 'Instagram'} exige exatamente 1 mídia de vídeo.`,
           422
         );
       }
@@ -198,7 +223,7 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       if (!isVideo) {
         throw new BrightBeanProviderError(
           'BRIGHTBEAN_INVALID_REEL_ASSET',
-          'Reel no Instagram exige arquivo de vídeo.',
+          `Reel no ${platform === 'FACEBOOK' ? 'Facebook' : 'Instagram'} exige arquivo de vídeo.`,
           422
         );
       }
@@ -358,12 +383,20 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       action = 'draft';
     }
 
-    const payload = {
+    let post_type: 'story' | 'reel' | undefined;
+    if (input.format === 'STORY_IMAGE' || input.format === 'STORY_VIDEO' || (input.format as any) === 'STORY') {
+      post_type = 'story';
+    } else if (input.format === 'REEL') {
+      post_type = 'reel';
+    }
+
+    const payload: BrightBeanCreatePostPayload = {
       social_account_id: input.accountId,
       caption: input.content,
       media_asset_ids: input.mediaIds,
       action,
       scheduled_at,
+      ...(post_type ? { post_type } : {}),
     };
 
     const res = await client.createPost(payload, input.idempotencyKey);
