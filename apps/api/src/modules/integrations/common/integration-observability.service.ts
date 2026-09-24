@@ -56,7 +56,21 @@ export function sanitizeMetadata(obj: unknown): any {
 }
 
 /**
- * Valida recursivamente se algum objeto de metadata/payload possui chaves sensíveis.
+ * Sanitiza strings de erro para evitar vazamento acidental de tokens/segredos em mensagens de exceção.
+ */
+export function sanitizeErrorMessage(message: string | null | undefined): string | null {
+  if (!message) return null;
+  let sanitized = message.trim();
+  sanitized = sanitized.replace(/(bearer\s+)[a-zA-Z0-9_\-\.\/]+/gi, '$1[REDACTED]');
+  sanitized = sanitized.replace(/(token\s*[:=]\s*)[a-zA-Z0-9_\-\.\/]+/gi, '$1[REDACTED]');
+  sanitized = sanitized.replace(/(secret\s*[:=]\s*)[a-zA-Z0-9_\-\.\/]+/gi, '$1[REDACTED]');
+  sanitized = sanitized.replace(/(password\s*[:=]\s*)[^\s]+/gi, '$1[REDACTED]');
+  sanitized = sanitized.replace(/(x-hook-secret\s*[:=]\s*)[a-zA-Z0-9_\-\.\/]+/gi, '$1[REDACTED]');
+  return sanitized;
+}
+
+/**
+ * Valida recursivamente se algum objeto de metadata/payload possui chaves sensíveis com valores não-redactados.
  */
 function sanitizeOrValidateMetadata(obj: unknown, path = ''): void {
   if (!obj || typeof obj !== 'object') return;
@@ -67,11 +81,13 @@ function sanitizeOrValidateMetadata(obj: unknown, path = ''): void {
   for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
     const normalizedKey = key.toLowerCase().replace(/[-_]/g, '');
     if (PROHIBITED_KEYS.has(normalizedKey)) {
-      throw new IntegrationObservabilityError(
-        `O campo de metadata '${path ? `${path}.${key}` : key}' não pode armazenar segredos ou credenciais.`,
-        400,
-        'PROHIBITED_METADATA_KEY'
-      );
+      if (value !== '[REDACTED]') {
+        throw new IntegrationObservabilityError(
+          `O campo de metadata '${path ? `${path}.${key}` : key}' não pode armazenar segredos ou credenciais.`,
+          400,
+          'PROHIBITED_METADATA_KEY'
+        );
+      }
     }
     sanitizeOrValidateMetadata(value, path ? `${path}.${key}` : key);
   }
@@ -180,6 +196,8 @@ export class IntegrationObservabilityService {
       throw new IntegrationObservabilityError('status é obrigatório.', 400, 'INVALID_INPUT');
     }
 
+    const cleanErrorSummary = sanitizeErrorMessage(input.errorSummary);
+
     if (input.metadata) {
       sanitizeOrValidateMetadata(input.metadata);
     }
@@ -192,7 +210,7 @@ export class IntegrationObservabilityService {
         itemsProcessed: input.itemsProcessed ?? 0,
         itemsSucceeded: input.itemsSucceeded ?? 0,
         itemsFailed: input.itemsFailed ?? 0,
-        errorSummary: input.errorSummary ? input.errorSummary.trim() : null,
+        errorSummary: cleanErrorSummary,
         ...(input.metadata ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
       },
     });
@@ -215,6 +233,8 @@ export class IntegrationObservabilityService {
       throw new IntegrationObservabilityError('message é obrigatória.', 400, 'INVALID_INPUT');
     }
 
+    const cleanMessage = sanitizeErrorMessage(input.message) || input.message.trim();
+
     if (input.metadata) {
       sanitizeOrValidateMetadata(input.metadata);
     }
@@ -227,7 +247,7 @@ export class IntegrationObservabilityService {
         provider: input.provider,
         operation: input.operation.trim(),
         code: input.code ? input.code.trim() : null,
-        message: input.message.trim(),
+        message: cleanMessage,
         retryable: input.retryable ?? false,
         metadata: input.metadata ? (input.metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
@@ -275,8 +295,9 @@ export class IntegrationObservabilityService {
       throw new IntegrationObservabilityError('eventType é obrigatório.', 400, 'INVALID_INPUT');
     }
 
-    if (input.payload) {
-      sanitizeOrValidateMetadata(input.payload);
+    const sanitizedPayload = input.payload ? sanitizeMetadata(input.payload) : undefined;
+    if (sanitizedPayload) {
+      sanitizeOrValidateMetadata(sanitizedPayload);
     }
 
     const existing = await this.prisma.webhookEvent.findUnique({
@@ -296,7 +317,7 @@ export class IntegrationObservabilityService {
         dedupeKey: input.dedupeKey.trim(),
         eventType: input.eventType.trim(),
         status: 'RECEIVED',
-        payload: input.payload ? (input.payload as Prisma.InputJsonValue) : Prisma.JsonNull,
+        payload: sanitizedPayload ? (sanitizedPayload as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
 
@@ -311,12 +332,13 @@ export class IntegrationObservabilityService {
     status: WebhookEventStatus,
     errorMessage?: string | null
   ) {
+    const cleanError = sanitizeErrorMessage(errorMessage);
     return this.prisma.webhookEvent.update({
       where: { id: webhookEventId },
       data: {
         status,
         processedAt: new Date(),
-        errorMessage: errorMessage ? errorMessage.trim() : null,
+        errorMessage: cleanError,
       },
     });
   }
