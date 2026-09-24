@@ -9,6 +9,9 @@ import { createHealthRoutes } from './routes/health.js';
 import { authRoutes } from './modules/auth/auth.routes.js';
 import { clientRoutes } from './modules/clients/clients.routes.js';
 import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
+import { commonIntegrationsRoutes } from './modules/integrations/common/common-integrations.routes.js';
+import { integrationRegistryService } from './modules/integrations/common/integration-registry.service.js';
+import { asanaIntegrationConnector } from './modules/integrations/asana/asana.connector.js';
 import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
 import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
 import { financialRoutes } from './modules/financial/financial.routes.js';
@@ -20,6 +23,9 @@ import { teamRoutes } from './modules/teams/team.routes.js';
 import { ObservabilityService } from './modules/observability/observability.service.js';
 import { createMetricsRoutes } from './modules/observability/metrics.routes.js';
 import { getFastifyLoggerConfig } from './modules/observability/logger-config.js';
+
+// Registrar conectores canônicos no registro comum
+integrationRegistryService.registerConnector(asanaIntegrationConnector);
 
 export interface BuildAppOptions {
   logger?: any;
@@ -143,6 +149,9 @@ export function buildApp(options?: BuildAppOptions): FastifyInstance {
 
   // 8. Rotas de Integração Asana
   app.register(asanaRoutes);
+
+  // 8.1 Rotas Canônicas e Central de Integrações
+  app.register(commonIntegrationsRoutes);
 
   // 9. Rotas de Integração Postiz
   app.register(postizRoutes);

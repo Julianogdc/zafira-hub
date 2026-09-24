@@ -54,6 +54,20 @@ enum IntegrationConnectionStatus {
   ERROR
 }
 
+enum SyncRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
 enum AsaasPaymentStatus {
   PENDING
   RECEIVED
@@ -93,6 +107,9 @@ model Organization {
   featureFlags           OrganizationFeatureFlag[]
   invitations            OrganizationInvitation[]
   integrationConnections IntegrationConnection[]
+  syncRuns               SyncRun[]
+  webhookEvents          WebhookEvent[]
+  integrationErrors      IntegrationError[]
 
   @@map("organizations")
 }
@@ -188,6 +205,8 @@ model Client {
   assignedMembers        UserClientAssignment[]
   teamAssignments        TeamClientAssignment[]
   integrationConnections IntegrationConnection[]
+  syncRuns               SyncRun[]
+  integrationErrors      IntegrationError[]
 
   @@unique([organizationId, id])
   @@index([organizationId])
@@ -211,8 +230,11 @@ model IntegrationConnection {
   createdAt            DateTime                    @default(now())
   updatedAt            DateTime                    @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  client       Client?      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client            Client?            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  syncRuns          SyncRun[]
+  webhookEvents     WebhookEvent[]
+  integrationErrors IntegrationError[]
 
   @@unique([organizationId, provider, externalScopeId])
   @@unique([clientId, provider])
@@ -221,6 +243,90 @@ model IntegrationConnection {
   @@index([provider])
   @@index([status])
   @@map("integration_connections")
+}
+
+model SyncRun {
+  id              String        @id @default(uuid())
+  organizationId  String
+  clientId        String?
+  connectionId    String?
+  provider        IntegrationProvider
+  operation       String
+  status          SyncRunStatus @default(RUNNING)
+  startedAt       DateTime      @default(now())
+  finishedAt      DateTime?
+  itemsProcessed  Int           @default(0)
+  itemsSucceeded  Int           @default(0)
+  itemsFailed     Int           @default(0)
+  errorSummary    String?       @db.Text
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("sync_runs")
+}
+
+model WebhookEvent {
+  id              String             @id @default(uuid())
+  organizationId  String
+  connectionId    String?
+  provider        IntegrationProvider
+  externalEventId String?
+  dedupeKey       String             @unique
+  eventType       String
+  status          WebhookEventStatus @default(RECEIVED)
+  receivedAt      DateTime           @default(now())
+  processedAt     DateTime?
+  errorMessage    String?            @db.Text
+  payload         Json?
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([dedupeKey])
+  @@map("webhook_events")
+}
+
+model IntegrationError {
+  id             String              @id @default(uuid())
+  organizationId String
+  clientId       String?
+  connectionId   String?
+  provider       IntegrationProvider
+  operation      String
+  code           String?
+  message        String              @db.Text
+  retryable      Boolean             @default(false)
+  resolvedAt     DateTime?
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([code])
+  @@index([retryable])
+  @@index([createdAt])
+  @@map("integration_errors")
 }
 
 model ClientIntegration {

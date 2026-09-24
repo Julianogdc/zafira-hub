@@ -1,7 +1,15 @@
 import crypto from 'crypto';
 import { prisma } from '../../../lib/prisma.js';
-import { encryptToken, decryptToken } from '../../../lib/crypto.js';
+import {
+  encryptToken,
+  decryptToken,
+  encryptIntegrationCredential,
+  decryptIntegrationCredential,
+} from '../../../lib/crypto.js';
 import { sseHub, AsanaNormalizedEvent } from '../../../lib/sseHub.js';
+import { integrationObservabilityService } from '../common/integration-observability.service.js';
+import { integrationConnectionService } from '../connections/integration-connection.service.js';
+import { AuditService } from '../../audit/audit.service.js';
 
 export class AsanaIntegrationError extends Error {
   constructor(public statusCode: number, message: string, public details?: any) {
@@ -171,8 +179,48 @@ export class AsanaService {
    * 2. Fallback estrito de desenvolvimento (apenas se NODE_ENV !== 'production')
    */
   async getValidToken(organizationId: string): Promise<{ token: string; source: 'organization' | 'env'; workspaceId?: string | null }> {
-    // 1. Consulta no banco
-    const orgIntegration = await prisma.organizationIntegration.findUnique({
+    // 1. Consulta canônica em IntegrationConnection (org-level)
+    const conn = await prisma.integrationConnection.findFirst({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+        clientId: null,
+      },
+    });
+
+    if (conn?.credentialCiphertext && conn.status === 'ACTIVE') {
+      try {
+        const plain = decryptIntegrationCredential(conn.credentialCiphertext);
+        let accessToken = plain;
+        let refreshToken: string | null = null;
+        let expiresAt: Date | null = null;
+
+        // Se o payload for JSON estruturado (OAuth)
+        if (plain.startsWith('{') && plain.endsWith('}')) {
+          try {
+            const parsed = JSON.parse(plain);
+            accessToken = parsed.accessToken || plain;
+            refreshToken = parsed.refreshToken || null;
+            expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
+          } catch {
+            // fallback plain string
+          }
+        }
+
+        // Verifica expiração e faz refresh se necessário
+        if (expiresAt && expiresAt < new Date() && refreshToken) {
+          const refreshed = await this.refreshToken(conn.id, refreshToken);
+          return { token: refreshed.accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+        }
+
+        return { token: accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+      } catch (err) {
+        console.warn('[AsanaService] Erro ao descriptografar IntegrationConnection:', err);
+      }
+    }
+
+    // 2. Caminho de migração explícito de OrganizationIntegration legado
+    const legacy = await prisma.organizationIntegration.findUnique({
       where: {
         organizationId_provider: {
           organizationId,
@@ -181,19 +229,14 @@ export class AsanaService {
       },
     });
 
-    if (orgIntegration?.accessToken) {
-      const plainAccessToken = decryptToken(orgIntegration.accessToken);
-      const plainRefreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
-
-      // Verifica se o token expirou e possui refresh token
-      if (orgIntegration.expiresAt && orgIntegration.expiresAt < new Date() && plainRefreshToken) {
-        const refreshed = await this.refreshToken(orgIntegration.id, plainRefreshToken);
-        return { token: refreshed.accessToken, source: 'organization', workspaceId: orgIntegration.workspaceId };
+    if (legacy?.accessToken) {
+      const migrated = await this.migrateLegacyOrganizationIntegration(organizationId);
+      if (migrated.token) {
+        return { token: migrated.token, source: 'organization', workspaceId: legacy.workspaceId };
       }
-      return { token: plainAccessToken, source: 'organization', workspaceId: orgIntegration.workspaceId };
     }
 
-    // 2. Fallback estrito para ambiente de desenvolvimento local (NUNCA em produção)
+    // 3. Fallback estrito para ambiente de desenvolvimento local (NUNCA em produção)
     if (process.env.NODE_ENV !== 'production') {
       const devToken = process.env.ASANA_DEV_PAT || process.env.ASANA_ACCESS_TOKEN;
       if (devToken) {
@@ -202,6 +245,71 @@ export class AsanaService {
     }
 
     throw new AsanaIntegrationError(400, 'A integração com o Asana não está configurada para esta organização.');
+  }
+
+  /**
+   * Caminho de migração explícito e testável para transferir credenciais do OrganizationIntegration legado para IntegrationConnection.
+   */
+  async migrateLegacyOrganizationIntegration(organizationId: string): Promise<{ migrated: boolean; token?: string; connectionId?: string }> {
+    const legacy = await prisma.organizationIntegration.findUnique({
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      },
+    });
+
+    if (!legacy || !legacy.accessToken) {
+      return { migrated: false };
+    }
+
+    const plainAccessToken = decryptToken(legacy.accessToken);
+    const plainRefreshToken = legacy.refreshToken ? decryptToken(legacy.refreshToken) : null;
+
+    const payload = JSON.stringify({
+      accessToken: plainAccessToken,
+      refreshToken: plainRefreshToken,
+      expiresAt: legacy.expiresAt?.toISOString() || null,
+    });
+
+    const credentialCiphertext = encryptIntegrationCredential(payload);
+    const meta = (legacy.metadata as any) || {};
+
+    const conn = await prisma.integrationConnection.upsert({
+      where: {
+        organizationId_provider_externalScopeId: {
+          organizationId,
+          provider: 'ASANA',
+          externalScopeId: legacy.workspaceId || 'default',
+        },
+      },
+      create: {
+        organizationId,
+        provider: 'ASANA',
+        authType: 'OAUTH2',
+        externalScopeId: legacy.workspaceId || 'default',
+        displayName: meta.userName ? `Asana (${meta.userName})` : 'Asana Workspace',
+        credentialCiphertext,
+        metadata: {
+          ...meta,
+          migratedFromLegacyAt: new Date().toISOString(),
+        },
+        status: 'ACTIVE',
+        lastValidatedAt: new Date(),
+      },
+      update: {
+        credentialCiphertext,
+        status: 'ACTIVE',
+        lastValidatedAt: new Date(),
+        metadata: {
+          ...meta,
+          migratedFromLegacyAt: new Date().toISOString(),
+        },
+      },
+    });
+
+    return { migrated: true, token: plainAccessToken, connectionId: conn.id };
   }
 
   /**
@@ -1460,22 +1568,49 @@ export class AsanaService {
 
     const data = (await response.json()) as { expires_in?: number; access_token: string; refresh_token?: string };
     const expiresAt = data.expires_in ? new Date(Date.now() + data.expires_in * 1000) : null;
+    const newRefreshToken = data.refresh_token || refreshToken;
 
-    await prisma.organizationIntegration.update({
+    // Atualiza a IntegrationConnection canônica
+    const connection = await prisma.integrationConnection.findUnique({
       where: { id: integrationId },
-      data: {
-        accessToken: encryptToken(data.access_token),
-        refreshToken: data.refresh_token ? encryptToken(data.refresh_token) : encryptToken(refreshToken),
-        expiresAt,
-        updatedAt: new Date(),
-      },
     });
+
+    if (connection) {
+      await integrationConnectionService.upsertConnection({
+        organizationId: connection.organizationId,
+        provider: 'ASANA',
+        rawCredential: {
+          accessToken: data.access_token,
+          refreshToken: newRefreshToken,
+          expiresAt: expiresAt?.toISOString() || null,
+        },
+        displayName: connection.displayName || 'Asana Workspace',
+        externalAccountId: connection.externalScopeId,
+        status: 'ACTIVE',
+        metadata: {
+          ...(typeof connection.metadata === 'object' && connection.metadata !== null ? connection.metadata : {}),
+          lastRefreshedAt: new Date().toISOString(),
+        },
+      });
+    } else {
+      // Fallback para caso ainda esteja atualizando via ID legado
+      await prisma.organizationIntegration.updateMany({
+        where: { id: integrationId },
+        data: {
+          accessToken: encryptToken(data.access_token),
+          refreshToken: encryptToken(newRefreshToken),
+          expiresAt,
+          updatedAt: new Date(),
+        },
+      });
+    }
 
     return { accessToken: data.access_token };
   }
 
   /**
    * Troca o Authorization Code retornado pelo Asana por Access Token e Refresh Token no backend.
+   * Persiste canonicamente em IntegrationConnection com criptografia.
    */
   async exchangeOAuthCode(organizationId: string, code: string, redirectUri: string): Promise<void> {
     const clientId = process.env.ASANA_CLIENT_ID;
@@ -1508,48 +1643,41 @@ export class AsanaService {
       expires_in?: number;
       access_token: string;
       refresh_token?: string;
-      data?: { gid?: string; name?: string; email?: string; workspaces?: Array<{ gid?: string }> };
+      data?: { gid?: string; name?: string; email?: string; workspaces?: Array<{ gid?: string; name?: string }> };
     };
     const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
     const workspaceId = tokenData.data?.workspaces?.[0]?.gid || null;
+    const workspaceName = tokenData.data?.workspaces?.[0]?.name || 'Asana Workspace';
 
-    const encryptedAccessToken = encryptToken(tokenData.access_token);
-    const encryptedRefreshToken = tokenData.refresh_token ? encryptToken(tokenData.refresh_token) : null;
-
-    await prisma.organizationIntegration.upsert({
-      where: {
-        organizationId_provider: {
-          organizationId,
-          provider: 'ASANA',
-        },
-      },
-      create: {
-        organizationId,
-        provider: 'ASANA',
-        accessToken: encryptedAccessToken,
-        refreshToken: encryptedRefreshToken,
-        expiresAt,
+    // Persiste canonicamente em IntegrationConnection (Criptografado)
+    await integrationConnectionService.upsertConnection({
+      organizationId,
+      provider: 'ASANA',
+      rawCredential: {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token || null,
+        expiresAt: expiresAt?.toISOString() || null,
         workspaceId,
-        metadata: {
-          userGid: tokenData.data?.gid,
-          userName: tokenData.data?.name,
-          userEmail: tokenData.data?.email,
-          connectedAt: new Date().toISOString(),
-        },
       },
-      update: {
-        accessToken: encryptedAccessToken,
-        refreshToken: encryptedRefreshToken || undefined,
-        expiresAt,
+      displayName: tokenData.data?.name ? `${workspaceName} (${tokenData.data.name})` : workspaceName,
+      externalAccountId: workspaceId || tokenData.data?.gid || null,
+      status: 'ACTIVE',
+      metadata: {
+        userGid: tokenData.data?.gid,
+        userName: tokenData.data?.name,
+        userEmail: tokenData.data?.email,
         workspaceId,
-        metadata: {
-          userGid: tokenData.data?.gid,
-          userName: tokenData.data?.name,
-          userEmail: tokenData.data?.email,
-          updatedAt: new Date().toISOString(),
-        },
+        connectedAt: new Date().toISOString(),
       },
     });
+
+    // Se houver registro legado na OrganizationIntegration, remove para evitar fontes conflitantes
+    await prisma.organizationIntegration.deleteMany({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+      },
+    }).catch(() => {});
   }
 
   /**
@@ -1582,11 +1710,19 @@ export class AsanaService {
    * Desconecta completamente o Asana da organização:
    * 1. Revoga o token no Asana (se possível)
    * 2. Remove os vínculos ClientIntegration do provedor ASANA pertencentes aos clientes da organização
-   * 3. Exclui o registro OrganizationIntegration do Asana
-   * 4. NÃO envia nenhuma deleção para projetos ou tarefas reais no Asana
+   * 3. Atualiza IntegrationConnection para DISCONNECTED (ou remove)
+   * 4. Exclui o registro OrganizationIntegration do Asana se ainda existir
+   * 5. NÃO envia nenhuma deleção para projetos ou tarefas reais no Asana
    */
   async disconnect(organizationId: string): Promise<void> {
-    // 1. Localiza a integração da organização
+    // 1. Localiza conexão canônica ou legado
+    const canonicalConn = await prisma.integrationConnection.findFirst({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+      },
+    });
+
     const orgIntegration = await prisma.organizationIntegration.findUnique({
       where: {
         organizationId_provider: {
@@ -1596,22 +1732,30 @@ export class AsanaService {
       },
     });
 
-    if (!orgIntegration) {
+    if (!canonicalConn && !orgIntegration) {
       throw new AsanaIntegrationError(404, 'Nenhuma integração Asana ativa encontrada para esta organização.');
     }
 
     // 2. Remove todos os webhooks remotos e locais da organização
     await this.removeAllWebhooks(organizationId).catch(() => {});
 
-    // 3. Revogação remota segura de tokens (sem expor credenciais em logs)
+    // 3. Revogação remota segura de tokens
     try {
-      const refreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
-      const accessToken = orgIntegration.accessToken ? decryptToken(orgIntegration.accessToken) : null;
-
-      if (refreshToken) {
-        await this.revokeToken(refreshToken);
-      } else if (accessToken) {
-        await this.revokeToken(accessToken);
+      if (canonicalConn) {
+        const cred = integrationConnectionService.getDecryptedCredential<{ accessToken?: string; refreshToken?: string }>(canonicalConn);
+        if (cred?.refreshToken) {
+          await this.revokeToken(cred.refreshToken);
+        } else if (cred?.accessToken) {
+          await this.revokeToken(cred.accessToken);
+        }
+      } else if (orgIntegration) {
+        const refreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
+        const accessToken = orgIntegration.accessToken ? decryptToken(orgIntegration.accessToken) : null;
+        if (refreshToken) {
+          await this.revokeToken(refreshToken);
+        } else if (accessToken) {
+          await this.revokeToken(accessToken);
+        }
       }
     } catch {
       // Prossegue mesmo se a chamada remota falhar
@@ -1633,10 +1777,23 @@ export class AsanaService {
       });
     }
 
-    // 5. Remove a integração da organização no PostgreSQL
-    await prisma.organizationIntegration.delete({
-      where: { id: orgIntegration.id },
-    });
+    // 5. Atualiza status na IntegrationConnection canônica para DISCONNECTED
+    if (canonicalConn) {
+      await prisma.integrationConnection.update({
+        where: { id: canonicalConn.id },
+        data: {
+          status: 'DISCONNECTED',
+          updatedAt: new Date(),
+        },
+      });
+    }
+
+    // 6. Remove a integração legada se ainda existir
+    if (orgIntegration) {
+      await prisma.organizationIntegration.delete({
+        where: { id: orgIntegration.id },
+      }).catch(() => {});
+    }
   }
 
   /**
@@ -1996,4 +2153,6 @@ export class AsanaService {
     return { synced: results.length, details: results };
   }
 }
+
+export const asanaService = new AsanaService();
 

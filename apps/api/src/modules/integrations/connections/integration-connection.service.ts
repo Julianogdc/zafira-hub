@@ -392,4 +392,93 @@ export class IntegrationConnectionService {
 
     return this.mapToDTO(updated);
   }
+
+  /**
+   * Cria ou atualiza uma conexão (org-level ou client-level) de forma atômica e criptografada.
+   */
+  async upsertConnection(input: {
+    organizationId: string;
+    clientId?: string | null;
+    provider: IntegrationProvider;
+    authType?: IntegrationAuthType;
+    externalAccountId?: string | null;
+    displayName?: string | null;
+    rawCredential: any;
+    status?: IntegrationConnectionStatus;
+    metadata?: Record<string, any>;
+  }): Promise<IntegrationConnectionDTO> {
+    const { organizationId, clientId = null, provider, authType = 'OAUTH2', externalAccountId = null, displayName = null, rawCredential, status = 'ACTIVE', metadata } = input;
+
+    if (!organizationId) {
+      throw new IntegrationConnectionError('organizationId é obrigatório.', 400, 'INVALID_INPUT');
+    }
+
+    if (metadata) {
+      validateMetadataObject(metadata);
+    }
+
+    const credString = typeof rawCredential === 'string' ? rawCredential : JSON.stringify(rawCredential);
+    const credentialCiphertext = encryptIntegrationCredential(credString);
+
+    const existing = await this.prisma.integrationConnection.findFirst({
+      where: {
+        organizationId,
+        provider,
+        clientId: clientId || null,
+      },
+    });
+
+    let result;
+    if (existing) {
+      result = await this.prisma.integrationConnection.update({
+        where: { id: existing.id },
+        data: {
+          authType,
+          credentialCiphertext,
+          externalScopeId: externalAccountId || existing.externalScopeId,
+          displayName: displayName || existing.displayName,
+          status,
+          metadata: metadata ? (metadata as Prisma.InputJsonValue) : (existing.metadata ?? Prisma.JsonNull),
+          lastValidatedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      });
+    } else {
+      result = await this.prisma.integrationConnection.create({
+        data: {
+          organizationId,
+          clientId: clientId || null,
+          provider,
+          authType,
+          credentialCiphertext,
+          externalScopeId: externalAccountId,
+          displayName,
+          status,
+          metadata: metadata ? (metadata as Prisma.InputJsonValue) : Prisma.JsonNull,
+          lastValidatedAt: new Date(),
+        },
+      });
+    }
+
+    return this.mapToDTO(result);
+  }
+
+  /**
+   * Helper para descriptografar credencial estruturada.
+   */
+  getDecryptedCredential<T = any>(connection: { credentialCiphertext?: string | null }): T | null {
+    if (!connection.credentialCiphertext) return null;
+    try {
+      const plain = decryptIntegrationCredential(connection.credentialCiphertext);
+      if (plain.startsWith('{') && plain.endsWith('}')) {
+        return JSON.parse(plain) as T;
+      }
+      return plain as unknown as T;
+    } catch {
+      return null;
+    }
+  }
 }
+
+export const integrationConnectionService = new IntegrationConnectionService();
+
