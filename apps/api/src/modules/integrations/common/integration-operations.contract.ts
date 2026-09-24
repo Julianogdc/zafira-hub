@@ -2,6 +2,7 @@ import { IntegrationProvider } from '@prisma/client';
 
 export interface IntegrationContext {
   organizationId: string;
+  userId?: string | null;
   clientId?: string | null;
   connectionId?: string | null;
   externalScopeId?: string | null;

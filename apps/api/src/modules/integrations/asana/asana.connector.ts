@@ -6,20 +6,25 @@ import {
   TestConnectionResult,
   SyncResult,
   SyncOptions,
+  ReconnectResult,
   DisconnectResult,
 } from '../common/integration-operations.contract.js';
-import { AsanaService, asanaService as defaultAsanaService } from './asana.service.js';
+import { AsanaService, asanaService as defaultAsanaService, AsanaIntegrationError } from './asana.service.js';
 import {
   IntegrationObservabilityService,
   integrationObservabilityService as defaultObservability,
 } from '../common/integration-observability.service.js';
+import { createAndPersistOAuthState } from '../../../lib/oauthState.js';
+import { prisma } from '../../../lib/prisma.js';
+import { buildAsanaAuthorizeUrl, ASANA_OAUTH_SCOPES } from './asana.routes.js';
 
 export class AsanaIntegrationConnector implements CommonIntegrationConnector {
   public readonly provider: IntegrationProvider = 'ASANA';
 
   constructor(
     private readonly asanaService: AsanaService = defaultAsanaService,
-    private readonly observability: IntegrationObservabilityService = defaultObservability
+    private readonly observability: IntegrationObservabilityService = defaultObservability,
+    private readonly prismaClient: any = prisma
   ) {}
 
   getCapabilities(): IntegrationCapabilities {
@@ -114,6 +119,34 @@ export class AsanaIntegrationConnector implements CommonIntegrationConnector {
     }
   }
 
+  /**
+   * Operação real de reconexão/autorização OAuth gerando state assinado de uso único e URL oficial.
+   */
+  async reconnect(ctx: IntegrationContext): Promise<ReconnectResult> {
+    const clientId = process.env.ASANA_CLIENT_ID;
+    if (!clientId) {
+      throw new AsanaIntegrationError(500, 'ASANA_CLIENT_ID não configurado no servidor.');
+    }
+
+    const redirectUri = process.env.ASANA_REDIRECT_URI || 'https://zafira-hub-v2-api.hvrb9d.easypanel.host/integrations/asana/oauth/callback';
+    const userId = ctx.userId || 'system';
+
+    const { stateParam } = await createAndPersistOAuthState(this.prismaClient, ctx.organizationId, userId, 'ASANA');
+
+    const authUrl = buildAsanaAuthorizeUrl({
+      clientId,
+      redirectUri,
+      state: stateParam,
+      scopes: ASANA_OAUTH_SCOPES,
+    });
+
+    return {
+      reconnected: true,
+      authUrl,
+      message: 'URL de autorização OAuth do Asana gerada com sucesso.',
+    };
+  }
+
   async disconnect(ctx: IntegrationContext): Promise<DisconnectResult> {
     await this.asanaService.disconnect(ctx.organizationId);
     return {
@@ -124,3 +157,4 @@ export class AsanaIntegrationConnector implements CommonIntegrationConnector {
 }
 
 export const asanaIntegrationConnector = new AsanaIntegrationConnector();
+

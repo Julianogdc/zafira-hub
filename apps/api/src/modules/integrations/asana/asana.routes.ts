@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { authenticate, requirePermission } from '../../../middleware/auth.js';
@@ -5,6 +6,10 @@ import { AsanaService, AsanaIntegrationError } from './asana.service.js';
 import { prisma } from '../../../lib/prisma.js';
 import { createAndPersistOAuthState, verifyAndConsumeOAuthState } from '../../../lib/oauthState.js';
 import { sseHub } from '../../../lib/sseHub.js';
+import {
+  integrationObservabilityService,
+  sanitizeMetadata,
+} from '../common/integration-observability.service.js';
 
 const linkProjectsSchema = z.object({
   projectGids: z.array(z.string().min(1)).min(1, 'Selecione pelo menos um projeto para vincular'),
@@ -946,12 +951,42 @@ export async function asanaRoutes(app: FastifyInstance) {
         });
       }
 
-      // Processa e publica via SSE imediatamente (zero espera no banco antes de publicar)
-      asanaService.processWebhookPayloadFast(sub, request.body, tWebhookReceived);
-      const tSsePublished = performance.now();
-      console.log(`[TIMING] [3. SSE Publicado] dur=${(tSsePublished - t0).toFixed(1)}ms`);
+      // Deduplicação determinística e auditoria do evento via WebhookEvent (tenant isolation da própria subscription)
+      const rawHash = crypto.createHash('sha256').update(rawBody).digest('hex');
+      const dedupeKey = `ASANA:${sub.id}:${rawHash}`;
+      const sanitizedPayload = sanitizeMetadata(request.body);
 
-      return reply.status(200).send({ status: 'ok' });
+      const { isDuplicate, event } = await integrationObservabilityService.recordWebhookEvent({
+        organizationId: sub.organizationId,
+        provider: 'ASANA',
+        dedupeKey,
+        eventType: 'asana.webhook',
+        payload: sanitizedPayload,
+      });
+
+      if (isDuplicate) {
+        console.log(`[AsanaWebhook] Evento duplicado detectado e deduplicado: dedupeKey=${dedupeKey}`);
+        return reply.status(200).send({ status: 'ok', deduplicated: true });
+      }
+
+      try {
+        // Processa e publica via SSE imediatamente (zero espera no banco antes de publicar)
+        asanaService.processWebhookPayloadFast(sub, request.body, tWebhookReceived);
+        const tSsePublished = performance.now();
+        console.log(`[TIMING] [3. SSE Publicado] dur=${(tSsePublished - t0).toFixed(1)}ms`);
+
+        await integrationObservabilityService.updateWebhookStatus(event.id, 'PROCESSED');
+        return reply.status(200).send({ status: 'ok' });
+      } catch (err: any) {
+        app.log.error(err, '[AsanaWebhook] Erro no processamento do payload do webhook');
+        await integrationObservabilityService.updateWebhookStatus(
+          event.id,
+          'FAILED',
+          err?.message || 'Erro durante o processamento do payload'
+        ).catch(() => {});
+
+        return reply.status(500).send({ error: 'Erro no processamento do evento de webhook' });
+      }
     }
 
     return reply.status(400).send({

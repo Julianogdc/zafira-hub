@@ -165,6 +165,29 @@ export async function commonIntegrationsRoutes(
     }
   );
 
+  // 4.1 POST /api/v1/integrations/:provider/reconnect
+  app.post(
+    '/api/v1/integrations/:provider/reconnect',
+    {
+      preHandler: [authenticate, requirePermission('deliverables.plan')],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const organizationId = getOrganizationId(request);
+        const { provider } = providerParamSchema.parse(request.params);
+        const body = (request.body as any) || {};
+
+        const auth = request.authContext;
+        const userId = auth?.type === 'user' ? auth.userId : null;
+
+        const result = await registry.reconnect(organizationId, provider, body.connectionId, userId, body);
+        return reply.status(200).send({ status: 'ok', data: result });
+      } catch (error) {
+        return handleError(error, reply);
+      }
+    }
+  );
+
   // 5. POST /api/v1/integrations/:provider/disconnect
   app.post(
     '/api/v1/integrations/:provider/disconnect',

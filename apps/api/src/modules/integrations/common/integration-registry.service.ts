@@ -7,6 +7,7 @@ import {
   TestConnectionResult,
   SyncResult,
   SyncOptions,
+  ReconnectResult,
   DisconnectResult,
 } from './integration-operations.contract.js';
 import {
@@ -280,6 +281,35 @@ export class IntegrationRegistryService {
 
     return { disconnected: true, message: 'Nenhuma conexão ativa encontrada para desconectar.' };
   }
+
+  /**
+   * Executa operação de reconexão/autorização para um provedor via conector registrado.
+   */
+  async reconnect(
+    organizationId: string,
+    provider: IntegrationProvider,
+    connectionId?: string,
+    userId?: string | null,
+    payload?: any
+  ): Promise<ReconnectResult> {
+    const connector = this.connectors.get(provider);
+    if (!connector || !connector.reconnect) {
+      throw new IntegrationRegistryError(
+        `O provedor ${provider} não suporta operação de reconexão.`,
+        400,
+        'UNSUPPORTED_OPERATION'
+      );
+    }
+
+    const ctx: IntegrationContext = {
+      organizationId,
+      userId,
+      connectionId,
+    };
+
+    return connector.reconnect(ctx, payload);
+  }
 }
 
 export const integrationRegistryService = new IntegrationRegistryService();
+

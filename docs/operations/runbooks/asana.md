@@ -4,82 +4,108 @@
 
 No Zafira Hub 2.1, o Asana utiliza a camada canônica de integrações:
 - **Autenticação e Credenciais:** Persistidas exclusivamente na tabela `IntegrationConnection` (`provider = 'ASANA'`) com segredos criptografados (`credentialCiphertext` via AES-256-GCM).
-- **Vínculos de Clientes:** Mantidos na tabela `ClientIntegration` vinculando o `clientId` local ao `externalId` (Project GID do Asana).
+- **Vínculos de Clientes:** Mantidos na tabela `ClientIntegration` vinculando o `clientId` local ao `externalId` (Project GID do Asana). Vínculos e históricos são **preservados** mesmo se a integração for desconectada.
 - **Observabilidade:**
-  - `SyncRun`: Trilha de execuções de sincronização de projetos/tarefas.
-  - `WebhookEvent`: Deduplicação e auditoria de eventos recebidos dos webhooks.
+  - `SyncRun`: Trilha de execuções de sincronização de projetos/tarefas (`RUNNING`, `SUCCESS`, `PARTIAL`, `FAILED`).
+  - `WebhookEvent`: Deduplicação determinística (`ASANA:<subscriptionId>:<sha256>`) e auditoria de eventos recebidos dos webhooks (`RECEIVED`, `PROCESSED`, `FAILED`, `IGNORED`).
   - `IntegrationError`: Registro operacional de erros (sem dados sensíveis).
 
 ---
 
 ## 2. Operações do Ciclo de Vida
 
-### 2.1 Conectar (OAuth 2.0)
-1. Iniciar o fluxo OAuth no endpoint:
-   `GET /api/v1/integrations/asana/oauth/authorize`
+### 2.1 Conectar / Autorizar (OAuth 2.0)
+1. Iniciar o fluxo OAuth no endpoint oficial:
+   `GET /integrations/asana/oauth/authorize`
 2. O usuário autoriza o aplicativo no Asana.
 3. O Asana redireciona para o callback:
-   `GET /api/v1/integrations/asana/oauth/callback?code=...`
+   `GET /integrations/asana/oauth/callback?code=...`
 4. O backend troca o código por Access Token e Refresh Token, criptografa o payload e salva em `IntegrationConnection` com status `ACTIVE`.
-5. Registros legados em `OrganizationIntegration` são automaticamente limpos.
+5. Registros legados em `OrganizationIntegration` são automaticamente limpos na migração.
 
 ### 2.2 Testar Conexão
-1. Executar via API canônica:
-   `POST /api/v1/integrations/asana/test`
-2. O backend busca as credenciais ativas, valida chamando `GET /users/me` no Asana e retorna:
+- Executar via API canônica da Central de Integrações:
+   `POST /api/v1/integrations/ASANA/test`
+- O backend busca as credenciais ativas, valida chamando `GET /users/me` no Asana e retorna:
    ```json
    {
-     "success": true,
-     "provider": "ASANA",
-     "accountName": "Nome do Usuário",
-     "workspaceId": "1234567890",
-     "latencyMs": 142
+     "status": "ok",
+     "data": {
+       "connected": true,
+       "provider": "ASANA",
+       "accountName": "Nome do Usuário",
+       "externalScopeId": "1234567890",
+       "message": "Conexão com o Asana validada com sucesso.",
+       "checkedAt": "2026-09-24T12:00:00.000Z"
+     }
    }
    ```
 
-### 2.3 Reconectar / Atualizar Credenciais
-- Para renovar permissões ou trocar o usuário administrador conectado, basta iniciar novamente o fluxo OAuth (`/api/v1/integrations/asana/oauth/authorize`). A conexão existente será atualizada no `IntegrationConnection` mantendo o histórico de projetos.
+### 2.3 Reconectar (Central de Integrações)
+- Executar via API canônica:
+   `POST /api/v1/integrations/ASANA/reconnect`
+- Retorna uma URL segura de autorização (`authUrl`) com novo `state` assinado de uso único:
+   ```json
+   {
+     "status": "ok",
+     "data": {
+       "reconnected": true,
+       "authUrl": "https://app.asana.com/-/oauth_authorize?..."
+     }
+   }
+   ```
 
 ### 2.4 Sincronização (Sync)
 - Executar via endpoint canônico:
-   `POST /api/v1/integrations/asana/sync`
-- A operação cria um `SyncRun` com status `RUNNING`, processa os projetos e webhooks vinculados aos clientes da organização e finaliza como `SUCCESS` ou `FAILED`.
+   `POST /api/v1/integrations/ASANA/sync`
+- A operação cria um `SyncRun` com status `RUNNING`, processa os projetos e webhooks vinculados aos clientes da organização e finaliza como `SUCCESS`, `PARTIAL` ou `FAILED`.
 
 ### 2.5 Desconectar
-1. Executar via endpoint canônico ou específico:
-   `POST /api/v1/integrations/asana/disconnect`
+1. Executar via endpoint canônico da Central:
+   `POST /api/v1/integrations/ASANA/disconnect`
+   (ou endpoint direto `DELETE /integrations/asana/disconnect`)
 2. O backend:
-   - Revoga o token remotamente no Asana via RFC 7009 (`/oauth_revoke`).
-   - Remove webhooks remotos ativos.
-   - Remove os vínculos `ClientIntegration` da organização.
-   - Marca `IntegrationConnection` como `DISCONNECTED`.
-   - Exclui registros legados remanescentes.
+   - Revoga o token remotamente no Asana via RFC 7009 (`/oauth_revoke`);
+   - Remove webhooks remotos ativos;
+   - Atualiza `IntegrationConnection` para o status `DISCONNECTED`;
+   - Exclui registros legados remanescentes;
+   - **PRESERVA TODOS** os vínculos `ClientIntegration` (projetos vinculados aos clientes permanecem para integridade histórica);
+   - **NÃO** remove projetos ou tarefas reais no Asana.
 
 ---
 
-## 3. Tratamento de Incidentes e Resolução de Problemas
+## 3. Webhooks e Deduplicação
 
-### 3.1 Token Expirado (401 Unauthorized)
+### 3.1 Endpoint de Recepção
+- `POST /integrations/asana/webhooks/:subscriptionId`
+
+### 3.2 Ciclo de Recepção e Deduplicação
+1. **Handshake:** Ao receber `X-Hook-Secret`, salva o segredo da assinatura e ecoa o header no handshake com status `200 OK`.
+2. **Validação de Assinatura:** Eventos de webhook são validados com HMAC-SHA256 usando `subscription.secret` e o corpo bruto (`rawBody`).
+3. **Deduplicação:** Uma chave única determinística `ASANA:<subscriptionId>:<sha256(rawBody)>` é gravada em `WebhookEvent`.
+4. **Entrega Repetida:** Se o Asana reenviar o mesmo payload (`isDuplicate === true`), a API responde `200 OK` sem reprocessar eventos.
+5. **Multi-tenant:** O `organizationId` do evento é obtido estritamente do registro de assinatura associado (`subscription.organizationId`).
+
+---
+
+## 4. Tratamento de Incidentes e Resolução de Problemas
+
+### 4.1 Token Expirado (401 Unauthorized)
 - O `AsanaService` realiza a renovação automática de access tokens utilizando o `refreshToken` persistido em `IntegrationConnection`.
 - Se o refresh falhar (ex.: refresh token revogado no painel do Asana), o status da conexão passa para `ERROR` e um registro é gravado em `IntegrationError`.
 - **Ação Operacional:** Solicitar ao usuário administrador que execute a reconexão via OAuth no painel do Hub.
 
-### 3.2 Erros de Rate Limit (429 Too Many Requests)
+### 4.2 Erros de Rate Limit (429 Too Many Requests)
 - O Asana possui limite de requisições por minuto.
-- O conector registra falha recuperável (`retryable: true`) em `IntegrationError` e propaga o cabeçalho `Retry-After`.
-
-### 3.3 Falha de Webhook e Handshake
-- Ao receber o handshake inicial (`X-Hook-Secret`), o Hub responde com `200 OK` e ecoa o header.
-- Eventos recebidos são gravados e deduplicados em `WebhookEvent` pela chave única `provider_dedupeKey`.
-- Se a assinatura HMAC for inválida, o evento é rejeitado com status `401`.
+- O conector registra falha recuperável (`retryable: true`) em `IntegrationError` e propaga o erro.
 
 ---
 
-## 4. Onde Consultar a Observabilidade
+## 5. Onde Consultar a Observabilidade
 
 - **Execuções de Sincronização:**
   `GET /api/v1/integrations/sync-runs?provider=ASANA`
-  Exibe status, itens processados, falhas e duração.
+  Exibe status (`RUNNING`, `SUCCESS`, `PARTIAL`, `FAILED`), itens processados, falhas e duração.
 
 - **Erros Operacionais:**
   `GET /api/v1/integrations/errors?provider=ASANA&resolved=false`
@@ -91,7 +117,7 @@ No Zafira Hub 2.1, o Asana utiliza a camada canônica de integrações:
 
 ---
 
-## 5. Rollback de Migração de Banco de Dados
+## 6. Rollback de Migração de Banco de Dados
 
 Caso seja necessário reverter a migration `20260924083000_add_integration_observability_models`:
 
