@@ -20,6 +20,15 @@ const providerParamSchema = z.object({
   provider: z.nativeEnum(IntegrationProvider),
 });
 
+const connectionOperationBodySchema = z.object({
+  connectionId: z.string().min(1).optional(),
+});
+
+const syncBodySchema = z.object({
+  connectionId: z.string().min(1).optional(),
+  options: z.record(z.string(), z.any()).optional(),
+});
+
 const syncRunQuerySchema = z.object({
   clientId: z.string().optional(),
   connectionId: z.string().optional(),
@@ -135,7 +144,7 @@ export async function commonIntegrationsRoutes(
       try {
         const organizationId = getOrganizationId(request);
         const { provider } = providerParamSchema.parse(request.params);
-        const body = (request.body as any) || {};
+        const body = connectionOperationBodySchema.parse(request.body || {});
 
         const result = await registry.testConnection(organizationId, provider, body.connectionId);
         return reply.status(200).send({ status: 'ok', data: result });
@@ -155,7 +164,7 @@ export async function commonIntegrationsRoutes(
       try {
         const organizationId = getOrganizationId(request);
         const { provider } = providerParamSchema.parse(request.params);
-        const body = (request.body as any) || {};
+        const body = syncBodySchema.parse(request.body || {});
 
         const result = await registry.triggerSync(organizationId, provider, body.connectionId, body.options);
         return reply.status(200).send({ status: 'ok', data: result });
@@ -175,7 +184,8 @@ export async function commonIntegrationsRoutes(
       try {
         const organizationId = getOrganizationId(request);
         const { provider } = providerParamSchema.parse(request.params);
-        const body = (request.body as any) || {};
+        const rawBody = (request.body as any) || {};
+        const body = connectionOperationBodySchema.passthrough().parse(rawBody);
 
         const auth = request.authContext;
         const userId = auth?.type === 'user' ? auth.userId : null;
@@ -198,7 +208,7 @@ export async function commonIntegrationsRoutes(
       try {
         const organizationId = getOrganizationId(request);
         const { provider } = providerParamSchema.parse(request.params);
-        const body = (request.body as any) || {};
+        const body = connectionOperationBodySchema.parse(request.body || {});
 
         const result = await registry.disconnect(organizationId, provider, body.connectionId);
         return reply.status(200).send({ status: 'ok', data: result });

@@ -177,6 +177,39 @@ export class IntegrationRegistryService {
   }
 
   /**
+   * Valida se a connectionId fornecida pertence à organização e ao provedor solicitados (Tenant Guard Fail-Closed).
+   * Retorna a conexão validada ou null se connectionId não foi informado.
+   * Lança 404 CONNECTION_NOT_FOUND se não pertencer à organização/provedor ou não existir.
+   */
+  private async resolveOwnedConnection(
+    organizationId: string,
+    provider: IntegrationProvider,
+    connectionId?: string | null
+  ): Promise<any | null> {
+    if (!connectionId) {
+      return null;
+    }
+
+    const connection = await this.prisma.integrationConnection.findFirst({
+      where: {
+        id: connectionId,
+        organizationId,
+        provider,
+      },
+    });
+
+    if (!connection) {
+      throw new IntegrationRegistryError(
+        'Conexão de integração não encontrada.',
+        404,
+        'CONNECTION_NOT_FOUND'
+      );
+    }
+
+    return connection;
+  }
+
+  /**
    * Executa teste de conexão canônico para um provedor.
    */
   async testConnection(
@@ -184,6 +217,9 @@ export class IntegrationRegistryService {
     provider: IntegrationProvider,
     connectionId?: string
   ): Promise<TestConnectionResult> {
+    const validatedConnection = await this.resolveOwnedConnection(organizationId, provider, connectionId);
+    const effectiveConnectionId = validatedConnection?.id;
+
     const connector = this.connectors.get(provider);
     if (!connector || !connector.testConnection) {
       throw new IntegrationRegistryError(
@@ -195,14 +231,14 @@ export class IntegrationRegistryService {
 
     const ctx: IntegrationContext = {
       organizationId,
-      connectionId,
+      connectionId: effectiveConnectionId,
     };
 
     try {
       const result = await connector.testConnection(ctx);
-      if (result.connected && connectionId) {
+      if (result.connected && effectiveConnectionId) {
         await this.prisma.integrationConnection.update({
-          where: { id: connectionId },
+          where: { id: effectiveConnectionId },
           data: { lastValidatedAt: new Date() },
         });
       }
@@ -210,7 +246,7 @@ export class IntegrationRegistryService {
     } catch (err: any) {
       await this.observability.recordError({
         organizationId,
-        connectionId,
+        connectionId: effectiveConnectionId,
         provider,
         operation: 'testConnection',
         code: err.code || 'TEST_CONNECTION_FAILED',
@@ -230,6 +266,9 @@ export class IntegrationRegistryService {
     connectionId?: string,
     options?: SyncOptions
   ): Promise<SyncResult> {
+    const validatedConnection = await this.resolveOwnedConnection(organizationId, provider, connectionId);
+    const effectiveConnectionId = validatedConnection?.id;
+
     const connector = this.connectors.get(provider);
     if (!connector || !connector.sync) {
       throw new IntegrationRegistryError(
@@ -241,7 +280,7 @@ export class IntegrationRegistryService {
 
     const ctx: IntegrationContext = {
       organizationId,
-      connectionId,
+      connectionId: effectiveConnectionId,
     };
 
     return connector.sync(ctx, options);
@@ -255,18 +294,21 @@ export class IntegrationRegistryService {
     provider: IntegrationProvider,
     connectionId?: string
   ): Promise<DisconnectResult> {
+    const validatedConnection = await this.resolveOwnedConnection(organizationId, provider, connectionId);
+    const effectiveConnectionId = validatedConnection?.id;
+
     const connector = this.connectors.get(provider);
     if (connector?.disconnect) {
       const ctx: IntegrationContext = {
         organizationId,
-        connectionId,
+        connectionId: effectiveConnectionId,
       };
       return connector.disconnect(ctx);
     }
 
     // Fallback padrão se não houver lógica customizada de disconnect no conector
-    if (connectionId) {
-      await this.connectionService.disconnectConnection(organizationId, connectionId);
+    if (effectiveConnectionId) {
+      await this.connectionService.disconnectConnection(organizationId, effectiveConnectionId);
       return { disconnected: true, message: 'Conexão desconectada com sucesso.' };
     }
 
@@ -292,6 +334,9 @@ export class IntegrationRegistryService {
     userId?: string | null,
     payload?: any
   ): Promise<ReconnectResult> {
+    const validatedConnection = await this.resolveOwnedConnection(organizationId, provider, connectionId);
+    const effectiveConnectionId = validatedConnection?.id;
+
     const connector = this.connectors.get(provider);
     if (!connector || !connector.reconnect) {
       throw new IntegrationRegistryError(
@@ -304,7 +349,7 @@ export class IntegrationRegistryService {
     const ctx: IntegrationContext = {
       organizationId,
       userId,
-      connectionId,
+      connectionId: effectiveConnectionId,
     };
 
     return connector.reconnect(ctx, payload);
