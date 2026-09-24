@@ -895,4 +895,519 @@ describe('Asana Canonical Integration & Hardened Lifecycle Suite (Passo 2C1.2 Re
       assert.ok(sanitizedHook.includes('x-hook-secret=[REDACTED]'));
     });
   });
+
+  // =========================================================================
+  // 7. CICLO PREVENTIVO DE EXPIRAÇÃO E PRIMEIRO REFRESH PÓS-MIGRAÇÃO (PASSO 2C1.3)
+  // =========================================================================
+  describe('7. Expiração Canônica e Primeiro Refresh Pós-Migração (Passo 2C1.3)', () => {
+    it('A. Legacy expirado com refresh válido deve migrar, renovar imediatamente e retornar NOVO token na 1ª chamada', async () => {
+      const expiredLegacyToken = '1/legacy-expired-token-001';
+      const validRefreshToken = '1/legacy-refresh-token-001';
+      const newRefreshedAccessToken = '1/new-access-token-refreshed-post-migration';
+      const pastDate = new Date(Date.now() - 3600000); // Expirou há 1 hora
+
+      let oauthTokenFetchCount = 0;
+      let createdConn: any = null;
+      let legacyDeleted = false;
+
+      globalThis.fetch = async (url: any) => {
+        if (String(url).includes('oauth_token')) {
+          oauthTokenFetchCount++;
+          return new Response(
+            JSON.stringify({
+              access_token: newRefreshedAccessToken,
+              refresh_token: validRefreshToken,
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response('{}', { status: 200 });
+      };
+
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalFindUniqueConn = prisma.integrationConnection.findUnique;
+      const originalFindUniqueLegacy = prisma.organizationIntegration.findUnique;
+      const originalTransaction = prisma.$transaction;
+      const originalUpdateConn = prisma.integrationConnection.update;
+      const originalCreateAudit = prisma.auditLog.create;
+
+      try {
+        prisma.$transaction = (async (callback: any) => {
+          const fakeTx = {
+            integrationConnection: {
+              findFirst: async () => null,
+              create: async (args: any) => {
+                createdConn = {
+                  id: 'conn-migrated-exp-1',
+                  ...args.data,
+                };
+                return createdConn;
+              },
+            },
+            organizationIntegration: {
+              findUnique: async () => ({
+                id: 'legacy-exp-1',
+                organizationId: testOrgId,
+                provider: 'ASANA',
+                accessToken: encryptToken(expiredLegacyToken),
+                refreshToken: encryptToken(validRefreshToken),
+                expiresAt: pastDate,
+                workspaceId: 'ws-exp-1',
+                metadata: {},
+              }),
+              delete: async () => {
+                legacyDeleted = true;
+                return {};
+              },
+            },
+          };
+          return callback(fakeTx);
+        }) as any;
+
+        prisma.integrationConnection.findFirst = (async (args: any) => {
+          if (createdConn && args.where.organizationId === testOrgId) return createdConn;
+          return null;
+        }) as any;
+
+        prisma.integrationConnection.findUnique = (async (args: any) => {
+          if (createdConn && args.where.id === createdConn.id) return createdConn;
+          return null;
+        }) as any;
+
+        prisma.integrationConnection.update = (async (args: any) => {
+          if (createdConn && args.where.id === createdConn.id) {
+            Object.assign(createdConn, args.data);
+            return createdConn;
+          }
+          return { id: args.where.id, ...args.data };
+        }) as any;
+
+        prisma.organizationIntegration.findUnique = (async () => ({
+          id: 'legacy-exp-1',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          accessToken: encryptToken(expiredLegacyToken),
+          refreshToken: encryptToken(validRefreshToken),
+          expiresAt: pastDate,
+          workspaceId: 'ws-exp-1',
+          metadata: {},
+        })) as any;
+
+        prisma.organizationIntegration.deleteMany = (async () => ({ count: 1 })) as any;
+        prisma.auditLog.create = (async () => ({ id: 'audit-1' })) as any;
+
+        const service = new AsanaService();
+        const res = await service.getValidToken(testOrgId);
+
+        // Validações obrigatórias
+        assert.strictEqual(res.token, newRefreshedAccessToken, 'Deve retornar o NOVO access token renovado');
+        assert.notStrictEqual(res.token, expiredLegacyToken, 'NUNCA deve retornar o access token legado expirado');
+        assert.strictEqual(oauthTokenFetchCount, 1, 'Deve executar o refresh exatamente uma vez na primeira chamada');
+        assert.strictEqual(legacyDeleted, true, 'OrganizationIntegration legado deve ter sido deletado');
+        assert.ok(createdConn, 'IntegrationConnection deve ter sido criada');
+        assert.strictEqual(createdConn.status, 'ACTIVE');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.integrationConnection.findUnique = originalFindUniqueConn;
+        prisma.organizationIntegration.findUnique = originalFindUniqueLegacy;
+        prisma.$transaction = originalTransaction;
+        prisma.integrationConnection.update = originalUpdateConn;
+        prisma.auditLog.create = originalCreateAudit;
+      }
+    });
+
+    it('B. Legacy expirado sem refresh token deve migrar, marcar ERROR e lançar 401 sem devolver token vencido', async () => {
+      const expiredLegacyToken = '1/legacy-expired-no-refresh';
+      const pastDate = new Date(Date.now() - 7200000);
+
+      let createdConn: any = null;
+      let recordedErrorCode: string | null = null;
+
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalFindUniqueConn = prisma.integrationConnection.findUnique;
+      const originalFindUniqueLegacy = prisma.organizationIntegration.findUnique;
+      const originalTransaction = prisma.$transaction;
+      const originalUpdateConn = prisma.integrationConnection.update;
+      const originalCreateError = (prisma as any).integrationError.create;
+
+      try {
+        prisma.$transaction = (async (callback: any) => {
+          const fakeTx = {
+            integrationConnection: {
+              findFirst: async () => null,
+              create: async (args: any) => {
+                createdConn = {
+                  id: 'conn-no-refresh-1',
+                  ...args.data,
+                };
+                return createdConn;
+              },
+            },
+            organizationIntegration: {
+              findUnique: async () => ({
+                id: 'legacy-noref-1',
+                organizationId: testOrgId,
+                provider: 'ASANA',
+                accessToken: encryptToken(expiredLegacyToken),
+                refreshToken: null, // Sem refresh token!
+                expiresAt: pastDate,
+                workspaceId: 'ws-noref-1',
+                metadata: {},
+              }),
+              delete: async () => ({}),
+            },
+          };
+          return callback(fakeTx);
+        }) as any;
+
+        prisma.integrationConnection.findFirst = (async (args: any) => {
+          if (createdConn && args.where.organizationId === testOrgId) return createdConn;
+          return null;
+        }) as any;
+
+        prisma.integrationConnection.findUnique = (async (args: any) => {
+          if (createdConn && args.where.id === createdConn.id) return createdConn;
+          return null;
+        }) as any;
+
+        prisma.integrationConnection.update = (async (args: any) => {
+          if (createdConn && args.where.id === createdConn.id) {
+            Object.assign(createdConn, args.data);
+            return createdConn;
+          }
+          return { id: args.where.id, ...args.data };
+        }) as any;
+
+        prisma.organizationIntegration.findUnique = (async () => ({
+          id: 'legacy-noref-1',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          accessToken: encryptToken(expiredLegacyToken),
+          refreshToken: null,
+          expiresAt: pastDate,
+          workspaceId: 'ws-noref-1',
+          metadata: {},
+        })) as any;
+
+        (prisma as any).integrationError.create = (async (args: any) => {
+          recordedErrorCode = args.data.code;
+          return { id: 'err-1', ...args.data };
+        }) as any;
+
+        const service = new AsanaService();
+
+        await assert.rejects(
+          async () => {
+            await service.getValidToken(testOrgId);
+          },
+          (err: any) => {
+            assert.ok(err instanceof AsanaIntegrationError);
+            assert.strictEqual(err.statusCode, 401);
+            assert.ok(err.message.includes('Reconexão necessária'));
+            return true;
+          }
+        );
+
+        assert.strictEqual(createdConn.status, 'ERROR', 'IntegrationConnection deve ter sido atualizada para ERROR');
+        assert.strictEqual(recordedErrorCode, 'TOKEN_EXPIRED_NO_REFRESH', 'IntegrationError deve registrar TOKEN_EXPIRED_NO_REFRESH');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.integrationConnection.findUnique = originalFindUniqueConn;
+        prisma.organizationIntegration.findUnique = originalFindUniqueLegacy;
+        prisma.$transaction = originalTransaction;
+        prisma.integrationConnection.update = originalUpdateConn;
+        (prisma as any).integrationError.create = originalCreateError;
+      }
+    });
+
+    it('C. Canônica ACTIVE expirada com refresh token deve renovar e retornar novo token', async () => {
+      const pastDate = new Date(Date.now() - 100000);
+      const connId = 'conn-active-expired-1';
+      const newAccessToken = '1/canonical-refreshed-token-999';
+
+      let refreshFetchCalls = 0;
+
+      globalThis.fetch = async (url: any) => {
+        if (String(url).includes('oauth_token')) {
+          refreshFetchCalls++;
+          return new Response(
+            JSON.stringify({
+              access_token: newAccessToken,
+              refresh_token: '1/refresh-999',
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        }
+        return new Response('{}', { status: 200 });
+      };
+
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalFindUnique = prisma.integrationConnection.findUnique;
+      const originalUpdate = prisma.integrationConnection.update;
+      const originalTransaction = prisma.$transaction;
+      const originalAudit = prisma.auditLog.create;
+
+      try {
+        prisma.$transaction = (async (fn: any) => fn(prisma)) as any;
+        prisma.auditLog.create = (async () => ({ id: 'audit-1' })) as any;
+
+        const canonicalConn = {
+          id: connId,
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'ACTIVE',
+          credentialCiphertext: encryptIntegrationCredential(
+            JSON.stringify({
+              accessToken: '1/old-expired-token',
+              refreshToken: '1/refresh-token-present',
+              expiresAt: pastDate.toISOString(),
+            })
+          ),
+          externalScopeId: 'ws-canonical-exp',
+          displayName: 'Asana Test',
+          metadata: {},
+        };
+
+        prisma.integrationConnection.findFirst = (async () => canonicalConn) as any;
+        prisma.integrationConnection.findUnique = (async () => canonicalConn) as any;
+        prisma.integrationConnection.update = (async (args: any) => ({ ...canonicalConn, ...args.data })) as any;
+
+        const service = new AsanaService();
+        const res = await service.getValidToken(testOrgId);
+
+        assert.strictEqual(res.token, newAccessToken);
+        assert.strictEqual(refreshFetchCalls, 1, 'Refresh deve ser acionado exatamente 1 vez');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.integrationConnection.findUnique = originalFindUnique;
+        prisma.integrationConnection.update = originalUpdate;
+        prisma.$transaction = originalTransaction;
+        prisma.auditLog.create = originalAudit;
+      }
+    });
+
+    it('D. Canônica ACTIVE expirada sem refresh token deve ir para ERROR e lançar 401', async () => {
+      const pastDate = new Date(Date.now() - 100000);
+      const connId = 'conn-active-no-ref-1';
+      let connStatusUpdated: string | null = null;
+      let recordedCode: string | null = null;
+
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalUpdate = prisma.integrationConnection.update;
+      const originalCreateError = (prisma as any).integrationError.create;
+
+      try {
+        const canonicalConn = {
+          id: connId,
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'ACTIVE',
+          credentialCiphertext: encryptIntegrationCredential(
+            JSON.stringify({
+              accessToken: '1/old-expired-token-no-ref',
+              refreshToken: null,
+              expiresAt: pastDate.toISOString(),
+            })
+          ),
+          externalScopeId: 'ws-no-ref',
+        };
+
+        prisma.integrationConnection.findFirst = (async () => canonicalConn) as any;
+        prisma.integrationConnection.update = (async (args: any) => {
+          connStatusUpdated = args.data.status;
+          return { ...canonicalConn, ...args.data };
+        }) as any;
+
+        (prisma as any).integrationError.create = (async (args: any) => {
+          recordedCode = args.data.code;
+          return { id: 'err-1', ...args.data };
+        }) as any;
+
+        const service = new AsanaService();
+
+        await assert.rejects(
+          async () => {
+            await service.getValidToken(testOrgId);
+          },
+          (err: any) => {
+            assert.ok(err instanceof AsanaIntegrationError);
+            assert.strictEqual(err.statusCode, 401);
+            return true;
+          }
+        );
+
+        assert.strictEqual(connStatusUpdated, 'ERROR');
+        assert.strictEqual(recordedCode, 'TOKEN_EXPIRED_NO_REFRESH');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.integrationConnection.update = originalUpdate;
+        (prisma as any).integrationError.create = originalCreateError;
+      }
+    });
+
+    it('E. Canônica ACTIVE com token válido no futuro não deve executar refresh desnecessário', async () => {
+      const futureDate = new Date(Date.now() + 3600000);
+      const validToken = '1/valid-future-token-12345';
+      let refreshFetchCalls = 0;
+
+      globalThis.fetch = async (url: any) => {
+        if (String(url).includes('oauth_token')) {
+          refreshFetchCalls++;
+          return new Response('{}', { status: 200 });
+        }
+        return new Response('{}', { status: 200 });
+      };
+
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+
+      try {
+        const canonicalConn = {
+          id: 'conn-future-1',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'ACTIVE',
+          credentialCiphertext: encryptIntegrationCredential(
+            JSON.stringify({
+              accessToken: validToken,
+              refreshToken: '1/refresh-future-1',
+              expiresAt: futureDate.toISOString(),
+            })
+          ),
+          externalScopeId: 'ws-future',
+        };
+
+        prisma.integrationConnection.findFirst = (async () => canonicalConn) as any;
+
+        const service = new AsanaService();
+        const res = await service.getValidToken(testOrgId);
+
+        assert.strictEqual(res.token, validToken);
+        assert.strictEqual(refreshFetchCalls, 0, 'ZERO chamadas de refresh devem ocorrer para token válido');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+      }
+    });
+
+    it('F. Migração não cria duplicata e mantém exatamente 1 conexão organizacional', async () => {
+      let createdConnectionsCount = 0;
+      const originalTransaction = prisma.$transaction;
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalFindUniqueLegacy = prisma.organizationIntegration.findUnique;
+      const originalFindUniqueConn = prisma.integrationConnection.findUnique;
+
+      try {
+        prisma.$transaction = (async (callback: any) => {
+          const fakeTx = {
+            integrationConnection: {
+              findFirst: async () => null,
+              create: async (args: any) => {
+                createdConnectionsCount++;
+                return { id: 'conn-single-1', ...args.data };
+              },
+            },
+            organizationIntegration: {
+              findUnique: async () => ({
+                id: 'legacy-single-1',
+                organizationId: testOrgId,
+                provider: 'ASANA',
+                accessToken: encryptToken('token-single'),
+                refreshToken: null,
+                expiresAt: new Date(Date.now() + 3600000),
+                workspaceId: 'ws-1',
+                metadata: {},
+              }),
+              delete: async () => ({}),
+            },
+          };
+          return callback(fakeTx);
+        }) as any;
+
+        prisma.integrationConnection.findFirst = (async () => null) as any;
+        prisma.integrationConnection.findUnique = (async () => ({
+          id: 'conn-single-1',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'ACTIVE',
+          credentialCiphertext: encryptIntegrationCredential(
+            JSON.stringify({
+              accessToken: 'token-single',
+              refreshToken: null,
+              expiresAt: new Date(Date.now() + 3600000).toISOString(),
+            })
+          ),
+        })) as any;
+
+        prisma.organizationIntegration.findUnique = (async () => ({
+          id: 'legacy-single-1',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          accessToken: encryptToken('token-single'),
+        })) as any;
+
+        const service = new AsanaService();
+        await service.getValidToken(testOrgId);
+
+        assert.strictEqual(createdConnectionsCount, 1, 'Deve criar exatamente 1 IntegrationConnection');
+      } finally {
+        prisma.$transaction = originalTransaction;
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.organizationIntegration.findUnique = originalFindUniqueLegacy;
+        prisma.integrationConnection.findUnique = originalFindUniqueConn;
+      }
+    });
+
+    it('G & H. DISCONNECTED e ERROR não ressuscitam mesmo com legado residual presente', async () => {
+      const originalFindFirst = prisma.integrationConnection.findFirst;
+      const originalFindUniqueLegacy = prisma.organizationIntegration.findUnique;
+
+      let legacyAccessed = false;
+
+      try {
+        prisma.organizationIntegration.findUnique = (async () => {
+          legacyAccessed = true;
+          return { id: 'legacy-residual', accessToken: encryptToken('token') };
+        }) as any;
+
+        const service = new AsanaService();
+
+        // 1. DISCONNECTED
+        prisma.integrationConnection.findFirst = (async () => ({
+          id: 'conn-disc-res',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'DISCONNECTED',
+        })) as any;
+
+        await assert.rejects(
+          async () => {
+            await service.getValidToken(testOrgId);
+          },
+          (err: any) => err.statusCode === 400 && err.message.includes('desconectada')
+        );
+
+        // 2. ERROR
+        prisma.integrationConnection.findFirst = (async () => ({
+          id: 'conn-err-res',
+          organizationId: testOrgId,
+          provider: 'ASANA',
+          status: 'ERROR',
+        })) as any;
+
+        await assert.rejects(
+          async () => {
+            await service.getValidToken(testOrgId);
+          },
+          (err: any) => err.statusCode === 400 && err.message.includes('estado de erro')
+        );
+
+        assert.strictEqual(legacyAccessed, false, 'ZERO fallback ao legado quando canônica está DISCONNECTED ou ERROR');
+      } finally {
+        prisma.integrationConnection.findFirst = originalFindFirst;
+        prisma.organizationIntegration.findUnique = originalFindUniqueLegacy;
+      }
+    });
+  });
 });
+

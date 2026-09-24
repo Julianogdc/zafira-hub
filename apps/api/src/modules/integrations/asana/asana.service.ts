@@ -173,15 +173,130 @@ export class AsanaService {
   private asanaBaseUrl = 'https://app.asana.com/api/1.0';
 
   /**
+   * Resolve e valida o token a partir de uma IntegrationConnection canônica.
+   * Aplica regras canônicas de expiração, refresh e proteção contra token expirado sem refresh.
+   */
+  private async resolveCanonicalConnectionToken(
+    conn: any,
+    organizationId: string
+  ): Promise<{ token: string; source: 'organization'; workspaceId?: string | null }> {
+    if (conn.status === 'DISCONNECTED') {
+      throw new AsanaIntegrationError(400, 'A integração com o Asana foi desconectada nesta organização. Reconexão necessária.');
+    }
+
+    if (conn.status === 'ERROR') {
+      throw new AsanaIntegrationError(400, 'A integração com o Asana está em estado de erro. Reconexão necessária.');
+    }
+
+    if (conn.status !== 'ACTIVE') {
+      throw new AsanaIntegrationError(400, `Conexão do Asana em estado inválido (${conn.status}). Reconexão necessária.`);
+    }
+
+    if (!conn.credentialCiphertext) {
+      throw new AsanaIntegrationError(400, 'Credencial ausente na conexão ativa do Asana. Reconexão necessária.');
+    }
+
+    try {
+      const plain = decryptIntegrationCredential(conn.credentialCiphertext);
+      let accessToken = plain;
+      let refreshToken: string | null = null;
+      let expiresAt: Date | null = null;
+
+      // Se o payload for JSON estruturado (OAuth)
+      if (plain.startsWith('{') && plain.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(plain);
+          accessToken = parsed.accessToken || plain;
+          refreshToken = parsed.refreshToken || null;
+          expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
+        } catch {
+          // fallback plain string
+        }
+      }
+
+      // Verifica expiração
+      const isExpired = Boolean(expiresAt && expiresAt <= new Date());
+
+      if (isExpired) {
+        if (refreshToken) {
+          // Caso 1: Token expirado e possui refreshToken -> renova token
+          try {
+            const refreshed = await this.refreshToken(conn.id, refreshToken);
+            return { token: refreshed.accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+          } catch (refreshErr: any) {
+            await integrationObservabilityService.recordError({
+              organizationId,
+              connectionId: conn.id,
+              provider: 'ASANA',
+              operation: 'OAUTH_REFRESH',
+              code: 'TOKEN_REFRESH_FAILED',
+              message: refreshErr?.message || 'Falha ao renovar token do Asana',
+              retryable: false,
+            }).catch(() => {});
+
+            await prisma.integrationConnection.update({
+              where: { id: conn.id },
+              data: { status: 'ERROR', updatedAt: new Date() },
+            }).catch(() => {});
+
+            throw new AsanaIntegrationError(401, 'Sessão do Asana expirada e renovação falhou. Reconexão necessária.');
+          }
+        } else {
+          // Caso 2: Token expirado SEM refreshToken -> bloqueia e marca ERROR
+          await integrationObservabilityService.recordError({
+            organizationId,
+            connectionId: conn.id,
+            provider: 'ASANA',
+            operation: 'OAUTH_VALIDATE',
+            code: 'TOKEN_EXPIRED_NO_REFRESH',
+            message: 'Token de acesso do Asana expirado e sem refresh token para renovação automática',
+            retryable: false,
+          }).catch(() => {});
+
+          await prisma.integrationConnection.update({
+            where: { id: conn.id },
+            data: { status: 'ERROR', updatedAt: new Date() },
+          }).catch(() => {});
+
+          throw new AsanaIntegrationError(401, 'Sessão do Asana expirada e sem refresh token disponível. Reconexão necessária.');
+        }
+      }
+
+      // Cleanup assíncrono seguro de registro legado residual se a conexão canônica está 100% ativa e válida
+      prisma.organizationIntegration.deleteMany({
+        where: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      }).catch(() => {});
+
+      return { token: accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+
+      await integrationObservabilityService.recordError({
+        organizationId,
+        connectionId: conn.id,
+        provider: 'ASANA',
+        operation: 'DECRYPT_CREDENTIAL',
+        code: 'CORRUPTED_CREDENTIAL',
+        message: 'Falha ao descriptografar credencial da conexão canônica',
+        retryable: false,
+      }).catch(() => {});
+
+      throw new AsanaIntegrationError(400, 'Credencial do Asana corrompida ou inválida. Reconexão necessária.');
+    }
+  }
+
+  /**
    * Obtém token de acesso válido para a organização.
    * Regra Canônica:
    * 1. Se existir qualquer IntegrationConnection organizacional (provider=ASANA):
-   *    - ACTIVE: usar apenas ela (e limpar resíduo legado se houver);
-   *    - DISCONNECTED: erro explícito, NÃO consulta legado;
-   *    - ERROR: erro explícito, NÃO consulta legado;
-   *    - credencial corrompida: erro operacional e exceção, NÃO consulta legado.
+   *    - Valida status, expiração e refresh via resolveCanonicalConnectionToken;
+   *    - DISCONNECTED / ERROR / Corrompido: erro explícito, NÃO consulta legado.
    * 2. Somente se NÃO existir nenhuma IntegrationConnection:
-   *    - Executa migração atômica de OrganizationIntegration legado.
+   *    - Executa migração atômica de OrganizationIntegration legado;
+   *    - Processa imediatamente a conexão recém-criada via resolveCanonicalConnectionToken.
    * 3. Fallback estrito de desenvolvimento (apenas se NODE_ENV !== 'production').
    */
   async getValidToken(organizationId: string): Promise<{ token: string; source: 'organization' | 'env'; workspaceId?: string | null }> {
@@ -195,89 +310,7 @@ export class AsanaService {
     });
 
     if (conn) {
-      if (conn.status === 'DISCONNECTED') {
-        throw new AsanaIntegrationError(400, 'A integração com o Asana foi desconectada nesta organização. Reconexão necessária.');
-      }
-
-      if (conn.status === 'ERROR') {
-        throw new AsanaIntegrationError(400, 'A integração com o Asana está em estado de erro. Reconexão necessária.');
-      }
-
-      if (conn.status === 'ACTIVE') {
-        if (!conn.credentialCiphertext) {
-          throw new AsanaIntegrationError(400, 'Credencial ausente na conexão ativa do Asana. Reconexão necessária.');
-        }
-
-        try {
-          const plain = decryptIntegrationCredential(conn.credentialCiphertext);
-          let accessToken = plain;
-          let refreshToken: string | null = null;
-          let expiresAt: Date | null = null;
-
-          // Se o payload for JSON estruturado (OAuth)
-          if (plain.startsWith('{') && plain.endsWith('}')) {
-            try {
-              const parsed = JSON.parse(plain);
-              accessToken = parsed.accessToken || plain;
-              refreshToken = parsed.refreshToken || null;
-              expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
-            } catch {
-              // fallback plain string
-            }
-          }
-
-          // Verifica expiração e faz refresh se necessário
-          if (expiresAt && expiresAt < new Date() && refreshToken) {
-            try {
-              const refreshed = await this.refreshToken(conn.id, refreshToken);
-              return { token: refreshed.accessToken, source: 'organization', workspaceId: conn.externalScopeId };
-            } catch (refreshErr: any) {
-              await integrationObservabilityService.recordError({
-                organizationId,
-                connectionId: conn.id,
-                provider: 'ASANA',
-                operation: 'OAUTH_REFRESH',
-                code: 'TOKEN_REFRESH_FAILED',
-                message: refreshErr?.message || 'Falha ao renovar token do Asana',
-                retryable: false,
-              }).catch(() => {});
-
-              await prisma.integrationConnection.update({
-                where: { id: conn.id },
-                data: { status: 'ERROR', updatedAt: new Date() },
-              }).catch(() => {});
-
-              throw new AsanaIntegrationError(401, 'Sessão do Asana expirada e renovação falhou. Reconexão necessária.');
-            }
-          }
-
-          // Cleanup assíncrono seguro de registro legado residual se a conexão canônica está 100% ativa
-          prisma.organizationIntegration.deleteMany({
-            where: {
-              organizationId,
-              provider: 'ASANA',
-            },
-          }).catch(() => {});
-
-          return { token: accessToken, source: 'organization', workspaceId: conn.externalScopeId };
-        } catch (err: any) {
-          if (err instanceof AsanaIntegrationError) throw err;
-
-          await integrationObservabilityService.recordError({
-            organizationId,
-            connectionId: conn.id,
-            provider: 'ASANA',
-            operation: 'DECRYPT_CREDENTIAL',
-            code: 'CORRUPTED_CREDENTIAL',
-            message: 'Falha ao descriptografar credencial da conexão canônica',
-            retryable: false,
-          }).catch(() => {});
-
-          throw new AsanaIntegrationError(400, 'Credencial do Asana corrompida ou inválida. Reconexão necessária.');
-        }
-      }
-
-      throw new AsanaIntegrationError(400, `Conexão do Asana em estado inválido (${conn.status}). Reconexão necessária.`);
+      return await this.resolveCanonicalConnectionToken(conn, organizationId);
     }
 
     // 2. Caminho de migração explícito e ATÔMICO apenas se nenhuma IntegrationConnection existir
@@ -292,8 +325,14 @@ export class AsanaService {
 
     if (legacy?.accessToken) {
       const migrated = await this.migrateLegacyOrganizationIntegration(organizationId);
-      if (migrated.token) {
-        return { token: migrated.token, source: 'organization', workspaceId: legacy.workspaceId };
+      if (migrated.migrated && migrated.connectionId) {
+        const newlyCreatedConn = await prisma.integrationConnection.findUnique({
+          where: { id: migrated.connectionId },
+        });
+
+        if (newlyCreatedConn) {
+          return await this.resolveCanonicalConnectionToken(newlyCreatedConn, organizationId);
+        }
       }
     }
 
