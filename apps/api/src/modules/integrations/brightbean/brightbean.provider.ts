@@ -562,7 +562,31 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     input: ScheduleSocialPostInput
   ): Promise<SocialPost> {
     const { client } = await this.resolveClientAndConnection(ctx);
-    const res = await client.schedulePost(input.postId, input.scheduledAt);
+    const currentPost = await client.getPost(input.postId);
+
+    if (!currentPost) {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_POST_NOT_FOUND',
+        `Publicação ${input.postId} não encontrada`,
+        404
+      );
+    }
+
+    let res: BrightBeanPostResponse;
+    const hubStatus = this.mapStatusToHub(currentPost.status);
+
+    if (hubStatus === 'DRAFT') {
+      res = await client.schedulePost(input.postId, input.scheduledAt);
+    } else if (hubStatus === 'SCHEDULED') {
+      res = await client.updatePostSchedule(input.postId, input.scheduledAt);
+    } else {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_POST_NOT_SCHEDULABLE',
+        `Publicação com status ${currentPost.status} não pode ser agendada ou retemporizada`,
+        409
+      );
+    }
+
     return this.mapCanonicalPost(res);
   }
 

@@ -36,7 +36,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { Cliente360Projetos } from '@/components/clients/Cliente360Projetos';
 import { Cliente360Conteudo } from '@/components/clients/Cliente360Conteudo';
-import { ManagePostizIntegrationsModal } from '@/components/clients/ManagePostizIntegrationsModal';
+import { ManageSocialAccountsModal } from '@/components/clients/ManageSocialAccountsModal';
 import { Cliente360Financeiro } from '@/components/clients/tabs/Cliente360Financeiro';
 import { Badge } from '@/components/ui/badge';
 
@@ -79,8 +79,8 @@ export default function Cliente360() {
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState<UpdateClientDTO>({});
 
-  // Estado do Modal de Integrações Postiz
-  const [isManagePostizOpen, setIsManagePostizOpen] = useState(false);
+  // Estado do Modal de Contas Sociais
+  const [isManageSocialOpen, setIsManageSocialOpen] = useState(false);
   const [contentRefreshKey, setContentRefreshKey] = useState(0);
 
   const handleIntegrationsChanged = () => {
@@ -413,11 +413,11 @@ export default function Cliente360() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setIsManagePostizOpen(true)}
+                  onClick={() => setIsManageSocialOpen(true)}
                   className="border-white/10 hover:bg-white/5 text-xs text-zinc-300 gap-1.5 h-8 shrink-0"
                 >
                   <Share2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Gerenciar Postiz
+                  Gerenciar contas sociais
                 </Button>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -448,10 +448,10 @@ export default function Cliente360() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setIsManagePostizOpen(true)}
+                      onClick={() => setIsManageSocialOpen(true)}
                       className="border-white/10 hover:bg-white/5 text-xs text-emerald-400 gap-1.5 mx-auto"
                     >
-                      <Plus className="w-3.5 h-3.5" /> Conectar Postiz
+                      <Plus className="w-3.5 h-3.5" /> Conectar conta social
                     </Button>
                   </div>
                 )}
@@ -481,12 +481,12 @@ export default function Cliente360() {
           <Cliente360Projetos clientId={client.id} canManage={canManage} />
         </TabsContent>
 
-        {/* 5. ABA: CONTEÚDO (POSTIZ REAL) */}
+        {/* 5. ABA: CONTEÚDO SOCIAL */}
         <TabsContent value="conteudo" className="outline-none">
           <Cliente360Conteudo
             clientId={client.id}
             refreshTrigger={contentRefreshKey}
-            onManageIntegrations={() => setIsManagePostizOpen(true)}
+            onManageIntegrations={() => setIsManageSocialOpen(true)}
           />
         </TabsContent>
 
@@ -679,11 +679,11 @@ export default function Cliente360() {
         </DialogContent>
       </Dialog>
 
-      {/* Modal de Gestão de Integrações Postiz */}
+      {/* Modal de Gestão de Contas Sociais */}
       {client && (
-        <ManagePostizIntegrationsModal
-          open={isManagePostizOpen}
-          onOpenChange={setIsManagePostizOpen}
+        <ManageSocialAccountsModal
+          open={isManageSocialOpen}
+          onOpenChange={setIsManageSocialOpen}
           clientId={client.id}
           clientName={client.name}
           canManage={canManage}

@@ -794,5 +794,201 @@ describe('Hardening Final do Backend Social (Passo 2C2.1.1)', () => {
       });
     });
   });
+
+  // =========================================================================
+  // 9. REAGENDAMENTO (Passo 2C2.2)
+  // =========================================================================
+  describe('9. Reagendamento de Publicações (Passo 2C2.2)', () => {
+    it('DRAFT chama POST /schedule', async () => {
+      let postScheduleCalled = false;
+      let updateScheduleCalled = false;
+
+      const mockClient: any = {
+        async getPost(id: string) {
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post em rascunho',
+            status: 'DRAFT',
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+        async schedulePost(id: string, scheduledAt: string) {
+          postScheduleCalled = true;
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post em rascunho',
+            status: 'SCHEDULED',
+            scheduled_at: scheduledAt,
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+        async updatePostSchedule() {
+          updateScheduleCalled = true;
+          return {} as any;
+        },
+      };
+
+      const provider = new BrightBeanProvider({ apiBaseUrl: 'http://localhost:8000/api/v1' } as any);
+      (provider as any).resolveClientAndConnection = async () => ({
+        client: mockClient,
+        connection: { id: 'conn-1' },
+      });
+
+      const res = await provider.schedulePost(
+        { organizationId: 'org-1' },
+        { postId: 'post-1', scheduledAt: '2026-10-01T12:00:00Z' }
+      );
+
+      assert.equal(postScheduleCalled, true, 'Deve chamar schedulePost para DRAFT');
+      assert.equal(updateScheduleCalled, false, 'Não deve chamar updatePostSchedule');
+      assert.equal(res.status, 'SCHEDULED');
+    });
+
+    it('SCHEDULED chama PATCH updatePostSchedule', async () => {
+      let postScheduleCalled = false;
+      let updateScheduleCalled = false;
+
+      const mockClient: any = {
+        async getPost(id: string) {
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post agendado',
+            status: 'SCHEDULED',
+            scheduled_at: '2026-10-01T10:00:00Z',
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+        async schedulePost() {
+          postScheduleCalled = true;
+          return {} as any;
+        },
+        async updatePostSchedule(id: string, scheduledAt: string) {
+          updateScheduleCalled = true;
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post agendado',
+            status: 'SCHEDULED',
+            scheduled_at: scheduledAt,
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+      };
+
+      const provider = new BrightBeanProvider({ apiBaseUrl: 'http://localhost:8000/api/v1' } as any);
+      (provider as any).resolveClientAndConnection = async () => ({
+        client: mockClient,
+        connection: { id: 'conn-1' },
+      });
+
+      const res = await provider.schedulePost(
+        { organizationId: 'org-1' },
+        { postId: 'post-2', scheduledAt: '2026-10-02T15:00:00Z' }
+      );
+
+      assert.equal(updateScheduleCalled, true, 'Deve chamar updatePostSchedule para SCHEDULED');
+      assert.equal(postScheduleCalled, false, 'Não deve chamar schedulePost');
+      assert.equal(res.status, 'SCHEDULED');
+    });
+
+    it('PUBLISHED falha fechado com 409 BRIGHTBEAN_POST_NOT_SCHEDULABLE', async () => {
+      const mockClient: any = {
+        async getPost(id: string) {
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post já publicado',
+            status: 'PUBLISHED',
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+      };
+
+      const provider = new BrightBeanProvider({ apiBaseUrl: 'http://localhost:8000/api/v1' } as any);
+      (provider as any).resolveClientAndConnection = async () => ({
+        client: mockClient,
+        connection: { id: 'conn-1' },
+      });
+
+      await assert.rejects(
+        async () => provider.schedulePost(
+          { organizationId: 'org-1' },
+          { postId: 'post-published', scheduledAt: '2026-10-01T12:00:00Z' }
+        ),
+        (err: any) => {
+          assert.equal(err.code, 'BRIGHTBEAN_POST_NOT_SCHEDULABLE');
+          assert.equal(err.statusCode, 409);
+          return true;
+        }
+      );
+    });
+
+    it('FAILED falha fechado com 409 BRIGHTBEAN_POST_NOT_SCHEDULABLE', async () => {
+      const mockClient: any = {
+        async getPost(id: string) {
+          return {
+            id,
+            workspace_id: 'ws-1',
+            content: 'Post que falhou',
+            status: 'FAILED',
+            created_at: new Date().toISOString(),
+            platform_posts: [],
+          };
+        },
+      };
+
+      const provider = new BrightBeanProvider({ apiBaseUrl: 'http://localhost:8000/api/v1' } as any);
+      (provider as any).resolveClientAndConnection = async () => ({
+        client: mockClient,
+        connection: { id: 'conn-1' },
+      });
+
+      await assert.rejects(
+        async () => provider.schedulePost(
+          { organizationId: 'org-1' },
+          { postId: 'post-failed', scheduledAt: '2026-10-01T12:00:00Z' }
+        ),
+        (err: any) => {
+          assert.equal(err.code, 'BRIGHTBEAN_POST_NOT_SCHEDULABLE');
+          assert.equal(err.statusCode, 409);
+          return true;
+        }
+      );
+    });
+
+    it('Post inexistente falha com 404 BRIGHTBEAN_POST_NOT_FOUND', async () => {
+      const mockClient: any = {
+        async getPost() {
+          return null;
+        },
+      };
+
+      const provider = new BrightBeanProvider({ apiBaseUrl: 'http://localhost:8000/api/v1' } as any);
+      (provider as any).resolveClientAndConnection = async () => ({
+        client: mockClient,
+        connection: { id: 'conn-1' },
+      });
+
+      await assert.rejects(
+        async () => provider.schedulePost(
+          { organizationId: 'org-1' },
+          { postId: 'post-nao-existe', scheduledAt: '2026-10-01T12:00:00Z' }
+        ),
+        (err: any) => {
+          assert.equal(err.code, 'BRIGHTBEAN_POST_NOT_FOUND');
+          assert.equal(err.statusCode, 404);
+          return true;
+        }
+      );
+    });
+  });
 });
 

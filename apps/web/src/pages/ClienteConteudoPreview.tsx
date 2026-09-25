@@ -27,11 +27,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthStore } from '@/store/useAuthStore';
 import EditarAgendamentoModal from '@/components/content/EditarAgendamentoModal';
 import {
-  ClientPostizPost,
-  postizIntegrationService,
-  cleanPostContent,
-  PostizMediaItem,
-} from '@/services/postiz';
+  SocialPost,
+  SocialAccount,
+  SocialMediaAsset,
+  socialPublisherService,
+  cleanSocialContent,
+  getSocialErrorMessage,
+} from '@/services/social-publisher';
 import { clientsService, HubClient } from '@/services/clients';
 
 export default function ClienteConteudoPreview() {
@@ -41,10 +43,11 @@ export default function ClienteConteudoPreview() {
   const location = useLocation();
 
   // Se o post foi passado pelo state da rota, usa imediatamente para renderização instantânea
-  const statePost = (location.state as any)?.post as ClientPostizPost | undefined;
+  const statePost = (location.state as any)?.post as SocialPost | undefined;
 
-  const [post, setPost] = useState<ClientPostizPost | null>(statePost || null);
+  const [post, setPost] = useState<SocialPost | null>(statePost || null);
   const [client, setClient] = useState<HubClient | null>(null);
+  const [accounts, setAccounts] = useState<SocialAccount[]>([]);
   const [loading, setLoading] = useState<boolean>(!statePost);
   const [error, setError] = useState<string | null>(null);
   const [selectedCarouselIndex, setSelectedCarouselIndex] = useState(0);
@@ -57,7 +60,7 @@ export default function ClienteConteudoPreview() {
   const userRole = (user?.role || '').toLowerCase();
   const isAdminOrManager = userRole === 'admin' || userRole === 'manager';
 
-  // Bloco técnico de detalhes da conta social (recolhido por padrão)
+  // Bloco de detalhes da conta social (recolhido por padrão)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
 
   // Carrega os dados garantindo revalidação obrigatória com a API do Hub mesmo se houver state prévio
@@ -66,34 +69,34 @@ export default function ClienteConteudoPreview() {
 
     try {
       setError(null);
-      // Sempre consulta o endpoint oficial da API para obter formato e settings fidedignos
-      const [postRes, clientData] = await Promise.allSettled([
-        postizIntegrationService.getClientPost(clientId, postId),
+      const [postRes, clientData, accountsRes] = await Promise.allSettled([
+        socialPublisherService.getClientPost(clientId, postId),
         clientsService.getClientById(clientId).catch(() => null),
+        socialPublisherService.getClientAccounts(clientId).catch(() => []),
       ]);
 
       if (postRes.status === 'fulfilled' && postRes.value?.post) {
         setPost(postRes.value.post);
       } else if (!post) {
         const reason = (postRes as any).reason;
-        const msg =
-          reason?.data?.message ||
-          reason?.message ||
-          'Publicação não encontrada ou sem permissão de acesso.';
-        setError(msg);
+        setError(getSocialErrorMessage(reason, 'Publicação não encontrada ou sem permissão de acesso.'));
       }
 
       if (clientData.status === 'fulfilled' && clientData.value) {
         setClient(clientData.value);
       }
+
+      if (accountsRes.status === 'fulfilled' && Array.isArray(accountsRes.value)) {
+        setAccounts(accountsRes.value);
+      }
     } catch (err: any) {
       if (!post) {
-        setError(err?.message || 'Erro ao carregar prévia do conteúdo.');
+        setError(getSocialErrorMessage(err, 'Erro ao carregar prévia do conteúdo.'));
       }
     } finally {
       setLoading(false);
     }
-  }, [clientId, postId]);
+  }, [clientId, postId, post]);
 
   useEffect(() => {
     loadData();
@@ -141,14 +144,22 @@ export default function ClienteConteudoPreview() {
             <CheckCircle2 className="w-3.5 h-3.5" /> Publicado
           </Badge>
         );
-      case 'QUEUE':
+      case 'PUBLISHING':
+        return (
+          <Badge
+            variant="outline"
+            className="bg-blue-500/10 text-blue-400 border-blue-500/20 text-xs px-2.5 py-1 gap-1.5 font-medium"
+          >
+            <Loader2 className="w-3.5 h-3.5 animate-spin" /> Publicando
+          </Badge>
+        );
       case 'SCHEDULED':
         return (
           <Badge
             variant="outline"
             className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-xs px-2.5 py-1 gap-1.5 font-medium"
           >
-            <Clock className="w-3.5 h-3.5" /> Agendado / Fila
+            <Clock className="w-3.5 h-3.5" /> Agendado
           </Badge>
         );
       case 'DRAFT':
@@ -160,13 +171,31 @@ export default function ClienteConteudoPreview() {
             <FileText className="w-3.5 h-3.5" /> Rascunho
           </Badge>
         );
-      case 'ERROR':
+      case 'PARTIALLY_PUBLISHED':
+        return (
+          <Badge
+            variant="outline"
+            className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-xs px-2.5 py-1 gap-1.5 font-medium"
+          >
+            <AlertCircle className="w-3.5 h-3.5" /> Publicado parcialmente
+          </Badge>
+        );
+      case 'FAILED':
         return (
           <Badge
             variant="outline"
             className="bg-red-500/10 text-red-400 border-red-500/20 text-xs px-2.5 py-1 gap-1.5 font-medium"
           >
             <AlertCircle className="w-3.5 h-3.5" /> Falhou
+          </Badge>
+        );
+      case 'CANCELLED':
+        return (
+          <Badge
+            variant="outline"
+            className="bg-zinc-700/20 text-zinc-400 border-zinc-600/30 text-xs px-2.5 py-1 gap-1.5 font-medium"
+          >
+            <AlertCircle className="w-3.5 h-3.5" /> Cancelado
           </Badge>
         );
       default:
@@ -207,13 +236,6 @@ export default function ClienteConteudoPreview() {
     );
   };
 
-  // Identifica se a URL é arquivo de vídeo
-  const isVideoFile = (url?: string | null): boolean => {
-    if (!url || typeof url !== 'string') return false;
-    const clean = url.split('?')[0].toLowerCase();
-    return /\.(mp4|mov|webm|m4v|avi|mkv|ogv)$/i.test(clean);
-  };
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] space-y-4">
@@ -244,49 +266,44 @@ export default function ClienteConteudoPreview() {
     );
   }
 
-  // Resolução de Mídia e Formato estrito conforme regras de apresentação da Etapa 3F
-  const mediaItems: PostizMediaItem[] = post.mediaItems || [];
-  const currentItem = mediaItems[selectedCarouselIndex] || null;
-  const currentMediaUrl = currentItem?.url || post.mediaThumbnailUrl;
-  const isVideo = post.mediaType === 'VIDEO' || isVideoFile(currentMediaUrl);
+  // Resolução de conta vinculada a partir de post.platformStates
+  const primaryPlatformState = post.platformStates?.[0];
+  const matchedAccount = accounts.find((a) => a.id === primaryPlatformState?.accountId);
+  const accountName = matchedAccount?.displayName || 'Conta social';
+  const accountPicture = matchedAccount?.avatarUrl || null;
+  const platform = matchedAccount?.platform || primaryPlatformState?.platform || 'Social';
 
-  // Priorização estrita do backend:
-  // Se o backend marcou isStory ou contentType STORY_VIDEO / STORY_IMAGE, é estritamente STORY.
-  // Em hipótese alguma um vídeo é reclassificado como Reel se for Story.
-  const isStory = Boolean(
-    post.isStory ||
-    post.contentType === 'STORY_VIDEO' ||
-    post.contentType === 'STORY_IMAGE'
-  );
+  // Resolução de permalink único
+  const permalinks = (post.platformStates || []).map((p) => p.permalink).filter(Boolean) as string[];
+  const releaseUrl = permalinks.length === 1 ? permalinks[0] : null;
 
-  const isStoryVideo = post.contentType === 'STORY_VIDEO' || (isStory && isVideo);
-  const isStoryImage = post.contentType === 'STORY_IMAGE' || (isStory && !isVideo);
-  const isCarousel = (post.contentType === 'CAROUSEL' || post.mediaType === 'CAROUSEL') && !isStory;
-  const isReel = (post.contentType === 'REEL' || (!isStory && isVideo)) && !isCarousel;
-  const isFeedImage = (post.contentType === 'FEED_IMAGE' || (!isStory && !isVideo && !isCarousel)) && !!currentMediaUrl;
-  const isNone = post.contentType === 'NONE' || (!currentMediaUrl && post.mediaCount === 0);
+  // Formato Canônico e Mídia
+  const mediaItems: SocialMediaAsset[] = post.mediaItems || [];
+  const currentItem = mediaItems[selectedCarouselIndex] || mediaItems[0] || null;
+  const currentMediaUrl = currentItem?.url;
+  const isVideo = currentItem?.mediaType === 'VIDEO';
 
-  // Regras da Etapa 3G:
-  // DRAFT, QUEUE e SCHEDULED permitem edição; PUBLISHED e ERROR não permitem.
+  const isStory = post.format === 'STORY_IMAGE' || post.format === 'STORY_VIDEO';
+  const isStoryVideo = post.format === 'STORY_VIDEO';
+  const isStoryImage = post.format === 'STORY_IMAGE';
+  const isReel = post.format === 'REEL';
+  const isCarousel = post.format === 'CAROUSEL';
+  const isFeed = post.format === 'FEED';
+
+  // Permitido agendar DRAFT ou alterar agendamento de SCHEDULED
   const isEditable =
     isAdminOrManager &&
-    Boolean(
-      post.status === 'DRAFT' ||
-      post.status === 'QUEUE' ||
-      post.status === 'SCHEDULED'
-    );
+    Boolean(post.status === 'DRAFT' || post.status === 'SCHEDULED');
 
-  // Título rigoroso conforme regras de apresentação
   const getFormatHeaderTitle = () => {
     if (isStoryVideo) return 'Prévia de Story em vídeo';
     if (isStoryImage) return 'Prévia de Story';
     if (isReel) return 'Prévia de Reel';
     if (isCarousel) return `Prévia de carrossel (${selectedCarouselIndex + 1}/${mediaItems.length || 1})`;
-    if (isFeedImage) return 'Prévia de publicação';
-    return 'Prévia indisponível';
+    if (isFeed) return 'Prévia de publicação';
+    return 'Prévia de conteúdo';
   };
 
-  // Badge do formato conforme especificação estrita da Etapa 3F (Story, Reel, etc.)
   const getFormatBadge = () => {
     if (isStory) {
       return (
@@ -309,7 +326,7 @@ export default function ClienteConteudoPreview() {
         </Badge>
       );
     }
-    if (isFeedImage) {
+    if (isFeed) {
       return (
         <Badge variant="outline" className="bg-cyan-500/10 text-cyan-300 border-cyan-500/20 text-xs px-2.5 py-1">
           Feed
@@ -319,7 +336,7 @@ export default function ClienteConteudoPreview() {
     return null;
   };
 
-  const displayLegend = cleanPostContent(post.content);
+  const displayLegend = cleanSocialContent(post.content);
   const isDefaultEmpty = displayLegend === 'Sem legenda';
 
   return (
@@ -368,14 +385,14 @@ export default function ClienteConteudoPreview() {
             <span className="hidden sm:inline">Atualizar</span>
           </Button>
 
-          {post.releaseUrl && (
+          {releaseUrl && (
             <Button
               variant="outline"
               size="sm"
               asChild
               className="border-emerald-500/30 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200 gap-2 text-xs"
             >
-              <a href={post.releaseUrl} target="_blank" rel="noopener noreferrer">
+              <a href={releaseUrl} target="_blank" rel="noopener noreferrer">
                 <span>Abrir post na rede social</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </a>
@@ -388,7 +405,7 @@ export default function ClienteConteudoPreview() {
       <div className="p-6 rounded-xl bg-zinc-950/40 border border-white/10 backdrop-blur-md flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2.5">
-            {renderPlatformBadge(post.platform)}
+            {renderPlatformBadge(platform)}
             {getFormatBadge()}
             {renderStatusBadge(post.status)}
             <Badge variant="outline" className="bg-purple-500/10 text-purple-300 border-purple-500/20 text-xs px-2.5 py-0.5 gap-1">
@@ -398,13 +415,13 @@ export default function ClienteConteudoPreview() {
 
           <div className="flex items-center gap-3">
             <Avatar className="w-9 h-9 border border-white/10 shrink-0">
-              {post.accountPicture && <AvatarImage src={post.accountPicture} alt={post.accountName} />}
+              {accountPicture && <AvatarImage src={accountPicture} alt={accountName} />}
               <AvatarFallback className="text-xs bg-zinc-800 text-zinc-300 font-bold">
-                {post.accountName?.slice(0, 2).toUpperCase() || 'PZ'}
+                {accountName?.slice(0, 2).toUpperCase() || 'SO'}
               </AvatarFallback>
             </Avatar>
             <div className="min-w-0">
-              <h1 className="text-lg font-bold text-white truncate">{post.accountName || 'Conta social'}</h1>
+              <h1 className="text-lg font-bold text-white truncate">{accountName}</h1>
               <p className="text-xs text-zinc-400 truncate">
                 Cliente: <span className="text-zinc-200 font-medium">{client?.name || 'Cliente 360'}</span>
               </p>
@@ -430,7 +447,7 @@ export default function ClienteConteudoPreview() {
               </div>
               <span className="text-sm font-semibold text-white">{formatDate(rawDate)}</span>
             </>
-          ) : post.status === 'ERROR' ? (
+          ) : post.status === 'FAILED' ? (
             <>
               <div className="flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
@@ -454,8 +471,8 @@ export default function ClienteConteudoPreview() {
         </div>
       </div>
 
-      {/* 3. CONTEÚDO PRINCIPAL (LAYOUT RESPONSIVO DINÂMICO CONFORME O FORMATO) */}
-      <div className={`grid grid-cols-1 ${isStory ? 'lg:grid-cols-12' : 'lg:grid-cols-12'} gap-6`}>
+      {/* 3. CONTEÚDO PRINCIPAL */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* COLUNA: MÍDIA EM DESTAQUE */}
         <div className={isStory ? 'lg:col-span-7 xl:col-span-6 flex flex-col space-y-4 mx-auto w-full' : 'lg:col-span-6 xl:col-span-5 flex flex-col space-y-4'}>
           <Card className="bg-zinc-950/40 border-white/10 overflow-hidden shadow-2xl">
@@ -539,18 +556,18 @@ export default function ClienteConteudoPreview() {
           {isCarousel && mediaItems.length > 1 && (
             <div className="flex items-center gap-2 overflow-x-auto p-2 bg-zinc-950/40 border border-white/10 rounded-lg">
               {mediaItems.map((item, idx) => {
-                const thumb = item.thumbnailUrl || item.url;
+                const thumb = item.url;
                 const isSelected = idx === selectedCarouselIndex;
                 return (
                   <button
-                    key={idx}
+                    key={item.id || idx}
                     type="button"
                     onClick={() => setSelectedCarouselIndex(idx)}
                     className={`w-14 h-14 rounded-md overflow-hidden shrink-0 border-2 transition-all relative ${
                       isSelected ? 'border-purple-500 ring-2 ring-purple-500/30 scale-105' : 'border-white/10 opacity-70 hover:opacity-100'
                     }`}
                   >
-                    {item.type === 'VIDEO' ? (
+                    {item.mediaType === 'VIDEO' ? (
                       <div className="w-full h-full bg-zinc-900 flex items-center justify-center relative">
                         <video src={thumb} className="w-full h-full object-cover pointer-events-none" muted preload="metadata" />
                         <Play className="w-3.5 h-3.5 text-white absolute inset-auto fill-white" />
@@ -565,9 +582,9 @@ export default function ClienteConteudoPreview() {
           )}
         </div>
 
-        {/* COLUNA: INFORMAÇÕES, LEGENDA (SE APLICÁVEL) E DETALHES TÉCNICOS */}
+        {/* COLUNA: INFORMAÇÕES, LEGENDA (SE APLICÁVEL) E DETALHES */}
         <div className={isStory ? 'lg:col-span-5 xl:col-span-6 flex flex-col space-y-6' : 'lg:col-span-6 xl:col-span-7 flex flex-col space-y-6'}>
-          {/* Card da Legenda — OMITIDO PARA STORIES CONFORME REGRA DE NEGÓCIO */}
+          {/* Card da Legenda — OMITIDO PARA STORIES */}
           {!isStory && (
             <Card className="bg-zinc-950/40 border-white/10 flex-1 flex flex-col shadow-xl">
               <CardHeader className="pb-3 border-b border-white/5 bg-zinc-900/20">
@@ -602,7 +619,7 @@ export default function ClienteConteudoPreview() {
                   Detalhes da conta social
                 </span>
                 <span className="text-[11px] text-zinc-500 font-normal">
-                  ({post.platform || 'Social'})
+                  ({platform})
                 </span>
               </div>
               <div className="text-zinc-400 hover:text-white transition-transform">
@@ -618,11 +635,11 @@ export default function ClienteConteudoPreview() {
               <CardContent className="p-5 space-y-3 text-xs animate-in fade-in slide-in-from-top-1 duration-200">
                 <div className="flex items-center justify-between py-1.5 border-b border-white/5">
                   <span className="text-zinc-400">Conta:</span>
-                  <span className="text-zinc-200 font-medium">{post.accountName}</span>
+                  <span className="text-zinc-200 font-medium">{accountName}</span>
                 </div>
                 <div className="flex items-center justify-between py-1.5 border-b border-white/5">
                   <span className="text-zinc-400">Plataforma:</span>
-                  <span className="text-zinc-200 font-medium capitalize">{post.platform}</span>
+                  <span className="text-zinc-200 font-medium capitalize">{platform}</span>
                 </div>
                 <div className="flex items-center justify-between py-1.5 border-b border-white/5">
                   <span className="text-zinc-400">Formato:</span>
@@ -635,9 +652,9 @@ export default function ClienteConteudoPreview() {
                       ? 'Reel'
                       : isCarousel
                       ? 'Carrossel'
-                      : isFeedImage
+                      : isFeed
                       ? 'Publicação (Feed)'
-                      : 'Sem mídia'}
+                      : post.format}
                   </span>
                 </div>
                 <div className="flex items-center justify-between py-1.5 border-b border-white/5">
@@ -670,3 +687,4 @@ export default function ClienteConteudoPreview() {
     </div>
   );
 }
+

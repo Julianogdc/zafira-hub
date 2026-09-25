@@ -251,6 +251,17 @@ export class BrightBeanClient {
     });
   }
 
+  async updatePostSchedule(
+    postId: string,
+    scheduledAt: string
+  ): Promise<BrightBeanPostResponse> {
+    return this.request<BrightBeanPostResponse>(`/posts/${postId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scheduled_at: scheduledAt }),
+    });
+  }
+
   async cancelPost(postId: string): Promise<{ success: boolean }> {
     await this.request<{ success: boolean }>(`/posts/${postId}/cancel`, {
       method: 'POST',

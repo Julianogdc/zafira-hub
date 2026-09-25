@@ -677,6 +677,17 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
             { status: 200 }
           );
         }
+        if (url.endsWith('/posts/post-sched')) {
+          return new Response(
+            JSON.stringify({
+              id: 'post-sched',
+              status: 'draft',
+              caption: 'Rascunho',
+              created_at: new Date().toISOString(),
+            }),
+            { status: 200 }
+          );
+        }
         return new Response('Not found', { status: 404 });
       });
 

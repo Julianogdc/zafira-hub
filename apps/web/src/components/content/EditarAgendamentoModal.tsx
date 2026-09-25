@@ -18,15 +18,20 @@ import {
   MapPin,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ClientPostizPost, postizIntegrationService } from '@/services/postiz';
+import {
+  SocialPost,
+  socialPublisherService,
+  getSocialErrorMessage,
+} from '@/services/social-publisher';
 
 interface EditarAgendamentoModalProps {
   isOpen: boolean;
   onClose: () => void;
-  post: ClientPostizPost;
+  post: SocialPost;
   clientId: string;
   clientName?: string;
-  onSuccess: (updatedPost: ClientPostizPost) => void;
+  accountName?: string;
+  onSuccess: (updatedPost: SocialPost) => void;
 }
 
 /**
@@ -72,9 +77,12 @@ export default function EditarAgendamentoModal({
   post,
   clientId,
   clientName,
+  accountName,
   onSuccess,
 }: EditarAgendamentoModalProps) {
   const isDraft = post.status === 'DRAFT';
+  const isScheduled = post.status === 'SCHEDULED';
+  const canSchedule = isDraft || isScheduled;
 
   // Inicialização de data e hora
   const [dateStr, setDateStr] = useState<string>('');
@@ -101,7 +109,6 @@ export default function EditarAgendamentoModal({
   const targetDate = useMemo(() => {
     if (!dateStr || !timeStr) return null;
     try {
-      // Campo Grande (MS) está em UTC-4 permanente (sem horário de verão)
       const isoCandidate = `${dateStr}T${timeStr}:00-04:00`;
       const d = new Date(isoCandidate);
       return isNaN(d.getTime()) ? null : d;
@@ -118,14 +125,21 @@ export default function EditarAgendamentoModal({
 
   // Formato legível do post
   const formatLabel = useMemo(() => {
-    if (post.isStory || post.contentType?.startsWith('STORY')) return 'Story';
-    if (post.contentType === 'REEL') return 'Reel';
-    if (post.contentType === 'CAROUSEL') return 'Carrossel';
-    if (post.contentType === 'FEED_IMAGE') return 'Feed';
-    return 'Publicação';
-  }, [post]);
+    const fmt = post.format || 'FEED';
+    if (fmt === 'STORY_IMAGE' || fmt === 'STORY_VIDEO') return 'Story';
+    if (fmt === 'REEL') return 'Reel';
+    if (fmt === 'CAROUSEL') return 'Carrossel';
+    return 'Feed';
+  }, [post.format]);
+
+  const platform = post.platformStates?.[0]?.platform || 'Social';
 
   const handleSave = async () => {
+    if (!canSchedule) {
+      toast.error('Publicações neste estado não podem ser agendadas ou retemporizadas.');
+      return;
+    }
+
     if (!targetDate || !isFuture) {
       toast.error('Selecione uma data e horário futuros para a publicação.');
       return;
@@ -133,16 +147,21 @@ export default function EditarAgendamentoModal({
 
     try {
       setIsSaving(true);
-      // Envia a data em ISO 8601 com timezone
       const isoWithOffset = `${dateStr}T${timeStr}:00-04:00`;
-      const res = await postizIntegrationService.schedulePost(clientId, post.id, isoWithOffset);
+      const updatedPost = await socialPublisherService.schedulePost(clientId, post.id, isoWithOffset);
 
-      toast.success('Agendamento atualizado com sucesso.');
-      onSuccess(res.post);
+      toast.success(
+        isDraft ? 'Rascunho agendado com sucesso.' : 'Agendamento atualizado com sucesso.'
+      );
+      onSuccess(updatedPost);
       onClose();
     } catch (err: any) {
-      console.error('[EditarAgendamentoModal] Erro técnico ao atualizar agendamento:', err);
-      toast.error('Não foi possível atualizar o agendamento. Revise os dados e tente novamente.');
+      console.error('[EditarAgendamentoModal] Erro ao atualizar agendamento:', err);
+      const msg = getSocialErrorMessage(
+        err,
+        'Não foi possível atualizar o agendamento. Revise os dados e tente novamente.'
+      );
+      toast.error(msg);
     } finally {
       setIsSaving(false);
     }
@@ -169,6 +188,13 @@ export default function EditarAgendamentoModal({
 
         {/* Resumo do Conteúdo */}
         <div className="space-y-4 pt-2">
+          {!canSchedule && (
+            <div className="p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>Publicações com status {post.status} não podem ser retemporizadas.</span>
+            </div>
+          )}
+
           <div className="p-3.5 rounded-lg bg-zinc-900/60 border border-white/5 space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-zinc-300 truncate max-w-[200px]">
@@ -185,17 +211,17 @@ export default function EditarAgendamentoModal({
                   variant="outline"
                   className="bg-zinc-800 text-zinc-300 border-white/10 text-[10px] px-2 py-0.5 uppercase"
                 >
-                  {post.platform || 'Social'}
+                  {platform}
                 </Badge>
               </div>
             </div>
 
             <div className="flex items-center justify-between text-xs text-zinc-400 pt-1 border-t border-white/5">
               <span className="truncate max-w-[220px]">
-                Conta: <strong className="text-zinc-200">{post.accountName || 'Social'}</strong>
+                Conta: <strong className="text-zinc-200">{accountName || 'Social'}</strong>
               </span>
               <span className="text-[11px] text-zinc-500 font-mono">
-                {isDraft ? 'Status: Rascunho' : 'Status: Agendado'}
+                {isDraft ? 'Status: Rascunho' : `Status: ${post.status}`}
               </span>
             </div>
           </div>
@@ -209,7 +235,7 @@ export default function EditarAgendamentoModal({
               <Input
                 type="date"
                 value={dateStr}
-                disabled={isSaving}
+                disabled={isSaving || !canSchedule}
                 onChange={(e) => setDateStr(e.target.value)}
                 className="bg-zinc-900 border-white/10 text-white text-xs h-9 focus-visible:ring-purple-500 [color-scheme:dark]"
               />
@@ -222,7 +248,7 @@ export default function EditarAgendamentoModal({
               <Input
                 type="time"
                 value={timeStr}
-                disabled={isSaving}
+                disabled={isSaving || !canSchedule}
                 onChange={(e) => setTimeStr(e.target.value)}
                 className="bg-zinc-900 border-white/10 text-white text-xs h-9 focus-visible:ring-purple-500 [color-scheme:dark]"
               />
@@ -239,7 +265,7 @@ export default function EditarAgendamentoModal({
           </div>
 
           {/* Validação de data no passado */}
-          {!isFuture && dateStr && timeStr && (
+          {!isFuture && dateStr && timeStr && canSchedule && (
             <div className="flex items-center gap-2 p-2.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300">
               <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
               <span>A data e o horário selecionados devem estar no futuro.</span>
@@ -263,7 +289,7 @@ export default function EditarAgendamentoModal({
             type="button"
             size="sm"
             onClick={handleSave}
-            disabled={isSaving || !isFuture}
+            disabled={isSaving || !isFuture || !canSchedule}
             className="bg-purple-600 hover:bg-purple-500 text-white text-xs gap-1.5 font-medium shadow-md shadow-purple-600/20 disabled:opacity-50"
           >
             {isSaving ? (
