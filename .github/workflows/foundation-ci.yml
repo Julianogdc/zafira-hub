@@ -166,6 +166,7 @@ jobs:
             -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
             -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
             -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
             -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
             zafira-hub-api:ci-test
 
@@ -408,6 +409,7 @@ jobs:
             -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
             -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
             -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
             -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
             "${API_REF}"
 
@@ -679,6 +681,7 @@ jobs:
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
             -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
             -e DATABASE_URL="${DATABASE_URL}" \
             "${API_REF}"
 
@@ -780,6 +783,7 @@ jobs:
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
             -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
             -e DATABASE_URL="${DATABASE_URL}" \
             "${ROLLBACK_API}"
 
@@ -833,6 +837,7 @@ jobs:
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
             -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
             -e DATABASE_URL="${DATABASE_URL}" \
             "${CURRENT_API}"
 
