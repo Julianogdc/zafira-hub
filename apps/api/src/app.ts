@@ -12,6 +12,11 @@ import { asanaRoutes } from './modules/integrations/asana/asana.routes.js';
 import { commonIntegrationsRoutes } from './modules/integrations/common/common-integrations.routes.js';
 import { integrationRegistryService } from './modules/integrations/common/integration-registry.service.js';
 import { asanaIntegrationConnector } from './modules/integrations/asana/asana.connector.js';
+import { BrightBeanProvider } from './modules/integrations/brightbean/brightbean.provider.js';
+import { BrightBeanIntegrationConnector } from './modules/integrations/brightbean/brightbean.connector.js';
+import { integrationConnectionService } from './modules/integrations/connections/integration-connection.service.js';
+import { SocialPublisherService } from './modules/integrations/social-publisher/social-publisher.service.js';
+import { createSocialPublisherRoutes } from './modules/integrations/social-publisher/social-publisher.routes.js';
 import { postizRoutes } from './modules/integrations/postiz/postiz.routes.js';
 import { asaasRoutes } from './modules/integrations/asaas/asaas.routes.js';
 import { financialRoutes } from './modules/financial/financial.routes.js';
@@ -24,12 +29,28 @@ import { ObservabilityService } from './modules/observability/observability.serv
 import { createMetricsRoutes } from './modules/observability/metrics.routes.js';
 import { getFastifyLoggerConfig } from './modules/observability/logger-config.js';
 
+// Configuração segura da URL base da BrightBean
+const defaultBrightBeanApiUrl =
+  process.env.BRIGHTBEAN_API_URL ||
+  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000/api/v1');
+
+export const brightBeanProvider = new BrightBeanProvider({
+  connectionService: integrationConnectionService,
+  apiBaseUrl: defaultBrightBeanApiUrl || 'http://localhost:8000/api/v1',
+});
+
+export const brightBeanIntegrationConnector = new BrightBeanIntegrationConnector(brightBeanProvider);
+export const socialPublisherService = new SocialPublisherService(brightBeanProvider);
+export const socialPublisherRoutes = createSocialPublisherRoutes(socialPublisherService);
+
 // Registrar conectores canônicos no registro comum
 integrationRegistryService.registerConnector(asanaIntegrationConnector);
+integrationRegistryService.registerConnector(brightBeanIntegrationConnector);
 
 export interface BuildAppOptions {
   logger?: any;
   observabilityService?: ObservabilityService;
+  socialPublisherService?: SocialPublisherService;
 }
 
 const REQUEST_START_TIME = Symbol('requestStartTime');
@@ -152,6 +173,13 @@ export function buildApp(options?: BuildAppOptions): FastifyInstance {
 
   // 8.1 Rotas Canônicas e Central de Integrações
   app.register(commonIntegrationsRoutes);
+
+  // 8.2 Rotas Canônicas de Publicação Social (BrightBean)
+  if (options?.socialPublisherService) {
+    app.register(createSocialPublisherRoutes(options.socialPublisherService));
+  } else {
+    app.register(socialPublisherRoutes);
+  }
 
   // 9. Rotas de Integração Postiz
   app.register(postizRoutes);

@@ -29,6 +29,20 @@ export interface SocialMediaUploadInput {
   idempotencyKey?: string;
 }
 
+export interface SocialPostListFilters {
+  socialAccountId?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SocialPostListResult {
+  posts: SocialPost[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 /**
   Interface canônica do provedor de Social Publishing (operações estritamente externas).
  
@@ -56,6 +70,14 @@ export interface SocialPublisherProvider {
     ctx: SocialPublisherContext,
     input: SocialMediaUploadInput
   ): Promise<SocialMediaUploadResult>;
+
+  /**
+    Lista publicações da instância externa do provider, respeitando o contexto e filtros.
+   */
+  listPosts(
+    ctx: SocialPublisherContext,
+    filters?: SocialPostListFilters
+  ): Promise<SocialPostListResult>;
 
   /**
     Cria ou agenda uma nova publicação no provider externo.

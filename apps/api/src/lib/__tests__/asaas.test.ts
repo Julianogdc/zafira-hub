@@ -1111,7 +1111,7 @@ test('--- Integração Asaas Modo Leitura & Webhook Suite (Hardening Etapa 4B) -
         id: 'pay_pend_mes',
         value: 5,
         status: AsaasPaymentStatus.PENDING,
-        dueDate: new Date(currentYear, currentMonth, 25), // futuro dentro do mês atual
+        dueDate: new Date(currentYear, currentMonth, 28, 23, 59, 59), // futuro dentro do mês atual
         paymentDate: null,
         clientPaymentDate: null,
         updatedAt: now,

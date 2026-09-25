@@ -3,9 +3,11 @@ import {
   BrightBeanAccountsListResponse,
   BrightBeanCreatePostPayload,
   BrightBeanErrorResponse,
+  BrightBeanListPostsFilters,
   BrightBeanMediaAsset,
   BrightBeanMeResponse,
   BrightBeanPostAnalyticsResponse,
+  BrightBeanPostListResponse,
   BrightBeanPostResponse,
 } from './brightbean.types.js';
 
@@ -216,6 +218,26 @@ export class BrightBeanClient {
       }
       throw err;
     }
+  }
+
+  async listPosts(
+    filters?: BrightBeanListPostsFilters
+  ): Promise<BrightBeanPostListResponse> {
+    const params = new URLSearchParams();
+    if (filters?.social_account_id) {
+      params.set('social_account_id', filters.social_account_id);
+    }
+    if (filters?.status) {
+      params.set('status', filters.status);
+    }
+    if (typeof filters?.limit === 'number') {
+      params.set('limit', String(filters.limit));
+    }
+    if (typeof filters?.offset === 'number') {
+      params.set('offset', String(filters.offset));
+    }
+    const query = params.toString() ? `?${params.toString()}` : '';
+    return this.request<BrightBeanPostListResponse>(`/posts/${query}`);
   }
 
   async schedulePost(

@@ -646,9 +646,7 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
       const provider = new BrightBeanProvider({ connectionService: connService, apiBaseUrl: 'https://api.brightbean.test/v1', fetchImpl });
 
       const post = await provider.getPost({ organizationId: 'o', connectionId: 'c' }, 'post-found');
-      assert.notEqual(post, null);
-      assert.equal(post?.id, 'post-found');
-      assert.equal(post?.format, null, 'format MUST be null on remote read');
+      assert.equal(post?.format, 'FEED', 'format is canonical FEED for 0/1 images without post_type');
       assert.equal(post?.content, 'Conteúdo da publicação');
       assert.equal(post?.platformStates[0].externalPostId, 'ext-ig-123');
       assert.equal(post?.platformStates[0].publishedAt, '2026-09-23T10:05:00Z');
@@ -692,7 +690,7 @@ describe('BrightBean Client & Provider Regression & Alignment Suite (PASSO 2B4B.
       assert.equal(capturedBody.scheduled_at, '2026-12-01T00:00:00Z');
       assert.equal(post.id, 'post-sched');
       assert.equal(post.status, 'SCHEDULED');
-      assert.equal(post.format, null);
+      assert.equal(post.format, 'FEED');
     });
   });
 

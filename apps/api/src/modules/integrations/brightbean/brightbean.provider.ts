@@ -3,6 +3,9 @@ import {
   ScheduleSocialPostInput,
   SocialAccount,
   SocialAccountAnalytics,
+  SocialContentFormat,
+  SocialMediaAsset,
+  SocialMediaType,
   SocialMediaUploadResult,
   SocialPlatform,
   SocialPlatformPostState,
@@ -13,6 +16,8 @@ import {
 } from '@zafira/contracts';
 import {
   SocialMediaUploadInput,
+  SocialPostListFilters,
+  SocialPostListResult,
   SocialPublisherContext,
   SocialPublisherProvider,
 } from '../social-publisher/social-publisher.provider.js';
@@ -22,8 +27,10 @@ import {
   BrightBeanAccount,
   BrightBeanCreatePostPayload,
   BrightBeanDerivedMetric,
+  BrightBeanMediaSummary,
   BrightBeanPlatformPost,
   BrightBeanPostMetricTile,
+  BrightBeanPostResponse,
 } from './brightbean.types.js';
 
 export class BrightBeanProviderError extends Error {
@@ -400,6 +407,29 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     };
 
     const res = await client.createPost(payload, input.idempotencyKey);
+    return this.mapCanonicalPost(res, input.format);
+  }
+
+  private mapCanonicalPost(
+    res: BrightBeanPostResponse,
+    fallbackFormat?: SocialContentFormat | null
+  ): SocialPost {
+    const mediaItems: SocialMediaAsset[] = (res.media_assets || []).map((ma) => {
+      let mediaType: SocialMediaType = 'IMAGE';
+      if (ma.media_type === 'video' || ma.mime_type.startsWith('video/')) {
+        mediaType = 'VIDEO';
+      } else if (ma.media_type === 'image' || ma.mime_type.startsWith('image/')) {
+        mediaType = 'IMAGE';
+      } else {
+        mediaType = 'OTHER';
+      }
+      return {
+        id: ma.id,
+        url: ma.url,
+        mimeType: ma.mime_type,
+        mediaType,
+      };
+    });
 
     const platformStates: SocialPlatformPostState[] = (
       res.platform_posts || []
@@ -408,22 +438,70 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       platform: this.mapPlatform(pp.platform),
       status: this.mapStatusToHub(pp.status),
       externalPostId: pp.platform_post_id ?? null,
+      permalink: pp.permalink_url || null,
       error: pp.publish_error ?? null,
       scheduledAt: pp.scheduled_at ?? null,
       publishedAt: pp.published_at ?? null,
     }));
 
+    // Determinação canônica do formato segundo regras do Bloco 1 (Itens 4 e 10):
+    // 1. post_type=story + mídia IMAGE -> STORY_IMAGE
+    // 2. post_type=story + mídia VIDEO -> STORY_VIDEO
+    // 3. post_type=reel -> REEL
+    // 4. sem post_type + mediaItems.length >= 2 -> CAROUSEL
+    // 5. sem post_type + 0 ou 1 imagem -> FEED
+    let format: SocialContentFormat | null = fallbackFormat || null;
+
+    const postType = res.platform_posts?.find((pp) => pp.post_type)?.post_type;
+
+    if (postType === 'story') {
+      const hasVideo = mediaItems.some((m) => m.mediaType === 'VIDEO');
+      format = hasVideo ? 'STORY_VIDEO' : 'STORY_IMAGE';
+    } else if (postType === 'reel') {
+      format = 'REEL';
+    } else if (!postType) {
+      if (mediaItems.length >= 2) {
+        format = 'CAROUSEL';
+      } else {
+        format = 'FEED';
+      }
+    }
+
     return {
       id: res.id,
       status: this.mapStatusToHub(res.status),
       content: res.caption,
-      format: input.format,
+      format,
       scheduledAt: res.scheduled_at ?? null,
       publishedAt: res.published_at ?? null,
       createdAt: res.created_at,
       platformStates,
+      mediaItems,
     };
   }
+
+  async listPosts(
+    ctx: SocialPublisherContext,
+    filters?: SocialPostListFilters
+  ): Promise<SocialPostListResult> {
+    const { client } = await this.resolveClientAndConnection(ctx);
+    const res = await client.listPosts({
+      social_account_id: filters?.socialAccountId,
+      status: filters?.status,
+      limit: filters?.limit,
+      offset: filters?.offset,
+    });
+
+    const posts = res.items.map((item) => this.mapCanonicalPost(item));
+
+    return {
+      posts,
+      total: res.total,
+      limit: res.limit,
+      offset: res.offset,
+    };
+  }
+
 
   async getPost(
     ctx: SocialPublisherContext,
@@ -433,28 +511,7 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     const res = await client.getPost(postId);
     if (!res) return null;
 
-    const platformStates: SocialPlatformPostState[] = (
-      res.platform_posts || []
-    ).map((pp: BrightBeanPlatformPost) => ({
-      accountId: pp.social_account_id,
-      platform: this.mapPlatform(pp.platform),
-      status: this.mapStatusToHub(pp.status),
-      externalPostId: pp.platform_post_id ?? null,
-      error: pp.publish_error ?? null,
-      scheduledAt: pp.scheduled_at ?? null,
-      publishedAt: pp.published_at ?? null,
-    }));
-
-    return {
-      id: res.id,
-      status: this.mapStatusToHub(res.status),
-      content: res.caption,
-      format: null, // NÃO inferir formato na leitura remota
-      scheduledAt: res.scheduled_at ?? null,
-      publishedAt: res.published_at ?? null,
-      createdAt: res.created_at,
-      platformStates,
-    };
+    return this.mapCanonicalPost(res);
   }
 
   async schedulePost(
@@ -463,29 +520,7 @@ export class BrightBeanProvider implements SocialPublisherProvider {
   ): Promise<SocialPost> {
     const { client } = await this.resolveClientAndConnection(ctx);
     const res = await client.schedulePost(input.postId, input.scheduledAt);
-
-    const platformStates: SocialPlatformPostState[] = (
-      res.platform_posts || []
-    ).map((pp: BrightBeanPlatformPost) => ({
-      accountId: pp.social_account_id,
-      platform: this.mapPlatform(pp.platform),
-      status: this.mapStatusToHub(pp.status),
-      externalPostId: pp.platform_post_id ?? null,
-      error: pp.publish_error ?? null,
-      scheduledAt: pp.scheduled_at ?? null,
-      publishedAt: pp.published_at ?? null,
-    }));
-
-    return {
-      id: res.id,
-      status: this.mapStatusToHub(res.status),
-      content: res.caption,
-      format: null,
-      scheduledAt: res.scheduled_at ?? null,
-      publishedAt: res.published_at ?? null,
-      createdAt: res.created_at,
-      platformStates,
-    };
+    return this.mapCanonicalPost(res);
   }
 
   async cancelPost(

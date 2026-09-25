@@ -73,6 +73,45 @@ export interface SocialPost {
   publishedAt?: string | null;
   createdAt: string;
   platformStates: SocialPlatformPostState[];
+  mediaItems?: SocialMediaAsset[];
+}
+
+export interface AggregatedSocialPost {
+  id: string;
+  clientId: string;
+  clientName: string;
+  accountId: string;
+  accountName: string;
+  platform: SocialPlatform;
+  format: SocialContentFormat;
+  status: SocialPostStatus;
+  content: string;
+  mediaItems: SocialMediaAsset[];
+  scheduledAt?: string | null;
+  publishedAt?: string | null;
+  createdAt: string;
+  externalPostId?: string | null;
+  releaseUrl?: string | null;
+  platformStates: SocialPlatformPostState[];
+}
+
+export interface AggregatedSocialContentFilters {
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  accountId?: string;
+  status?: SocialPostStatus;
+  format?: SocialContentFormat;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface AggregatedSocialContentResponse {
+  posts: AggregatedSocialPost[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export interface CreateSocialPostInput {

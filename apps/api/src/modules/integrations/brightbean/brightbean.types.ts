@@ -32,11 +32,22 @@ export interface BrightBeanMediaAsset {
   media_type?: string | null;
 }
 
+export interface BrightBeanMediaSummary {
+  id: string;
+  url: string;
+  mime_type: string;
+  media_type: string;
+  position: number;
+}
+
 export interface BrightBeanPlatformPost {
+  id?: string;
   social_account_id: string;
   platform: string;
   status: string;
   platform_post_id?: string | null;
+  permalink_url?: string | null;
+  post_type?: string | null;
   publish_error?: string | null;
   scheduled_at?: string | null;
   published_at?: string | null;
@@ -44,12 +55,32 @@ export interface BrightBeanPlatformPost {
 
 export interface BrightBeanPostResponse {
   id: string;
-  status: string;
+  workspace_id?: string;
+  title?: string;
   caption: string;
+  first_comment?: string;
   scheduled_at?: string | null;
+  proposed_publish_at?: string | null;
   published_at?: string | null;
+  status: string;
   created_at: string;
+  updated_at?: string;
   platform_posts?: BrightBeanPlatformPost[];
+  media_assets?: BrightBeanMediaSummary[];
+}
+
+export interface BrightBeanPostListResponse {
+  items: BrightBeanPostResponse[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface BrightBeanListPostsFilters {
+  social_account_id?: string;
+  status?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface BrightBeanDerivedMetric {
