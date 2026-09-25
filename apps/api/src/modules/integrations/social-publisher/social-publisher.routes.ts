@@ -61,20 +61,14 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
     };
 
     function getOrganizationId(request: FastifyRequest): string {
-      const auth = request.authContext;
-      if (auth && auth.type === 'user' && auth.memberships && auth.memberships.length > 0) {
-        const org = auth.memberships.find((m) => m.organizationSlug === 'zafira') || auth.memberships[0];
-        if (org?.organizationId) return org.organizationId;
-      }
-
-      const headerOrg = request.headers['x-organization-id'];
-      if (typeof headerOrg === 'string' && headerOrg.trim()) {
-        return headerOrg.trim();
+      const authResultOrg = (request as any).authorizationResult?.organizationId;
+      if (typeof authResultOrg === 'string' && authResultOrg.trim()) {
+        return authResultOrg.trim();
       }
 
       throw new SocialPublisherServiceError(
-        'ORGANIZATION_REQUIRED',
-        'Contexto de organização não identificado na requisição.',
+        'ORGANIZATION_CONTEXT_REQUIRED',
+        'Contexto de organização ativo é obrigatório para acessar este recurso.',
         400
       );
     }

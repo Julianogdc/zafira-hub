@@ -14,6 +14,11 @@ async function main() {
   const args = process.argv.slice(2);
   const isApply = args.includes('--apply');
 
+  if (args.some((a) => a.startsWith('--api-key'))) {
+    console.error('ERRO DE SEGURANÇA: A flag --api-key não é permitida por motivos de auditoria e segurança. Forneça a chave exclusivamente pela variável de ambiente BRIGHTBEAN_API_KEY.');
+    process.exit(1);
+  }
+
   const organizationId =
     process.env.ORGANIZATION_ID ||
     args.find((a) => a.startsWith('--org-id='))?.split('=')[1];
@@ -22,9 +27,7 @@ async function main() {
     process.env.BRIGHTBEAN_WORKSPACE_ID ||
     args.find((a) => a.startsWith('--workspace-id='))?.split('=')[1];
 
-  const apiKey =
-    process.env.BRIGHTBEAN_API_KEY ||
-    args.find((a) => a.startsWith('--api-key='))?.split('=')[1];
+  const apiKey = process.env.BRIGHTBEAN_API_KEY?.trim();
 
   const hiddenPostsFile =
     process.env.BRIGHTBEAN_HIDDEN_POST_IDS_FILE ||
@@ -46,7 +49,7 @@ async function main() {
   }
 
   if (!apiKey) {
-    console.error('ERRO: BRIGHTBEAN_API_KEY não informada (via env ou --api-key).');
+    console.error('ERRO: BRIGHTBEAN_API_KEY não informada (defina a variável de ambiente BRIGHTBEAN_API_KEY).');
     process.exit(1);
   }
 
@@ -70,7 +73,7 @@ async function main() {
 
   console.log(`Organization ID:    ${organizationId}`);
   console.log(`Workspace ID:       ${workspaceId}`);
-  console.log(`API Key:            [CONFIGURADA - ${apiKey.length} caracteres - NÃO EXIBIDA]`);
+  console.log(`API Key:            CONFIGURADA`);
   console.log(`Hidden Post IDs:    ${hiddenPostIds.length} IDs carregados`);
   console.log(`Provider:           BRIGHTBEAN`);
   console.log(`Auth Type:          API_KEY`);

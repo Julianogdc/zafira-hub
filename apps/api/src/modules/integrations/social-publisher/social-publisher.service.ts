@@ -326,12 +326,10 @@ export class SocialPublisherService {
       accountMap.set(acc.id, acc);
     }
 
-    // Chamada à listagem da BrightBean
-    const providerList = await this.provider.listPosts(ctx, {
-      socialAccountId: filters?.accountId,
+    // Chamada paginada completa à listagem da BrightBean
+    const providerPosts = await this.fetchAllProviderPosts(ctx, {
+      accountId: filters?.accountId,
       status: filters?.status,
-      limit: 100,
-      offset: 0,
     });
 
     // Filtro dos IDs técnicos da metadata da conexão
@@ -343,7 +341,7 @@ export class SocialPublisherService {
 
     let allAggregated: AggregatedSocialPost[] = [];
 
-    for (const p of providerList.posts) {
+    for (const p of providerPosts) {
       if (hiddenPostIds.has(p.id)) {
         continue;
       }
@@ -474,15 +472,14 @@ export class SocialPublisherService {
         : []
     );
 
-    const providerList = await this.provider.listPosts(ctx, {
+    // Chamada paginada completa à listagem da BrightBean
+    const providerPosts = await this.fetchAllProviderPosts(ctx, {
       status: filters?.status,
-      limit: 100,
-      offset: 0,
     });
 
     const clientPosts: SocialPost[] = [];
 
-    for (const post of providerList.posts) {
+    for (const post of providerPosts) {
       if (hiddenPostIds.has(post.id)) {
         continue;
       }
@@ -692,5 +689,66 @@ export class SocialPublisherService {
       return null;
     }
     return this.provider.getAccountAnalytics(ctx, accountId, period);
+  }
+
+  /**
+   * Helper que percorre todas as páginas do provedor BrightBean até offset >= total.
+   * Proteções:
+   * - Lança erro seguro se o provedor retornar página vazia antes de atingir o total;
+   * - Protege contra loop infinito (máx 500 iterações);
+   * - Respeita filtros provider-side (accountId, status).
+   */
+  private async fetchAllProviderPosts(
+    ctx: SocialPublisherContext,
+    filters?: { accountId?: string; status?: string }
+  ): Promise<SocialPost[]> {
+    const allPosts: SocialPost[] = [];
+    const pageSize = 100;
+    let offset = 0;
+    let total = Infinity;
+    const maxIterations = 500;
+    let iterations = 0;
+
+    while (offset < total && iterations < maxIterations) {
+      iterations++;
+      const result = await this.provider.listPosts(ctx, {
+        socialAccountId: filters?.accountId,
+        status: filters?.status,
+        limit: pageSize,
+        offset,
+      });
+
+      total = result.total;
+
+      if (!result.posts || result.posts.length === 0) {
+        if (offset < total) {
+          throw new SocialPublisherServiceError(
+            'PROVIDER_PAGINATION_ERROR',
+            `O provedor retornou página vazia no offset ${offset} antes de atingir o total esperado de ${total} posts.`,
+            502
+          );
+        }
+        break;
+      }
+
+      allPosts.push(...result.posts);
+      offset += result.posts.length;
+
+      // Se a página retornou menos itens que o pageSize e ainda não chegou ao total informado,
+      // interrompemos para evitar loop quando o provedor não preenche total com precisão.
+      if (result.posts.length < pageSize && offset < total) {
+        break;
+      }
+    }
+
+    if (iterations >= maxIterations) {
+      throw new SocialPublisherServiceError(
+        'PAGINATION_LIMIT_EXCEEDED',
+        'Limite de iterações de paginação excedido ao consultar o provedor.',
+        500
+      );
+    }
+
+    return allPosts;
   }
 }

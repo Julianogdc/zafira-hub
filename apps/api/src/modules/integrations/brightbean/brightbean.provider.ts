@@ -444,27 +444,70 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       publishedAt: pp.published_at ?? null,
     }));
 
-    // Determinação canônica do formato segundo regras do Bloco 1 (Itens 4 e 10):
-    // 1. post_type=story + mídia IMAGE -> STORY_IMAGE
-    // 2. post_type=story + mídia VIDEO -> STORY_VIDEO
-    // 3. post_type=reel -> REEL
-    // 4. sem post_type + mediaItems.length >= 2 -> CAROUSEL
-    // 5. sem post_type + 0 ou 1 imagem -> FEED
-    let format: SocialContentFormat | null = fallbackFormat || null;
-
+    // Determinação canônica estrita do formato (Passo 2C2.1.1 - Fail-Closed):
+    // 1. post_type=story + EXATAMENTE 1 IMAGE -> STORY_IMAGE
+    // 2. post_type=story + EXATAMENTE 1 VIDEO -> STORY_VIDEO
+    // 3. post_type=story + 0 mídias / >1 mídia / OTHER -> erro BRIGHTBEAN_UNREPRESENTABLE_FORMAT
+    // 4. post_type=reel + EXATAMENTE 1 VIDEO -> REEL
+    // 5. post_type=reel + qualquer outra combinação -> erro BRIGHTBEAN_UNREPRESENTABLE_FORMAT
+    // 6. sem post_type + mediaItems.length >= 2 -> CAROUSEL
+    // 7. sem post_type + 0 mídia -> FEED
+    // 8. sem post_type + 1 IMAGE -> FEED
+    // 9. sem post_type + 1 VIDEO -> erro BRIGHTBEAN_UNREPRESENTABLE_FORMAT
     const postType = res.platform_posts?.find((pp) => pp.post_type)?.post_type;
 
+    let format: SocialContentFormat;
+
     if (postType === 'story') {
-      const hasVideo = mediaItems.some((m) => m.mediaType === 'VIDEO');
-      format = hasVideo ? 'STORY_VIDEO' : 'STORY_IMAGE';
+      if (mediaItems.length === 1 && mediaItems[0].mediaType === 'IMAGE') {
+        format = 'STORY_IMAGE';
+      } else if (mediaItems.length === 1 && mediaItems[0].mediaType === 'VIDEO') {
+        format = 'STORY_VIDEO';
+      } else {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_UNREPRESENTABLE_FORMAT',
+          `Story exige exatamente 1 mídia IMAGE ou VIDEO. Encontrado: ${mediaItems.length} mídia(s).`,
+          422
+        );
+      }
     } else if (postType === 'reel') {
-      format = 'REEL';
+      if (mediaItems.length === 1 && mediaItems[0].mediaType === 'VIDEO') {
+        format = 'REEL';
+      } else {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_UNREPRESENTABLE_FORMAT',
+          `Reel exige exatamente 1 mídia VIDEO. Encontrado: ${mediaItems.length} mídia(s).`,
+          422
+        );
+      }
     } else if (!postType) {
       if (mediaItems.length >= 2) {
         format = 'CAROUSEL';
-      } else {
+      } else if (mediaItems.length === 0) {
         format = 'FEED';
+      } else if (mediaItems.length === 1) {
+        if (mediaItems[0].mediaType === 'IMAGE') {
+          format = 'FEED';
+        } else {
+          throw new BrightBeanProviderError(
+            'BRIGHTBEAN_UNREPRESENTABLE_FORMAT',
+            'Publicação com 1 vídeo sem post_type não pode ser representada de forma canônica.',
+            422
+          );
+        }
+      } else {
+        throw new BrightBeanProviderError(
+          'BRIGHTBEAN_UNREPRESENTABLE_FORMAT',
+          'Combinação de mídia inválida sem post_type.',
+          422
+        );
       }
+    } else {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_UNREPRESENTABLE_FORMAT',
+        `post_type desconhecido recebido da API BrightBean: ${postType}`,
+        422
+      );
     }
 
     return {

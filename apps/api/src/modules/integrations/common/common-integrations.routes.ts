@@ -87,17 +87,16 @@ export async function commonIntegrationsRoutes(
   }
 
   function getOrganizationId(request: FastifyRequest): string {
-    const auth = request.authContext;
-    if (!auth) {
-      throw new IntegrationRegistryError('Não autenticado.', 401, 'UNAUTHORIZED');
+    const authResultOrg = (request as any).authorizationResult?.organizationId;
+    if (typeof authResultOrg === 'string' && authResultOrg.trim()) {
+      return authResultOrg.trim();
     }
 
-    if (auth.type === 'user' && auth.memberships.length > 0) {
-      const org = auth.memberships.find((m) => m.organizationSlug === 'zafira') || auth.memberships[0];
-      return org.organizationId;
-    }
-
-    throw new IntegrationRegistryError('Acesso requer contexto de organização.', 403, 'ORGANIZATION_CONTEXT_REQUIRED');
+    throw new IntegrationRegistryError(
+      'Contexto de organização ativo é obrigatório para acessar este recurso.',
+      400,
+      'ORGANIZATION_CONTEXT_REQUIRED'
+    );
   }
 
   // 1. GET /api/v1/integrations/overview

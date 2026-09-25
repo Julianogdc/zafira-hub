@@ -28,15 +28,14 @@ import { teamRoutes } from './modules/teams/team.routes.js';
 import { ObservabilityService } from './modules/observability/observability.service.js';
 import { createMetricsRoutes } from './modules/observability/metrics.routes.js';
 import { getFastifyLoggerConfig } from './modules/observability/logger-config.js';
+import { resolveBrightBeanApiUrl } from './modules/integrations/brightbean/brightbean.config.js';
 
-// Configuração segura da URL base da BrightBean
-const defaultBrightBeanApiUrl =
-  process.env.BRIGHTBEAN_API_URL ||
-  (process.env.NODE_ENV === 'production' ? '' : 'http://localhost:8000/api/v1');
+// Configuração segura da URL base da BrightBean (fail-closed em produção)
+const defaultBrightBeanApiUrl = resolveBrightBeanApiUrl();
 
 export const brightBeanProvider = new BrightBeanProvider({
   connectionService: integrationConnectionService,
-  apiBaseUrl: defaultBrightBeanApiUrl || 'http://localhost:8000/api/v1',
+  apiBaseUrl: defaultBrightBeanApiUrl,
 });
 
 export const brightBeanIntegrationConnector = new BrightBeanIntegrationConnector(brightBeanProvider);
@@ -94,7 +93,7 @@ export function buildApp(options?: BuildAppOptions): FastifyInstance {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'Idempotency-Key'],
   });
 
   // Preserva o payload bruto (rawBody) para validação de assinaturas HMAC em Webhooks (ex: Asana)
