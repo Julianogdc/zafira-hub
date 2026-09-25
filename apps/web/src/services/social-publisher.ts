@@ -117,7 +117,16 @@ export function getSocialErrorMessage(error: unknown, fallbackMessage: string = 
     return 'Contexto de organização não definido. Selecione uma organização ativa.';
   }
 
-  if (error?.status === 403 || code === 'FORBIDDEN') {
+  if (
+    code === 'SOCIAL_PAGINATION_LIMIT_EXCEEDED' ||
+    code === 'SOCIAL_PAGINATION_INCONSISTENCY' ||
+    rawMessage.includes('SOCIAL_PAGINATION_LIMIT_EXCEEDED') ||
+    rawMessage.includes('SOCIAL_PAGINATION_INCONSISTENCY')
+  ) {
+    return 'Não foi possível carregar todos os conteúdos. Tente novamente.';
+  }
+
+  if (err?.status === 403 || code === 'FORBIDDEN') {
     return 'Você não possui permissão para executar esta ação no módulo social.';
   }
 
@@ -160,8 +169,8 @@ export const socialPublisherService = {
   /**
    * Vincula uma conta social ao cliente.
    */
-  async linkAccount(clientId: string, accountId: string): Promise<{ success: boolean; accountId: string }> {
-    return api.post<{ success: boolean; accountId: string }>(
+  async linkAccount(clientId: string, accountId: string): Promise<{ success: boolean; clientIntegrationId: string }> {
+    return api.post<{ success: boolean; clientIntegrationId: string }>(
       `/api/v1/clients/${clientId}/social/accounts`,
       { accountId }
     );
@@ -170,8 +179,8 @@ export const socialPublisherService = {
   /**
    * Desvincula uma conta social do cliente.
    */
-  async unlinkAccount(clientId: string, accountId: string): Promise<{ success: boolean; accountId: string }> {
-    return api.delete<{ success: boolean; accountId: string }>(
+  async unlinkAccount(clientId: string, accountId: string): Promise<{ success: boolean }> {
+    return api.delete<{ success: boolean }>(
       `/api/v1/clients/${clientId}/social/accounts/${accountId}`
     );
   },
@@ -198,7 +207,8 @@ export const socialPublisherService = {
   /**
    * Percorre todas as páginas de conteúdo agregado da organização até exaustão.
    * Utilizado pelo calendário mensal para carregar a totalidade das publicações do período.
-   * Inclui salvaguarda contra loops infinitos (máximo 50 páginas de 100 itens).
+   * Inclui salvaguarda contra loops infinitos (máximo 50 páginas de 100 itens) e fail-closed
+   * explícito caso o limite de páginas seja atingido com registros pendentes ou ocorra inconsistência.
    */
   async getAllAggregatedContent(
     filters?: Omit<AggregatedSocialContentFilters, 'limit' | 'offset'>
@@ -210,8 +220,12 @@ export const socialPublisherService = {
     const maxIterations = 50;
     let iteration = 0;
 
-    while (offset < total && iteration < maxIterations) {
+    while (offset < total) {
+      if (iteration >= maxIterations) {
+        throw new Error('SOCIAL_PAGINATION_LIMIT_EXCEEDED');
+      }
       iteration++;
+
       const response = await this.getAggregatedContent({
         ...filters,
         limit: pageSize,
@@ -221,6 +235,10 @@ export const socialPublisherService = {
       total = response.total;
       const receivedCount = response.posts.length;
 
+      if (receivedCount === 0 && offset < total) {
+        throw new Error('SOCIAL_PAGINATION_INCONSISTENCY');
+      }
+
       if (receivedCount === 0) {
         break;
       }
@@ -229,8 +247,12 @@ export const socialPublisherService = {
       offset += receivedCount;
 
       if (receivedCount < pageSize && offset < total) {
-        break;
+        throw new Error('SOCIAL_PAGINATION_INCONSISTENCY');
       }
+    }
+
+    if (offset < total && total !== Infinity) {
+      throw new Error('SOCIAL_PAGINATION_LIMIT_EXCEEDED');
     }
 
     return allPosts;
@@ -256,6 +278,8 @@ export const socialPublisherService = {
 
   /**
    * Percorre todas as páginas de publicações de um cliente específico.
+   * Fail-closed explícito caso o limite de páginas seja atingido com registros pendentes
+   * ou ocorra inconsistência nos dados retornados.
    */
   async getAllClientContent(clientId: string, status?: SocialPostStatus): Promise<SocialPost[]> {
     const pageSize = 100;
@@ -265,8 +289,12 @@ export const socialPublisherService = {
     const maxIterations = 50;
     let iteration = 0;
 
-    while (offset < total && iteration < maxIterations) {
+    while (offset < total) {
+      if (iteration >= maxIterations) {
+        throw new Error('SOCIAL_PAGINATION_LIMIT_EXCEEDED');
+      }
       iteration++;
+
       const response = await this.getClientContent(clientId, {
         status,
         limit: pageSize,
@@ -276,6 +304,10 @@ export const socialPublisherService = {
       total = response.total;
       const receivedCount = response.posts.length;
 
+      if (receivedCount === 0 && offset < total) {
+        throw new Error('SOCIAL_PAGINATION_INCONSISTENCY');
+      }
+
       if (receivedCount === 0) {
         break;
       }
@@ -284,8 +316,12 @@ export const socialPublisherService = {
       offset += receivedCount;
 
       if (receivedCount < pageSize && offset < total) {
-        break;
+        throw new Error('SOCIAL_PAGINATION_INCONSISTENCY');
       }
+    }
+
+    if (offset < total && total !== Infinity) {
+      throw new Error('SOCIAL_PAGINATION_LIMIT_EXCEEDED');
     }
 
     return allPosts;

@@ -75,8 +75,9 @@ export default function ClienteConteudoPreview() {
         socialPublisherService.getClientAccounts(clientId).catch(() => []),
       ]);
 
-      if (postRes.status === 'fulfilled' && postRes.value?.post) {
-        setPost(postRes.value.post);
+      const fetchedPost = postRes.status === 'fulfilled' ? ((postRes.value as any)?.post || postRes.value) : null;
+      if (fetchedPost && fetchedPost.id) {
+        setPost(fetchedPost);
       } else if (!post) {
         const reason = (postRes as any).reason;
         setError(getSocialErrorMessage(reason, 'Publicação não encontrada ou sem permissão de acesso.'));

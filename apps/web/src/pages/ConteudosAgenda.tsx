@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CalendarDays,
@@ -70,14 +70,14 @@ export default function ConteudosAgenda() {
   // Estado do Compositor Zafira
   const [compositorOpen, setCompositorOpen] = useState<boolean>(false);
 
-  // MÃªs de navegaÃ§Ã£o (data de referÃªncia)
+  // Mês de navegação (data de referência)
   const [currentDate, setCurrentDate] = useState<Date>(() => {
     const d = new Date();
     d.setDate(1);
     return d;
   });
 
-  // Modo de visualizaÃ§Ã£o: 'calendar' ou 'list'
+  // Modo de visualização: 'calendar' ou 'list'
   const [viewMode, setViewMode] = useState<'calendar' | 'list'>('calendar');
 
   // Filtros
@@ -99,17 +99,17 @@ export default function ConteudosAgenda() {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // PaginaÃ§Ã£o da lista
+  // Paginação da lista
   const [currentPage, setCurrentPage] = useState<number>(1);
   const pageSize = 15;
 
-  // Modal para exibir todos os posts de um dia especÃ­fico
+  // Modal para exibir todos os posts de um dia específico
   const [selectedDayPosts, setSelectedDayPosts] = useState<{
     date: Date;
     posts: AggregatedSocialPost[];
   } | null>(null);
 
-  // Calcula inÃ­cio e fim do mÃªs corrente em ISO
+  // Calcula início e fim do mês corrente em ISO
   const { startDateIso, endDateIso, monthName, year } = useMemo(() => {
     const y = currentDate.getFullYear();
     const m = currentDate.getMonth();
@@ -128,7 +128,7 @@ export default function ConteudosAgenda() {
     };
   }, [currentDate]);
 
-  // Carrega dados da API canÃ´nica do Hub
+  // Carrega dados da API canônica do Hub
   const loadData = useCallback(
     async (isForceRefresh = false) => {
       try {
@@ -171,13 +171,13 @@ export default function ConteudosAgenda() {
         }
 
         if (isForceRefresh) {
-          toast.success('ConteÃºdos sincronizados com sucesso!');
+          toast.success('Conteúdos sincronizados com sucesso!');
         }
       } catch (err: any) {
-        const msg = getSocialErrorMessage(err, 'Falha ao carregar conteÃºdos da integraÃ§Ã£o social.');
+        const msg = getSocialErrorMessage(err, 'Falha ao carregar conteúdos da integração social.');
         setError(msg);
-        toast.error('Erro na sincronizaÃ§Ã£o', {
-          description: 'NÃ£o foi possÃ­vel atualizar os conteÃºdos.',
+        toast.error('Erro na sincronização', {
+          description: 'Não foi possível atualizar os conteúdos.',
         });
       } finally {
         setLoading(false);
@@ -191,7 +191,7 @@ export default function ConteudosAgenda() {
     loadData(false);
   }, [loadData]);
 
-  // Reset de pÃ¡gina quando filtros mudam
+  // Reset de página quando filtros mudam
   useEffect(() => {
     setCurrentPage(1);
   }, [selectedClientId, selectedAccountId, selectedStatus, selectedFormat, searchQuery]);
@@ -202,7 +202,7 @@ export default function ConteudosAgenda() {
     return accountsList.filter((a) => a.clientId === selectedClientId);
   }, [accountsList, selectedClientId]);
 
-  // Reset de conta caso mude o cliente e a conta selecionada nÃ£o pertenÃ§a mais a ele
+  // Reset de conta caso mude o cliente e a conta selecionada não pertença mais a ele
   useEffect(() => {
     if (selectedClientId !== 'ALL' && selectedAccountId !== 'ALL') {
       const match = accountsList.find((a) => a.id === selectedAccountId);
@@ -212,7 +212,7 @@ export default function ConteudosAgenda() {
     }
   }, [selectedClientId, selectedAccountId, accountsList]);
 
-  // Resumo canÃ´nico calculado no frontend
+  // Resumo canônico calculado no frontend
   const summary: AgendaSummary = useMemo(() => {
     let scheduledCount = 0;
     let publishedCount = 0;
@@ -250,7 +250,7 @@ export default function ConteudosAgenda() {
     };
   }, [posts]);
 
-  // NavegaÃ§Ã£o de mÃªs
+  // Navegação de mês
   const handlePrevMonth = () => {
     setCurrentDate((prev) => {
       const d = new Date(prev);
@@ -282,7 +282,7 @@ export default function ConteudosAgenda() {
     }
   };
 
-  // FormataÃ§Ã£o de data / hora
+  // Formatação de data / hora
   const formatTime = (dateStr?: string | null) => {
     if (!dateStr) return '--:--';
     try {
@@ -311,7 +311,7 @@ export default function ConteudosAgenda() {
     }
   };
 
-  // Helper de badges de status canÃ´nicos
+  // Helper de badges de status canônicos
   const renderStatusBadge = (status: string) => {
     switch (status) {
       case 'PUBLISHED':
@@ -386,7 +386,7 @@ export default function ConteudosAgenda() {
     }
   };
 
-  // Helper de badges de formato canÃ´nicos
+  // Helper de badges de formato canônicos
   const renderFormatBadge = (post: AggregatedSocialPost) => {
     switch (post.format) {
       case 'STORY_IMAGE':
@@ -461,7 +461,7 @@ export default function ConteudosAgenda() {
     );
   };
 
-  // ConstruÃ§Ã£o dos dias para a grade mensal do calendÃ¡rio
+  // Construção dos dias para a grade mensal do calendário
   const calendarDays = useMemo(() => {
     const daysInMonth = new Date(year, currentDate.getMonth() + 1, 0).getDate();
     const firstDayOfWeek = new Date(year, currentDate.getMonth(), 1).getDay();
@@ -535,7 +535,7 @@ export default function ConteudosAgenda() {
     <TooltipProvider>
       <div className="space-y-6 pb-12 max-w-7xl mx-auto">
         {/* ========================================================================= */}
-        {/* CABEÃ‡ALHO OPERACIONAL */}
+        {/* CABEÇALHO OPERACIONAL */}
         {/* ========================================================================= */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-white/5 pb-5">
           <div>
@@ -545,10 +545,10 @@ export default function ConteudosAgenda() {
               </div>
               <div>
                 <h1 className="text-2xl font-bold tracking-tight text-white">
-                  ConteÃºdos & Agenda
+                  Conteúdos & Agenda
                 </h1>
                 <p className="text-sm text-zinc-400">
-                  Acompanhe o planejamento e as entregas de conteÃºdo da agÃªncia.
+                  Acompanhe o planejamento e as entregas de conteúdo da agência.
                 </p>
               </div>
             </div>
@@ -573,14 +573,14 @@ export default function ConteudosAgenda() {
                 className="bg-purple-600 hover:bg-purple-500 text-white gap-2 h-9 px-4 font-semibold shadow-md shadow-purple-600/20"
               >
                 <Plus className="w-4 h-4" />
-                <span>Criar conteÃºdo</span>
+                <span>Criar conteúdo</span>
               </Button>
             )}
           </div>
         </div>
 
         {/* ========================================================================= */}
-        {/* CARDS DE RESUMO OPERACIONAL DO PERÃODO */}
+        {/* CARDS DE RESUMO OPERACIONAL DO PERÍODO */}
         {/* ========================================================================= */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* 1. Agendados */}
@@ -597,7 +597,7 @@ export default function ConteudosAgenda() {
                     summary.scheduledCount
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500">No perÃ­odo selecionado</p>
+                <p className="text-[11px] text-zinc-500">No período selecionado</p>
               </div>
               <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
                 <Clock className="w-5 h-5" />
@@ -619,7 +619,7 @@ export default function ConteudosAgenda() {
                     summary.publishedCount
                   )}
                 </div>
-                <p className="text-[11px] text-zinc-500">PublicaÃ§Ãµes confirmadas</p>
+                <p className="text-[11px] text-zinc-500">Publicações confirmadas</p>
               </div>
               <div className="p-3 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 <CheckCircle2 className="w-5 h-5" />
@@ -627,12 +627,12 @@ export default function ConteudosAgenda() {
             </CardContent>
           </Card>
 
-          {/* 3. PrÃ³xima PublicaÃ§Ã£o */}
+          {/* 3. Próxima Publicação */}
           <Card className="bg-zinc-900/60 border-white/10 backdrop-blur-md">
             <CardContent className="p-5 flex items-center justify-between">
               <div className="space-y-1 min-w-0 pr-2">
                 <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  PrÃ³xima PublicaÃ§Ã£o
+                  Próxima Publicação
                 </p>
                 {loading ? (
                   <div className="h-7 w-28 bg-white/10 animate-pulse rounded" />
@@ -645,7 +645,7 @@ export default function ConteudosAgenda() {
                       {formatDateFull(summary.nextPost.scheduledAt || summary.nextPost.createdAt)}
                     </div>
                     <p className="text-[11px] text-zinc-400 truncate">
-                      {summary.nextPost.clientName} â€¢ {summary.nextPost.accountName}
+                      {summary.nextPost.clientName} • {summary.nextPost.accountName}
                     </p>
                   </div>
                 ) : (
@@ -661,7 +661,7 @@ export default function ConteudosAgenda() {
             </CardContent>
           </Card>
 
-          {/* 4. Falhas e AtenÃ§Ã£o */}
+          {/* 4. Falhas e Atenção */}
           <Card
             className={`bg-zinc-900/60 border-white/10 backdrop-blur-md ${
               summary.errorCount > 0 ? 'border-red-500/30 bg-red-950/10' : ''
@@ -670,7 +670,7 @@ export default function ConteudosAgenda() {
             <CardContent className="p-5 flex items-center justify-between">
               <div className="space-y-1">
                 <p className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  AtenÃ§Ã£o / Falhas
+                  Atenção / Falhas
                 </p>
                 <div
                   className={`text-2xl font-bold tracking-tight ${
@@ -684,7 +684,7 @@ export default function ConteudosAgenda() {
                   )}
                 </div>
                 <p className="text-[11px] text-zinc-500">
-                  {summary.errorCount > 0 ? 'Requer atenÃ§Ã£o operacional' : 'Nenhuma falha ativa'}
+                  {summary.errorCount > 0 ? 'Requer atenção operacional' : 'Nenhuma falha ativa'}
                 </p>
               </div>
               <div
@@ -701,11 +701,11 @@ export default function ConteudosAgenda() {
         </div>
 
         {/* ========================================================================= */}
-        {/* BARRA DE NAVEGAÃ‡ÃƒO TEMPORAL E FILTROS */}
+        {/* BARRA DE NAVEGAÇÃO TEMPORAL E FILTROS */}
         {/* ========================================================================= */}
         <Card className="bg-zinc-900/70 border-white/10 backdrop-blur-md">
           <CardContent className="p-4 space-y-4">
-            {/* Linha superior: NavegaÃ§Ã£o de MÃªs + Alternador CalendÃ¡rio/Lista */}
+            {/* Linha superior: Navegação de Mês + Alternador Calendário/Lista */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/5">
               <div className="flex items-center gap-2">
                 <Button
@@ -713,7 +713,7 @@ export default function ConteudosAgenda() {
                   size="icon"
                   onClick={handlePrevMonth}
                   className="h-8 w-8 bg-zinc-800 border-white/10 hover:bg-zinc-700 text-zinc-300"
-                  title="MÃªs anterior"
+                  title="Mês anterior"
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
@@ -725,7 +725,7 @@ export default function ConteudosAgenda() {
                   size="icon"
                   onClick={handleNextMonth}
                   className="h-8 w-8 bg-zinc-800 border-white/10 hover:bg-zinc-700 text-zinc-300"
-                  title="PrÃ³ximo mÃªs"
+                  title="Próximo mês"
                 >
                   <ChevronRight className="w-4 h-4" />
                 </Button>
@@ -752,7 +752,7 @@ export default function ConteudosAgenda() {
                     }`}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" />
-                    CalendÃ¡rio
+                    Calendário
                   </Button>
                   <Button
                     variant={viewMode === 'list' ? 'default' : 'ghost'}
@@ -771,7 +771,7 @@ export default function ConteudosAgenda() {
               </div>
             </div>
 
-            {/* Linha de Filtros CombinÃ¡veis */}
+            {/* Linha de Filtros Combináveis */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               {/* Filtro: Cliente */}
               <div className="space-y-1">
@@ -813,7 +813,7 @@ export default function ConteudosAgenda() {
                 </Select>
               </div>
 
-              {/* Filtro: Status CanÃ´nico */}
+              {/* Filtro: Status Canônico */}
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
                   Status
@@ -835,7 +835,7 @@ export default function ConteudosAgenda() {
                 </Select>
               </div>
 
-              {/* Filtro: Formato CanÃ´nico */}
+              {/* Filtro: Formato Canônico */}
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">
                   Formato
@@ -850,7 +850,7 @@ export default function ConteudosAgenda() {
                     <SelectItem value="REEL">Reel</SelectItem>
                     <SelectItem value="CAROUSEL">Carrossel</SelectItem>
                     <SelectItem value="STORY_IMAGE">Story (Imagem)</SelectItem>
-                    <SelectItem value="STORY_VIDEO">Story (VÃ­deo)</SelectItem>
+                    <SelectItem value="STORY_VIDEO">Story (Vídeo)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -883,17 +883,17 @@ export default function ConteudosAgenda() {
         </Card>
 
         {/* ========================================================================= */}
-        {/* CONTEÃšDO PRINCIPAL: CALENDÃRIO OU LISTA */}
+        {/* CONTEÚDO PRINCIPAL: CALENDÁRIO OU LISTA */}
         {/* ========================================================================= */}
         {loading ? (
           <div className="flex flex-col items-center justify-center p-16 space-y-4 bg-zinc-900/30 rounded-2xl border border-white/5">
             <RefreshCw className="w-8 h-8 animate-spin text-purple-400" />
-            <p className="text-sm text-zinc-400">Carregando conteÃºdos e agenda...</p>
+            <p className="text-sm text-zinc-400">Carregando conteúdos e agenda...</p>
           </div>
         ) : error ? (
           <div className="p-8 rounded-2xl bg-red-950/20 border border-red-500/20 text-center space-y-3">
             <AlertCircle className="w-8 h-8 text-red-400 mx-auto" />
-            <p className="text-sm font-semibold text-red-300">Falha na sincronizaÃ§Ã£o dos conteÃºdos</p>
+            <p className="text-sm font-semibold text-red-300">Falha na sincronização dos conteúdos</p>
             <p className="text-xs text-zinc-400 max-w-md mx-auto">{error}</p>
             <Button
               variant="outline"
@@ -910,9 +910,9 @@ export default function ConteudosAgenda() {
               <CalendarDays className="w-8 h-8" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-base font-semibold text-white">Nenhum conteÃºdo encontrado</h3>
+              <h3 className="text-base font-semibold text-white">Nenhum conteúdo encontrado</h3>
               <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                NÃ£o hÃ¡ publicaÃ§Ãµes cadastradas para o perÃ­odo ou filtros selecionados nas contas sociais vinculadas.
+                Não há publicações cadastradas para o período ou filtros selecionados nas contas sociais vinculadas.
               </p>
             </div>
             {(selectedClientId !== 'ALL' ||
@@ -938,7 +938,7 @@ export default function ConteudosAgenda() {
           </div>
         ) : viewMode === 'calendar' ? (
           /* ----------------------------------------------------------------------- */
-          /* MODO CALENDÃRIO */
+          /* MODO CALENDÁRIO */
           /* ----------------------------------------------------------------------- */
           <div className="space-y-2">
             {/* Dias da semana */}
@@ -948,7 +948,7 @@ export default function ConteudosAgenda() {
               <div>Qua</div>
               <div>Qui</div>
               <div>Sex</div>
-              <div className="text-purple-400">SÃ¡b</div>
+              <div className="text-purple-400">Sáb</div>
               <div className="text-purple-400">Dom</div>
             </div>
 
@@ -977,7 +977,7 @@ export default function ConteudosAgenda() {
                         : 'bg-zinc-900/50 border-white/5 hover:border-white/10'
                     }`}
                   >
-                    {/* CabeÃ§alho do dia */}
+                    {/* Cabeçalho do dia */}
                     <div className="flex items-center justify-between mb-1.5">
                       <span
                         className={`text-xs font-bold px-1.5 py-0.5 rounded ${
@@ -1002,7 +1002,7 @@ export default function ConteudosAgenda() {
                           key={post.id}
                           onClick={() => handlePostClick(post)}
                           className="group p-1.5 rounded-md bg-zinc-800/80 hover:bg-zinc-700/90 border border-white/5 hover:border-purple-500/40 cursor-pointer transition-all space-y-1"
-                          title={`${post.clientName} â€¢ ${post.accountName}`}
+                          title={`${post.clientName} • ${post.accountName}`}
                         >
                           <div className="flex items-center justify-between gap-1">
                             <span className="text-[10px] font-mono font-medium text-zinc-300">
@@ -1020,7 +1020,7 @@ export default function ConteudosAgenda() {
                         </div>
                       ))}
 
-                      {/* BotÃ£o +X para dias com muitos conteÃºdos */}
+                      {/* Botão +X para dias com muitos conteúdos */}
                       {remainingCount > 0 && (
                         <button
                           onClick={() =>
@@ -1050,14 +1050,14 @@ export default function ConteudosAgenda() {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="border-b border-white/10 bg-zinc-800/50 text-zinc-400 uppercase tracking-wider font-semibold">
-                      <th className="p-3 w-14 text-center">PrÃ©via</th>
-                      <th className="p-3">Data / HorÃ¡rio</th>
+                      <th className="p-3 w-14 text-center">Prévia</th>
+                      <th className="p-3">Data / Horário</th>
                       <th className="p-3">Cliente</th>
                       <th className="p-3">Conta Social</th>
                       <th className="p-3">Formato</th>
                       <th className="p-3">Status</th>
                       <th className="p-3 max-w-xs">Legenda</th>
-                      <th className="p-3 text-right">AÃ§Ã£o</th>
+                      <th className="p-3 text-right">Ação</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
@@ -1067,7 +1067,7 @@ export default function ConteudosAgenda() {
                         onClick={() => handlePostClick(post)}
                         className="hover:bg-zinc-800/40 cursor-pointer transition-colors group"
                       >
-                        {/* PrÃ©via / Miniatura */}
+                        {/* Prévia / Miniatura */}
                         <td className="p-3 text-center">
                           <div className="w-10 h-10 rounded-lg bg-zinc-800 border border-white/10 overflow-hidden flex items-center justify-center relative mx-auto">
                             {post.mediaThumbnailUrl ? (
@@ -1088,7 +1088,7 @@ export default function ConteudosAgenda() {
                           </div>
                         </td>
 
-                        {/* Data e HorÃ¡rio */}
+                        {/* Data e Horário */}
                         <td className="p-3 whitespace-nowrap">
                           <div className="font-semibold text-white group-hover:text-purple-300">
                             {post.status === 'DRAFT'
@@ -1133,7 +1133,7 @@ export default function ConteudosAgenda() {
                           {renderStatusBadge(post.status)}
                         </td>
 
-                        {/* Legenda (exceto para Story conforme regra explÃ­cita) */}
+                        {/* Legenda (exceto para Story conforme regra explícita) */}
                         <td className="p-3 max-w-xs text-zinc-300">
                           {post.format === 'STORY_IMAGE' || post.format === 'STORY_VIDEO' ? (
                             <span className="text-zinc-500 italic text-[11px]">
@@ -1146,7 +1146,7 @@ export default function ConteudosAgenda() {
                           )}
                         </td>
 
-                        {/* AÃ§Ã£o */}
+                        {/* Ação */}
                         <td className="p-3 text-right whitespace-nowrap">
                           {post.status === 'PUBLISHED' && post.releaseUrl ? (
                             <Button
@@ -1164,7 +1164,7 @@ export default function ConteudosAgenda() {
                               className="h-8 text-xs text-purple-400 hover:text-purple-300 hover:bg-purple-500/10 gap-1.5"
                             >
                               <Eye className="w-3.5 h-3.5" />
-                              PrÃ©via
+                              Prévia
                             </Button>
                           )}
                         </td>
@@ -1175,12 +1175,12 @@ export default function ConteudosAgenda() {
               </div>
             </div>
 
-            {/* PaginaÃ§Ã£o da lista */}
+            {/* Paginação da lista */}
             {totalListPages > 1 && (
               <div className="flex items-center justify-between text-xs text-zinc-400 px-2">
                 <div>
                   Mostrando {(currentPage - 1) * pageSize + 1} a{' '}
-                  {Math.min(currentPage * pageSize, posts.length)} de {posts.length} conteÃºdos
+                  {Math.min(currentPage * pageSize, posts.length)} de {posts.length} conteúdos
                 </div>
                 <div className="flex items-center gap-2">
                   <Button
@@ -1193,7 +1193,7 @@ export default function ConteudosAgenda() {
                     Anterior
                   </Button>
                   <span className="px-2 font-medium text-white">
-                    PÃ¡gina {currentPage} de {totalListPages}
+                    Página {currentPage} de {totalListPages}
                   </span>
                   <Button
                     variant="outline"
@@ -1202,7 +1202,7 @@ export default function ConteudosAgenda() {
                     disabled={currentPage === totalListPages}
                     className="h-8 bg-zinc-800 border-white/10 hover:bg-zinc-700 text-zinc-300"
                   >
-                    PrÃ³xima
+                    Próxima
                   </Button>
                 </div>
               </div>
@@ -1211,7 +1211,7 @@ export default function ConteudosAgenda() {
         )}
 
         {/* ========================================================================= */}
-        {/* MODAL PARA DETALHE DE CONTEÃšDOS DO DIA (+X) */}
+        {/* MODAL PARA DETALHE DE CONTEÚDOS DO DIA (+X) */}
         {/* ========================================================================= */}
         <Dialog
           open={!!selectedDayPosts}
@@ -1221,7 +1221,7 @@ export default function ConteudosAgenda() {
             <DialogHeader>
               <DialogTitle className="text-base font-bold flex items-center gap-2">
                 <CalendarDays className="w-5 h-5 text-purple-400" />
-                ConteÃºdos de{' '}
+                Conteúdos de{' '}
                 {selectedDayPosts?.date
                   ? new Intl.DateTimeFormat('pt-BR', {
                       day: '2-digit',
@@ -1271,7 +1271,7 @@ export default function ConteudosAgenda() {
           </DialogContent>
         </Dialog>
 
-        {/* Compositor Zafira de ConteÃºdo (Admin & Manager) */}
+        {/* Compositor Zafira de Conteúdo (Admin & Manager) */}
         <CompositorZafiraModal
           open={compositorOpen}
           onOpenChange={setCompositorOpen}

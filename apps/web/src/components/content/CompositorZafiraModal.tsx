@@ -101,6 +101,17 @@ export function CompositorZafiraModal({
   // Idempotência do CreatePost (cache de fingerprint para retentativas de timeout)
   const createPostFingerprintRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
+  // Idempotência de Upload (cache de fingerprint para retentativas de timeout/erro)
+  const pendingUploadOperationsRef = useRef<Map<string, { idempotencyKey: string; createdAt: number }>>(new Map());
+
+  // Limpa estados transitórios e chaves de idempotência ao fechar modal
+  useEffect(() => {
+    if (!open) {
+      pendingUploadOperationsRef.current.clear();
+      createPostFingerprintRef.current = null;
+    }
+  }, [open]);
+
   // Envio / Carregamento
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -255,9 +266,25 @@ export function CompositorZafiraModal({
           throw new Error('O formato selecionado requer uma imagem (.jpg, .png, .webp).');
         }
 
-        // Chave de idempotência estável para a operação de upload deste arquivo
-        const uploadKey = createIdempotencyKey();
+        // Chave de idempotência estável para a operação de upload deste arquivo (reutilizada em caso de retry)
+        const fileFingerprint = `${file.name}-${file.size}-${file.type}-${file.lastModified}-${format}`;
+        let uploadKey: string;
+        const existingOp = pendingUploadOperationsRef.current.get(fileFingerprint);
+
+        if (existingOp) {
+          uploadKey = existingOp.idempotencyKey;
+        } else {
+          uploadKey = createIdempotencyKey();
+          pendingUploadOperationsRef.current.set(fileFingerprint, {
+            idempotencyKey: uploadKey,
+            createdAt: Date.now(),
+          });
+        }
+
         const uploaded = await socialPublisherService.uploadMedia(file, uploadKey);
+
+        // Upload confirmado com sucesso: remove a pendência daquele fingerprint
+        pendingUploadOperationsRef.current.delete(fileFingerprint);
 
         const newItem: UploadedItem = {
           id: uploaded.id,
@@ -268,7 +295,11 @@ export function CompositorZafiraModal({
           idempotencyKey: uploadKey,
         };
 
+        // Proteção contra duplicação no state em retentativas
         setMediaItems((prev) => {
+          if (prev.some((m) => m.id === newItem.id)) {
+            return prev;
+          }
           if (format === 'CAROUSEL') {
             return [...prev, newItem];
           }
@@ -395,6 +426,7 @@ export function CompositorZafiraModal({
 
       // Limpa dados de idempotência e fecha modal
       createPostFingerprintRef.current = null;
+      pendingUploadOperationsRef.current.clear();
       setMediaItems([]);
       setCaption('');
       onSuccess(res);
