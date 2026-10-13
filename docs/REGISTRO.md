@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — Registro do aceite técnico da F8-3 (DEC-F8-008) e correção da P32 — Claude
+- AUTORIZAÇÃO: aceite técnico da F8-3 pela Direção (DEC-F8-008); somente documentação, com `[skip ci]`. Sem F8-4, F8-0b, VPS, produção ou workflows no privado.
+- EXECUTADO: F8-3 marcada como **concluída** no ESTADO, no Mapa e no contrato; evidências do CI e do Browser Gate F8 registradas na DEC. **P32 corrigida** no `MAPA_MESTRE.md` público (removido o trecho repetido "`(repositório interno)` (repositório interno)" da nota de abertura da parte C2; nenhuma regra alterada). Commit de documentação com `[skip ci]`.
+- DIVERGÊNCIA REGISTRADA: o aceite foi pedido como "DEC-F8-007", número já existente; registrado como DEC-F8-008 (ver nota na DEC).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633` no interno). Nenhum código alterado; nenhum run disparado.
+- PRÓXIMA MICROETAPA PREVISTA NO MAPA: **F8-0b — verificação ativa das capacidades do BrightBean** (`docs/propostas/F8-0_MATRIZ_CAPACIDADES_BRIGHTBEAN.md`, §5), pré-requisito obrigatório da F8-4. Exige instância de teste do BrightBean, credencial de escopo mínimo e **autorização expressa** (sem dados de cliente). **Não autorizada; não iniciada.**
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-0b, F8-4 e F8-5 sem DEC, BrightBean/S3 reais, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / contrato da F8-3 (interno e público).
+
+### DEC-F8-008 — Aceite técnico e conclusão da F8-3 (contador de Entregas por estágio) (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: revisão da entrega da F8-3 (DEC-F8-007).
+- Decisão: (1) **Aceite técnico da F8-3**, com evidências confirmadas pela Direção: commit `38ce219`; run 38446236135 (https://github.com/Julianogdc/zafira-hub/actions/runs/38446236135) com **CI oficial 5/5** — domínio 94/94, API 822/822, web 88/88, PostgreSQL 145/145 (inclui o teste da F8-3); **Browser Gate F8 PASS com 70 verificações e 0 falhas**, cenário L completo (contagem sem duplicidade por versão/reenvio/revogação, publicados `null`, meta e peças de Entregas intactas, tela igual à API, painel somente leitura, Org B recusada, 390 px em duas colunas sem rolagem); gates F4–F7 PASS; somente `ubuntu-latest`, 0 ms faturáveis. (2) **F8-3 concluída.** (3) Corrigir a P32 se ainda pendente. (4) Alterações documentais com `[skip ci]`. (5) **Não iniciar F8-4 nem F8-0b**; sem VPS/produção; sem workflows no privado; sem modificar regras de negócio aprovadas.
+- Nota de numeração: a mensagem da Direção pediu o registro como "DEC-F8-007", número já usado nesta mesma data pela aprovação do contrato e autorização da implementação da F8-3. Como o registro não reescreve entradas, o aceite recebeu o número seguinte, **DEC-F8-008**. Se a Direção preferir outra numeração, registra-se uma nova entrada.
+- Alternativas consideradas: —
+- Impacto: documentação (ESTADO_ATUAL, REGISTRO, MAPA_MESTRE e contrato da F8-3 nos dois repositórios; nota da parte C2 do Mapa público pela P32). Nenhum código.
+- Revisão: na autorização da próxima microetapa da F8.
+
 ### 2026-10-13 — F8-3: contador de Entregas por estágio implementado (DEC-F8-007) — Claude
 - AUTORIZAÇÃO: DEC-F8-007 — implementar a F8-3 conforme o contrato aprovado (D1 A, D2, D3). Sem F8-4/F8-0b, VPS, produção, workflows privados ou contratação de serviços.
 - CÓDIGO (público: `2673c2b` implementação; `b2b9760` e `38ce219` correções dos testes novos; espelho no interno `3bbe281`, `026a333` e `d1e0633`, conferido arquivo a arquivo):
