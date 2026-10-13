@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b: preparação da R1+ por análise de código (DEC-F8-014) — Claude
+- AUTORIZAÇÃO: DEC-F8-014 — somente leitura de código.
+- EXECUTADO: leitura do fork em `4e5bef9` (rotas de posts, serviços e modelo de composição, motor do publicador); nenhuma chamada à instância. Roteiro em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §10. Commit de documentação com `[skip ci]`.
+- CONCLUSÕES: agendar e reagendar exigem `create_posts` + **`publish_directly`**; cancelar exige só `create_posts`. Cancelar devolve `scheduled` → `draft`, apaga o horário e tira o post da fila; depois de `publishing` não há cancelamento. Sem validação de horário futuro (passado publica em ~15 s). Agendar/reagendar/cancelar sem chave de idempotência, idempotentes pelo estado (repetição → 409). Agendado conta no teto diário. Revogar/expirar a chave não cancela agendados. Fluxo de aprovação do workspace pode recusar o agendamento (422).
+- ROTEIRO PROPOSTO: chave `create_posts` + `publish_directly`; Stories D6 e D7 da R1; agendar a +7 d (em `-03:00`), cancelar, cancelar de novo (409), agendar +7 d → reagendar +8 d → cancelar; executor recusa horário < agora + 6 d e qualquer operação fora dessas rotas; inventário final de agendados = 0.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R1 **aceita**; R1+ **preparada, não autorizada**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial agendar/publicar, alterar credenciais, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-014 — Aceite técnico da R1 da F8-0b e preparação da R1+ (somente análise) (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: encerrar a R1 (DEC-F8-013) e preparar os testes de agendamento, reagendamento e cancelamento (T20–T23).
+- Decisão: (1) **Aceite técnico da R1.** (2) **Autorizada somente a análise técnica da R1+:** consultar o código do fork (`zafira-custom-v1`, `4e5bef9`); identificar permissões de agendar, reagendar e cancelar; confirmar a necessidade de `publish_directly`; analisar o cancelamento e os riscos de publicação acidental; verificar fuso e idempotência de agendamentos futuros; preparar o roteiro T20–T23 só na conta de testes; definir como confirmar o cancelamento; avaliar o reaproveitamento dos rascunhos e arquivos da R1. (3) Proibido: alterar permissões/credenciais, criar/agendar/reagendar/cancelar/publicar, VPS/produção, iniciar R1+ ou R2.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: na autorização da execução da R1+.
+
 ### 2026-10-13 — F8-0b Fase R1: uploads e rascunhos sem publicação (DEC-F8-013) — Claude
 - AUTORIZAÇÃO: DEC-F8-013.
 - PORTÃO: 3 leituras de `/me/` consistentes; permissões exatas (`create_posts`, `upload_media`, `view_analytics`), sem `publish_directly`; conta de teste conectada.

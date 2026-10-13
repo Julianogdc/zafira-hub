@@ -261,3 +261,55 @@ Todas as 17 mídias aceitas terminaram com `processing_status` = `completed` (o 
 4. Vídeo leva alguns segundos em `pending` antes de `completed`: aguardar o processamento antes de agendar.
 
 **Pendências para a R1+:** autorização específica; chave com `publish_directly` **somente** quando autorizada (agendar a +7 dias, reagendar e cancelar — T20 a T23); aguardar 30 s após alterar a chave; reaproveitar os rascunhos D1/D2 para os testes de agendamento e cancelamento.
+
+## 10. Preparação da R1+ (2026-10-13, DEC-F8-014) — análise de código, sem escrita
+
+Fonte: fork `zafira-custom-v1`, commit `4e5bef9` (`apps/api/routers/posts.py`, `apps/composer/services.py`, `apps/composer/models.py`, `apps/publisher/engine.py`). Nada foi chamado na instância.
+
+### 10.1 Permissões exigidas
+| Operação | Rota | Permissões | Observação |
+|---|---|---|---|
+| Agendar um rascunho (T20) | `POST /posts/{id}/schedule` com `scheduled_at` | **`create_posts` + `publish_directly`** | só leva `draft` → `scheduled`; sem rascunho → 409 |
+| Reagendar um agendado (T23) | `PATCH /posts/{id}` com `scheduled_at` | **`create_posts` + `publish_directly`** (exigida quando o post está agendado) | só altera filhos `scheduled`; rascunhos não são afetados |
+| Cancelar (T21/T22) | `POST /posts/{id}/cancel` | **somente `create_posts`** | `scheduled` → `draft`; sem agendado → 409 |
+| Criar já agendado | `POST /posts/` com `action=schedule` | `create_posts` + `publish_directly` | **não usar** na R1+ |
+
+**`publish_directly` é necessária para agendar e reagendar** e não é necessária para cancelar. Chave mínima da R1+: **`create_posts` + `publish_directly`** (sem `upload_media`; `view_analytics` opcional), mesma conta de teste na allowlist. **Bloqueio possível:** se o workspace tiver fluxo de aprovação ativo (`approval_workflow_mode`), o agendamento é recusado com 422 ("Workspace requires approval before scheduling") — resultado válido a registrar, sem contornar.
+
+### 10.2 Como o servidor publica e cancela
+- O publicador roda a cada **~15 s** e pega filhos com `status = scheduled` e horário efetivo (`scheduled_at` do filho ou, se vazio, do post) **≤ agora**; trava as linhas (`select_for_update`) e passa para `publishing`.
+- **Cancelar** faz `scheduled` → `draft`, **apaga `scheduled_at`** e remove a entrada da fila do calendário; o post deixa de ser candidato do publicador. Transições permitidas a partir de `scheduled`: só `publishing` ou `draft`. Depois de `publishing`, **não há cancelamento** (409 "No scheduled platform posts to cancel").
+- **Não há validação de horário futuro** em agendar nem em reagendar: horário passado ou muito próximo **publica no ciclo seguinte (~15 s)**.
+- Horários: campo em UTC; enviar sempre com fuso explícito (`Z` ou `-03:00`, já confirmado na R1 que o servidor converte para o mesmo instante).
+- **Idempotência:** agendar, reagendar e cancelar **não** usam `Idempotency-Key`; são idempotentes **pelo estado** (repetir agendar → 409; repetir cancelar → 409).
+- O agendamento conta no **teto diário da conta** (Instagram 25/24 h); rascunhos não contam.
+- **Revogar ou expirar a chave não cancela agendados**: o publicador não depende da chave. A validade atual (20/10/2026) cai antes de +7 dias.
+
+### 10.3 Riscos e proteções
+| Risco | Proteção no executor e no roteiro |
+|---|---|
+| Horário passado/próximo publica em ~15 s | o executor **recusa enviar** `scheduled_at` menor que agora + 6 dias; usa +7 d e +8 d |
+| Agendado esquecido publica na data | cancelar **na mesma execução**, logo após cada verificação; inventário final por `GET /posts/?status=scheduled`; se algo restar, parar e avisar a Direção para cancelar pela interface |
+| Corrida entre cancelar e o publicador | só ocorreria no minuto do horário; com +7 d não há janela |
+| Publicação acidental | usar **rascunhos de Story** (somem em 24 h) na conta própria de testes, já autorizada a receber publicações experimentais |
+| Operação fora do escopo | executor só permite `GET`, `POST /posts/{id}/schedule`, `PATCH` **apenas** com `scheduled_at` e `POST /posts/{id}/cancel`; nada de criar posts, upload ou `action=schedule` |
+| Permissão além do necessário | portão em `/me/` (3 leituras): exatamente as permissões autorizadas e 1 conta de teste; aguardar 30 s após alterar a chave |
+| Fluxo de aprovação do workspace | 422 é registrado e a fase para; não alterar configuração |
+
+### 10.4 Reaproveitamento da R1
+Sim. O agendamento usa o `post_id` de rascunhos existentes; as mídias já estão processadas (`completed`). Recomendado: **D6 (Story imagem)** para T20–T22 e **D7 (Story vídeo)** para T23. **Não usar** D4 (carrossel com 11 itens) nem D15 (legenda com 2201 caracteres), que são inválidos para publicação.
+
+### 10.5 Sequência recomendada (após autorização)
+1. Direção ajusta a chave para `create_posts` + `publish_directly` (mesma conta de teste); aguardar 30 s.
+2. Portão: 3× `GET /me/`; `GET /posts/?status=scheduled` deve começar com **0**.
+3. **T20:** agendar D6 para agora + 7 dias, enviado em `-03:00` → esperar 200, filho `scheduled`, horário devolvido em UTC no mesmo instante.
+4. **T21:** cancelar D6 → 200, filho `draft`, `scheduled_at` vazio no post e no filho.
+5. **T22:** cancelar D6 de novo → 409. Agendar D6 de novo não é necessário.
+6. **T23:** agendar D7 para +7 d → reagendar (`PATCH` só com `scheduled_at`) para +8 d → conferir o novo horário → cancelar → `draft`.
+7. Encerramento: `GET /posts/?status=scheduled` = **0**; releitura de D6 e D7 = `draft` sem horário; nova releitura após alguns minutos; registro das evidências.
+8. Recomendado em seguida: Direção retira `publish_directly` da chave.
+
+### 10.6 Como confirmar que o cancelamento valeu
+Resposta do cancelamento com filho `draft`; `GET /posts/{id}` com post e filhos em `draft` e `scheduled_at` nulo; `GET /posts/?social_account_id=<conta>&status=scheduled` com total 0; segundo cancelamento devolvendo 409 (não há mais agendado). Como o publicador só seleciona `scheduled`, um post em `draft` sem horário **não é publicado depois**.
+
+**Critérios de aceite da R1+:** T20–T23 com os resultados esperados (ou 422 de aprovação registrado); **nenhum post publicado nem em `publishing`**; zero agendados ao fim; evidências sem chave nem dados pessoais.
