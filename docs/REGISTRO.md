@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-3: revisão do domínio e contrato técnico (sem implementação) — Claude
+- AUTORIZAÇÃO: DEC-F8-006 — somente revisar o domínio e propor o contrato técnico; **não implementar**. Sem F8-4, VPS, produção ou workflows no privado.
+- EXECUTADO: leitura de `schema.prisma` (Content*, Approval*, Deliverable*), `content.service.ts`, `approval.service.ts`, `deliverables.service.ts/routes.ts`, escopo de cliente e papéis padrão. Contrato em `docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md`: unidade = `ContentItem`; estágios derivados na leitura (primeiro `ContentMedia` → `sentForApprovalAt` → `ApprovalDecision` APPROVED); contagem cumulativa e monotônica; reenvio/reemissão/nova versão sem duplicidade; **Publicados = `null` (NOT_INTEGRATED), nunca 0**, e barra em estado neutro; endpoint de leitura com `deliverables.view` + `content.view` + escopo de cliente; nenhuma escrita em Entregas; testes de aceite por camada e extensão do Browser Gate F8. Commit único no público com `[skip ci]`.
+- ACHADOS: L1 `ContentItem.deliverablePieceId` sem chave estrangeira nem unicidade; L2 `archivedAt` sem rota que o preencha; L3 a especificação §9 previa gravar os estágios no enum de `DeliverablePiece` — o contrato recomenda não gravar (D2).
+- DECISÕES PEDIDAS À DIREÇÃO: **D1** período do conteúdo (recomendado: competência do plano da peça vinculada; sem vínculo, mês do primeiro arquivo no fuso da organização); **D2** contagem derivada, sem gravar nas peças (substitui a §9); **D3** um conteúdo por peça (índice único parcial).
+- BASELINE DE CÓDIGO: inalterada — `2fd34dc` no público (espelho `b7de353` no interno). Nenhum código alterado; nenhum run disparado.
+- STATUS: contrato **em revisão pela Direção**. F8-3 **não implementada**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguarda DEC que aprove o contrato e D1–D3.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial código da F8-3 antes da DEC, F8-4/F8-5, F8-4 sem F8-0b, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md (interno e público).
+
+### DEC-F8-006 — Interface da F8-3 aprovada (contador de Entregas por estágio); contrato técnico antes do código (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: definir a F8-3 (próxima microetapa prevista no Mapa) depois do aceite da F8-2 (DEC-F8-005).
+- Decisão: (1) **Interface aprovada:** no painel de Entregas, quatro contadores — **Arquivos recebidos, Enviados para aprovação, Aprovados pelo cliente, Publicados** — e uma **barra complementar** com a proporção de publicadas entre recebidas. (2) **Regras:** contadores cumulativos por estágio alcançado, sem duplicidade por versão; uma peça = uma entrega, independentemente de versões ou reenvios; **meta contratual nunca alterada automaticamente**; contar a partir dos eventos reais da F8-1 e F8-2; **não presumir publicação** (Publicado exige confirmação confiável, integrada nas próximas etapas); preservar histórico de versões, decisões e pedidos de alteração; respeitar RBAC, organização e escopo de cliente; seguir o Design System e a responsividade existentes; sem fluxo editorial paralelo ao Asana. (3) **Tarefa autorizada:** revisar o domínio de Entregas e Conteúdos e apresentar um **contrato técnico** (`docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md`) para revisão. (4) **Não implementar ainda.** Sem F8-4, VPS, produção ou workflows no privado.
+- Alternativas consideradas: —
+- Impacto: documentação; o código da F8-3 depende de nova DEC aprovando o contrato e as decisões D1–D3.
+- Revisão: na aprovação do contrato da F8-3.
+
 ### 2026-10-13 — Registro do aceite técnico da F8-2 (DEC-F8-005) e correção da P31 — Claude
 - AUTORIZAÇÃO: DEC-F8-005 — registrar o aceite e o encerramento técnico da F8-2 e corrigir a P31; somente documentação, com `[skip ci]`. Sem F8-3, VPS ou produção.
 - EXECUTADO: ESTADO_ATUAL, REGISTRO e MAPA_MESTRE atualizados nos dois repositórios, respeitando o saneamento (o público continua sem informação sensível; nenhum arquivo copiado do interno para o público). `AGENTS.md` público: removida a segunda cópia, idêntica, da seção "8. Dois repositórios: público e interno" (texto e regras inalterados). Commit único no público com `[skip ci]`.
