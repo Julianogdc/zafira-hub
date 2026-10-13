@@ -70,6 +70,8 @@ Componente web puro: moldura de perfil + legenda truncada com "mais"; proporçõ
 
 ## 9. Entregas (contador por estágio)
 
+> **Atualização (DEC-F8-007, D2):** o texto abaixo foi **superado**. Os estágios são **derivados na leitura** dos registros reais de Conteúdos e Aprovações (primeiro arquivo, envio da versão, decisão APPROVED do cliente); **nada é gravado no enum de `DeliverablePiece`**, a meta contratual e as etapas manuais de Entregas (DEC-F6-002) não mudam, e "Publicados" fica indisponível até haver confirmação confiável (F8-4/F8-5). Uma peça por conteúdo (D3). Contrato: `docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md`.
+
 A peça de Entregas mostra o estágio de conteúdo: **arquivo recebido → enviado para aprovação → aprovado → publicado**, mapeado sobre o enum atual (`PRODUCED`, `APPROVED`, `DELIVERED`) com um novo marcador de "enviado para aprovação" **[a migrar com autorização]**. "Entregue" continua exigindo aprovado + publicado (DEC-F6-002). Versões repetidas não geram peça nova; excedente segue a regra de extra; **a meta contratual não muda automaticamente**.
 
 ## 10. BrightBean — capacidades (verificar antes do agendamento)

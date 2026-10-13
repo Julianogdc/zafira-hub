@@ -1,6 +1,6 @@
 # F8-3 — Contrato técnico: contador de Entregas por estágio
 
-> **Situação:** proposta para revisão da Direção (DEC-F8-006). **Não implementar** antes da aprovação deste contrato por nova DEC.
+> **Situação:** **aprovado pela Direção (DEC-F8-007)** com D1 = opção A, D2 e D3 aprovadas. Implementado no público em `38ce219` (run 38446236135); aceite técnico pendente.
 > Base: decisão de produto da Direção de 2026-10-13 (interface aprovada); código no público `2fd34dc`.
 
 ## 1. O que existe hoje (levantamento do domínio)
