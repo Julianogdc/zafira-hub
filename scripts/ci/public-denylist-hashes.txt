@@ -1,0 +1,14 @@
+# Lista de negacao do repositorio publico: SOMENTE HASHES SHA-256 (nenhum valor).
+# Gerada a partir do repositorio interno; scripts/ci/public-guard.mjs compara tokens da arvore com estes hashes.
+# Prefixos hasheados: host:, word:, ip:, cred:. Um hash por linha; o texto apos # indica o tipo.
+350403e2c1f4d277383616cdd0ed267592194dadd75b93c25c4d3e26a183c307  # sufixo
+3a045c26b4b2199657b3a5b669520eec36f9c8a4026c49c20d95076f014d714c  # sufixo
+3ebab6a974dd34e24e5831f62dc5ba16e1d23f32d20f9c19e9ad00e04dd042a7  # ip
+43fdbfc5bc41331eab4dc20f84fd54b45285bf119e6719e7992e58b545123faa  # sufixo
+5fb0cf9ca5f5dc778123d45096a5951b442a800e5493f9183130241d7585f2d8  # rotulo
+61c58f382b2e8dd7cfcfcc007d8be489ae4b0df84fc02f1cfbb38bcbb9aff96f  # sufixo
+62d624f67bfc5a6330a227eae026366fd02a28a634f1346f0a10b42137e1de1a  # sufixo
+84870e4f5caeb0057840107646509abcd222ffa3d4c695929a384c489409a9e1  # sufixo
+96f348908b52870b96f28eb63dd2648c65acd923c8e5b4272504dc3957b8aa7a  # sufixo
+978da802548f63abfb45a06cf8caaa7f74ca313ab6ca8db7b140abc843ed5e86  # rotulo
+d22aa996566c397721e090c11209eed57c669ce237bd7952ae6fa842b5eb2381  # sufixo

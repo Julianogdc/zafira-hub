@@ -1,0 +1,39 @@
+{
+  "name": "zafira-hub",
+  "version": "2.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=@zafira/web",
+    "dev:api": "npm run dev --workspace=@zafira/api",
+    "build:contracts": "npm run build --workspace=@zafira/contracts",
+    "build:domain": "npm run build --workspace=@zafira/domain",
+    "build:internal": "npm run build:contracts && npm run build:domain",
+    "build:web": "npm run build --workspace=@zafira/web",
+    "build:api": "npm run build:internal && npm run build --workspace=@zafira/api",
+    "build": "npm run build:internal && npm run build:web && npm run build --workspace=@zafira/api",
+    "test": "npm run test --workspace=@zafira/api",
+    "test:web": "npm run test --workspace=@zafira/web",
+    "lint": "npm run lint --workspace=@zafira/web",
+    "lint:f6": "npm run lint:f6 --workspace=@zafira/web",
+    "typecheck:contracts": "npm run typecheck --workspace=@zafira/contracts",
+    "typecheck:domain": "npm run typecheck --workspace=@zafira/domain",
+    "typecheck:api": "npm run typecheck --workspace=@zafira/api",
+    "typecheck:web": "npm run typecheck --workspace=@zafira/web",
+    "test:domain": "npm run test --workspace=@zafira/domain",
+    "prisma:generate": "npm run prisma:generate --workspace=@zafira/api",
+    "test:integration:db": "npm run test:integration:db --workspace=@zafira/api",
+    "prisma:migrate:deploy": "npm run prisma:migrate:deploy --workspace=@zafira/api",
+    "prisma:migrate:status": "npm run prisma:migrate:status --workspace=@zafira/api",
+    "guard:public": "node scripts/ci/public-guard.mjs repo",
+    "ci:prepare-rbac-organizations": "npm run ci:prepare-rbac-organizations --workspace=@zafira/api"
+  },
+  "packageManager": "npm@11.6.2",
+  "engines": {
+    "node": "^24.12.0",
+    "npm": "^11.6.2"
+  }
+}

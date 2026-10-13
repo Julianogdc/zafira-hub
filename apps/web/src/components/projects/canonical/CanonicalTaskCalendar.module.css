@@ -1,0 +1,333 @@
+.calendarContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background-color: #0d0d12;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+}
+
+.calendarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.titleArea {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.monthTitle {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+.monthBadge {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.15rem 0.6rem;
+  border-radius: 9999px;
+}
+
+.navControls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cbd5e1;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.navBtn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.todayBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  height: 2rem;
+  padding: 0 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 0.375rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.todayBtn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+/* Grid do Calendário */
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  background-color: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.weekdayHeader {
+  background-color: #111116;
+  padding: 0.5rem 0.25rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+}
+
+.dayCell {
+  background-color: #0e0e13;
+  min-height: 110px;
+  padding: 0.35rem 0.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  transition: background-color 0.15s ease;
+}
+
+.dayCell:hover {
+  background-color: #13131a;
+}
+
+.dayCellOtherMonth {
+  background-color: rgba(14, 14, 19, 0.4);
+  opacity: 0.45;
+}
+
+.dayCellToday {
+  background-color: rgba(99, 102, 241, 0.04);
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, 0.3);
+}
+
+.dayCellHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.15rem;
+}
+
+.dayNumber {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #cbd5e1;
+  width: 1.35rem;
+  height: 1.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+}
+
+.dayNumberToday {
+  background-color: #6366f1;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.dayTaskCount {
+  font-size: 0.65rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+.tasksList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+}
+
+.taskItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: 0.25rem;
+  font-size: 0.7rem;
+  line-height: 1.2;
+  cursor: pointer;
+  background-color: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #e2e8f0;
+  text-align: left;
+  width: 100%;
+  transition: all 0.12s ease;
+  user-select: none;
+}
+
+.taskItem:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-1px);
+}
+
+.taskItemOverdue {
+  background-color: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+  color: #fca5a5;
+}
+
+.taskItemOverdue:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.taskItemDone {
+  background-color: rgba(16, 185, 129, 0.05);
+  border-color: rgba(16, 185, 129, 0.2);
+  color: #86efac;
+  opacity: 0.8;
+}
+
+.taskItemDone:hover {
+  background-color: rgba(16, 185, 129, 0.1);
+  opacity: 1;
+}
+
+.taskContent {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  overflow: hidden;
+  flex: 1;
+}
+
+.taskTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 450;
+}
+
+.taskTitleDone {
+  text-decoration: line-through;
+  color: #94a3b8;
+}
+
+.taskLink {
+  color: #94a3b8;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem;
+  border-radius: 0.2rem;
+  transition: color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.taskLink:hover {
+  color: #ffffff;
+}
+
+.moreTasksBadge {
+  font-size: 0.65rem;
+  color: #94a3b8;
+  background-color: rgba(255, 255, 255, 0.04);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+  text-align: center;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+/* Painel de tarefas sem prazo */
+.noDueDateSection {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+}
+
+.noDueDateHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.noDueDateTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.noDueDateCount {
+  background-color: rgba(255, 255, 255, 0.06);
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.noDueDateGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.noDueDateCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.6rem;
+  background-color: #111116;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.noDueDateCard:hover {
+  background-color: #16161d;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.calendarNote {
+  font-size: 0.75rem;
+  color: #64748b;
+  text-align: center;
+  margin: 0.25rem 0 0 0;
+}

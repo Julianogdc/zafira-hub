@@ -1,0 +1,455 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — LISTA CANÔNICA DE TAREFAS ASANA (F6-IMP.3)
+   CSS Module canônico e responsivo consumindo exclusivamente tokens --z-*
+   ========================================================================== */
+
+.taskListContainer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-4, 16px);
+  width: 100%;
+  background-color: var(--z-surface-card, #111116);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-lg, 12px);
+  padding: var(--z-space-5, 20px);
+}
+
+/* --------------------------------------------------------------------------
+   Cabeçalho da Seção de Tarefas
+   -------------------------------------------------------------------------- */
+.taskListHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-3, 12px);
+}
+
+@media (min-width: 640px) {
+  .taskListHeader {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.titleArea {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3, 12px);
+}
+
+.sectionTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--z-text-primary, #ffffff);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-2, 8px);
+}
+
+.taskCountBadge {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background-color: rgba(255, 255, 255, 0.08);
+  color: var(--z-text-secondary, #cbd5e1);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* --------------------------------------------------------------------------
+   Barra de Filtros e Busca
+   -------------------------------------------------------------------------- */
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-3, 12px);
+  padding: var(--z-space-3, 12px);
+  background-color: var(--z-surface-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--z-radius-md, 8px);
+}
+
+.filtersRow {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--z-space-3, 12px);
+}
+
+/* A busca ocupa a linha inteira; os cinco seletores dividem a linha seguinte. */
+.filtersRow > :first-child {
+  grid-column: 1 / -1;
+}
+
+@media (min-width: 640px) {
+  .filtersRow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1024px) {
+  .filtersRow {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    align-items: center;
+  }
+}
+
+.searchBox {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 10px;
+  color: var(--z-text-muted, #94a3b8);
+  pointer-events: none;
+}
+
+.searchInput {
+  width: 100%;
+  padding-left: 32px;
+  padding-right: 28px;
+  height: 36px;
+  font-size: 13px;
+  background-color: #0d0d12;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #ffffff;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.searchInput:focus {
+  border-color: rgba(99, 102, 241, 0.5);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.5);
+}
+
+.clearSearchBtn {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--z-text-muted, #94a3b8);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clearSearchBtn:hover {
+  color: #ffffff;
+}
+
+.filterSummary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  font-size: 12px;
+  color: var(--z-text-muted, #94a3b8);
+  padding: 0 4px;
+}
+
+.resetFiltersBtn {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: #818cf8;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  transition: color 0.15s ease;
+}
+
+.resetFiltersBtn:hover {
+  color: #a5b4fc;
+}
+
+/* --------------------------------------------------------------------------
+   Tabela Canônica de Tarefas
+   -------------------------------------------------------------------------- */
+.tableWrapper {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-md, 8px);
+  background-color: #0d0d12;
+}
+
+.tasksTable {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
+}
+
+.tableHead {
+  background-color: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.tableHeadTh {
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--z-text-muted, #94a3b8);
+  white-space: nowrap;
+}
+
+.tableRow {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background-color 0.15s ease;
+  cursor: pointer;
+}
+
+.tableRow:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.tableRow:last-child {
+  border-bottom: none;
+}
+
+.tableTd {
+  padding: 12px 14px;
+  vertical-align: middle;
+  color: var(--z-text-secondary, #cbd5e1);
+}
+
+/* Célula do Título */
+.taskNameCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.taskNameText {
+  font-weight: 500;
+  color: var(--z-text-primary, #ffffff);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.taskCompletedText {
+  text-decoration: line-through;
+  color: var(--z-text-muted, #64748b);
+}
+
+/* Badges e Status */
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.statusCompleted {
+  background-color: rgba(16, 185, 129, 0.12);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.statusOverdue {
+  background-color: rgba(239, 68, 68, 0.12);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.statusPending {
+  background-color: rgba(99, 102, 241, 0.12);
+  color: #a5b4fc;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+}
+
+/* Projeto e Seção */
+.projectBadge {
+  display: inline-block;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--z-text-secondary, #cbd5e1);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sectionText {
+  font-size: 11px;
+  color: var(--z-text-muted, #94a3b8);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Responsável */
+.assigneeCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 130px;
+}
+
+.assigneeAvatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--z-text-secondary, #cbd5e1);
+}
+
+.assigneePhoto {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.assigneeName {
+  font-size: 12px;
+  color: var(--z-text-secondary, #cbd5e1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unassignedText {
+  font-size: 12px;
+  color: var(--z-text-muted, #64748b);
+  font-style: italic;
+}
+
+/* Prazo */
+.dueDateCell {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.dueDateOverdue {
+  color: var(--z-status-danger, #f87171);
+  font-weight: 600;
+}
+
+.dueDateNormal {
+  color: var(--z-text-secondary, #cbd5e1);
+}
+
+/* Ação de detalhes */
+.detailsBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #818cf8;
+  background-color: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  cursor: pointer;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.detailsBtn:hover {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #ffffff;
+}
+
+/* Alternador Lista | Quadro (F6-IMP.4) */
+.viewBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.viewToggle {
+  display: inline-flex;
+  /* F6-IMP.9: em telas estreitas (390 px) os 4 botões quebram linha em vez de sumir da tela */
+  flex-wrap: wrap;
+  max-width: 100%;
+  padding: 2px;
+  background-color: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.viewToggleBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--z-text-muted, #94a3b8);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.viewToggleBtn:hover {
+  color: #ffffff;
+}
+
+.viewToggleBtnActive {
+  color: #ffffff;
+  background-color: rgba(99, 102, 241, 0.25);
+}
+
+.groupByArea {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.groupByLabel {
+  font-size: 12px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+.boardNote {
+  margin: 0;
+  font-size: 11px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+/* Estado de busca sem resultados */
+.noFilterResults {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--z-text-muted, #94a3b8);
+  font-size: 13px;
+}

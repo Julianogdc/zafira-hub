@@ -1,0 +1,1318 @@
+name: Hub 2.1 Foundation CI
+
+on:
+  push:
+    branches:
+      - hub-2.1
+  pull_request:
+    branches:
+      - hub-2.1
+  workflow_dispatch:
+
+jobs:
+  quality:
+    name: Code Quality and Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Secret Scan (Repository)
+        run: bash scripts/ci/secret-scan.sh repo
+
+      - name: Public Guard (informacao operacional)
+        run: node scripts/ci/public-guard.mjs repo
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+
+      - name: Ensure npm version
+        run: npm install -g npm@11.6.2
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Typecheck Contracts
+        run: npm run typecheck:contracts
+
+      # O domínio importa tipos de @zafira/contracts: compilar contracts antes
+      - name: Build Contracts
+        run: npm run build:contracts
+
+      - name: Typecheck Domain
+        run: npm run typecheck:domain
+
+      - name: Build Internal Packages
+        run: npm run build:internal
+
+      - name: Typecheck API
+        run: npm run typecheck:api
+
+      - name: Typecheck Web
+        run: npm run typecheck:web
+
+      # F6-IMP.9 / P13: lint bloqueante do código da F6 (o lint completo do web ainda tem erros legados)
+      - name: Lint F6 Web
+        run: npm run lint:f6
+
+      # F6-IMP.9 / P13: relatório (não bloqueante) das vulnerabilidades de produção; aviso acima da linha de base (P27)
+      - name: Dependency Audit Report (production)
+        run: node scripts/ci/npm-audit-report.mjs
+
+      - name: Upload Dependency Audit Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ github.sha }}
+          path: artifacts/npm-audit/
+          retention-days: 14
+
+      - name: Build Web
+        run: npm run build:web
+
+      - name: Build API
+        run: npm run build:api
+
+      - name: Test Domain
+        run: npm run test:domain
+
+      - name: Unit Tests
+        run: npm test
+
+      - name: Unit Tests (Web)
+        run: npm run test:web
+
+  postgres-integration:
+    name: PostgreSQL Integration Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: zafira_hub_ci
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/zafira_hub_ci?schema=public
+      NODE_ENV: test
+      ZAFIRA_TEST_DATABASE: 1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
+
+      - name: Ensure npm version
+        run: npm install -g npm@11.6.2
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Prisma Client
+        run: npm run prisma:generate
+
+      - name: Build Internal Packages
+        run: npm run build:internal
+
+      - name: Apply Migrations
+        run: npm run prisma:migrate:deploy
+
+      - name: Status Migrations
+        run: npm run prisma:migrate:status
+
+      - name: Prepare CI Organizations
+        run: npm run ci:prepare-rbac-organizations
+
+      - name: First RBAC Bootstrap
+        run: npm run rbac:bootstrap --workspace=@zafira/api
+
+      - name: Second RBAC Bootstrap (Idempotency)
+        run: npm run rbac:bootstrap --workspace=@zafira/api
+
+      - name: Database Integration Tests
+        run: npm run test:integration:db
+
+  docker-build:
+    name: Docker Build Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API Docker Image
+        run: |
+          docker build \
+            -f apps/api/Dockerfile \
+            -t zafira-hub-api:ci-test \
+            .
+
+      - name: Build Web Docker Image
+        run: |
+          docker build \
+            -f apps/web/Dockerfile \
+            -t zafira-hub-web:ci-test \
+            .
+
+      - name: Bundle Safety Scan
+        run: |
+          echo "Inspecionando bundle estático gerado dentro da imagem Web..."
+          docker create --name web-extract zafira-hub-web:ci-test
+          mkdir -p /tmp/web-dist
+          docker cp web-extract:/usr/share/nginx/html/. /tmp/web-dist/
+          docker rm web-extract
+
+          if grep -rniE "easypanel\.host" /tmp/web-dist; then
+            echo "FALHA: Domínio legado hardcoded encontrado no bundle compilado!"
+            exit 1
+          fi
+          echo "Bundle Safety Scan: PASS (zero referências a domínios legados)"
+
+          echo "Varredura de credenciais no bundle público..."
+          bash scripts/ci/secret-scan.sh dir /tmp/web-dist
+
+      - name: API Image Secret Files Scan
+        run: |
+          echo "Verificando se arquivos de ambiente entraram na imagem da API..."
+          found=$(docker run --rm --entrypoint sh zafira-hub-api:ci-test -c 'find /app \( -name ".env" -o -name ".env.*" -o -name "*.local" \) -not -name "*.example" -not -path "*/node_modules/*" 2>/dev/null' || true)
+          if [ -n "$found" ]; then
+            echo "FALHA: arquivos de ambiente encontrados dentro da imagem da API:"
+            echo "$found"
+            exit 1
+          fi
+          echo "API Image Secret Files Scan: PASS (nenhum arquivo .env na imagem)"
+
+      - name: Create Smoke Network & Launch API Container
+        run: |
+          docker network create zafira-hub-smoke
+          docker run -d \
+            --name api \
+            --network zafira-hub-smoke \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
+            -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
+            zafira-hub-api:ci-test
+
+      - name: Verify API Container Smoke & Health
+        run: |
+          echo "Aguardando container API atingir status healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API container is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          FINAL_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api)
+          if [ "$FINAL_STATUS" != "healthy" ]; then
+            echo "FALHA: API container não atingiu status healthy ($FINAL_STATUS)"
+            docker logs api
+            exit 1
+          fi
+
+          echo "Executando requisição direta GET /health na API..."
+          docker exec api node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log(data); if (data.status !== 'ok') process.exit(1); })"
+          echo "API Smoke: PASS"
+
+      - name: Launch Web Container
+        run: |
+          docker run -d \
+            --name web \
+            --network zafira-hub-smoke \
+            -p 8080:80 \
+            -e API_UPSTREAM="http://api:3001" \
+            zafira-hub-web:ci-test
+
+      - name: Verify Web Container Smoke & Nginx Render
+        run: |
+          echo "Aguardando container Web atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Web container is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          FINAL_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web)
+          if [ "$FINAL_STATUS" != "healthy" ]; then
+            echo "FALHA: Web container não atingiu status healthy ($FINAL_STATUS)"
+            docker logs web
+            exit 1
+          fi
+
+          echo "Validando configuração Nginx renderizada (nginx -T)..."
+          NGINX_CONF=$(docker exec web nginx -T)
+          echo "$NGINX_CONF" | grep -q "proxy_pass http://api:3001/;" || {
+            echo "FALHA: API_UPSTREAM não foi renderizado corretamente na configuração do Nginx!"
+            echo "$NGINX_CONF"
+            exit 1
+          }
+
+          echo "$NGINX_CONF" | grep -q "try_files \$uri \$uri/ /index.html;" || {
+            echo "FALHA: Variável \$uri foi corrompida pelo envsubst!"
+            echo "$NGINX_CONF"
+            exit 1
+          }
+
+          echo "Nginx Template Render: PASS"
+
+      - name: Verify Reverse Proxy Smoke
+        run: |
+          echo "Testando endpoint raiz do Web (GET /)..."
+          curl -fsS http://127.0.0.1:8080/ > /dev/null
+          echo "Web Root GET /: PASS"
+
+          echo "Testando reverse proxy Web -> API (GET /hub-api/health)..."
+          RESP=$(curl -fsS http://127.0.0.1:8080/hub-api/health)
+          echo "Resposta recebida via proxy: $RESP"
+          echo "$RESP" | grep -q '"status":"ok"' || echo "$RESP" | grep -q '"status": "ok"' || {
+            echo "FALHA: Resposta inesperada de /hub-api/health"
+            exit 1
+          }
+          echo "Reverse Proxy Smoke (/hub-api/health): PASS"
+
+      - name: Cleanup Smoke Containers
+        if: always()
+        run: |
+          echo "Limpando containers e rede de smoke..."
+          docker rm -f api web || true
+          docker network rm zafira-hub-smoke || true
+          echo "Cleanup concluído."
+
+  publish-images:
+    name: Publish Images
+    runs-on: ubuntu-latest
+    needs: [quality, postgres-integration, docker-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/hub-2.1'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api_digest: ${{ steps.build-api.outputs.digest }}
+      web_digest: ${{ steps.build-web.outputs.digest }}
+      api_ref: ghcr.io/julianogdc/zafira-hub-api@${{ steps.build-api.outputs.digest }}
+      web_ref: ghcr.io/julianogdc/zafira-hub-web@${{ steps.build-web.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Define Image Tags
+        id: tags
+        run: |
+          TAG="git-${{ github.sha }}-run-${{ github.run_id }}"
+          echo "image_tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "API Image: ghcr.io/julianogdc/zafira-hub-api:$TAG"
+          echo "Web Image: ghcr.io/julianogdc/zafira-hub-web:$TAG"
+
+      - name: Build and Push API Image
+        id: build-api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ghcr.io/julianogdc/zafira-hub-api:${{ steps.tags.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and Push Web Image
+        id: build-web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ghcr.io/julianogdc/zafira-hub-web:${{ steps.tags.outputs.image_tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Generate Deployment Manifest
+        id: manifest
+        run: |
+          API_DIGEST="${{ steps.build-api.outputs.digest }}"
+          WEB_DIGEST="${{ steps.build-web.outputs.digest }}"
+          TAG="${{ steps.tags.outputs.image_tag }}"
+
+          API_IMMUTABLE_REF="ghcr.io/julianogdc/zafira-hub-api@${API_DIGEST}"
+          WEB_IMMUTABLE_REF="ghcr.io/julianogdc/zafira-hub-web@${WEB_DIGEST}"
+
+          cat <<EOF > deployment-manifest.json
+          {
+            "gitSha": "${{ github.sha }}",
+            "workflowRunId": "${{ github.run_id }}",
+            "publishedAt": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')",
+            "api": {
+              "image": "ghcr.io/julianogdc/zafira-hub-api",
+              "tag": "${TAG}",
+              "digest": "${API_DIGEST}",
+              "immutableRef": "${API_IMMUTABLE_REF}"
+            },
+            "web": {
+              "image": "ghcr.io/julianogdc/zafira-hub-web",
+              "tag": "${TAG}",
+              "digest": "${WEB_DIGEST}",
+              "immutableRef": "${WEB_IMMUTABLE_REF}"
+            }
+          }
+          EOF
+
+          echo "Deployment Manifest Gerado:"
+          cat deployment-manifest.json
+
+          echo "### 🚀 Zafira Hub 2.1 — Immutable Artifacts" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Git Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Workflow Run:** \`${{ github.run_id }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | Tag | Immutable Reference |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| :--- | :--- | :--- |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **API** | \`${TAG}\` | \`${API_IMMUTABLE_REF}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Web** | \`${TAG}\` | \`${WEB_IMMUTABLE_REF}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Deployment Manifest Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zafira-hub-deployment-manifest-${{ github.sha }}
+          path: deployment-manifest.json
+          retention-days: 90
+
+      - name: Verify Published Images via Digest Pull & Smoke Test
+        run: |
+          API_DIGEST="${{ steps.build-api.outputs.digest }}"
+          WEB_DIGEST="${{ steps.build-web.outputs.digest }}"
+          API_REF="ghcr.io/julianogdc/zafira-hub-api@${API_DIGEST}"
+          WEB_REF="ghcr.io/julianogdc/zafira-hub-web@${WEB_DIGEST}"
+
+          echo "1. Efetuando pull das imagens publicadas por digest sha256..."
+          docker pull "${API_REF}"
+          docker pull "${WEB_REF}"
+
+          echo "2. Validando OCI revision das imagens publicadas..."
+          API_REV=$(docker inspect "${API_REF}" | grep '"org.opencontainers.image.revision"' | head -n 1)
+          WEB_REV=$(docker inspect "${WEB_REF}" | grep '"org.opencontainers.image.revision"' | head -n 1)
+          echo "API OCI Revision: $API_REV"
+          echo "Web OCI Revision: $WEB_REV"
+
+          echo "$API_REV" | grep -q "${{ github.sha }}" || {
+            echo "FALHA: Revision da API não corresponde ao Git SHA!"
+            exit 1
+          }
+          echo "$WEB_REV" | grep -q "${{ github.sha }}" || {
+            echo "FALHA: Revision do Web não corresponde ao Git SHA!"
+            exit 1
+          }
+
+          echo "3. Criando rede temporária de smoke para imagens publicadas..."
+          docker network create zafira-hub-registry-smoke
+
+          echo "4. Iniciando container API a partir do digest publicado..."
+          docker run -d \
+            --name api-published \
+            --network zafira-hub-registry-smoke \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="smoke-test-dummy-cookie-secret-32-chars-long" \
+            -e JWT_SECRET="smoke-test-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="smoke-test-dummy-internal-api-key-12345" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e DATABASE_URL="postgresql://smoke:smoke@localhost:5432/smoke?schema=public" \
+            "${API_REF}"
+
+          echo "5. Aguardando container API publicado atingir status healthy..."
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-published 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "API container publicado is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          API_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-published)
+          if [ "$API_STATUS" != "healthy" ]; then
+            echo "FALHA: Container API publicado não atingiu status healthy ($API_STATUS)"
+            docker logs api-published
+            exit 1
+          fi
+
+          echo "6. Testando endpoint GET /health na API publicada..."
+          docker exec api-published node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log(data); if (data.status !== 'ok') process.exit(1); })"
+          echo "API Published GET /health: PASS"
+
+          echo "7. Iniciando container Web a partir do digest publicado..."
+          docker run -d \
+            --name web-published \
+            --network zafira-hub-registry-smoke \
+            -p 8081:80 \
+            -e API_UPSTREAM="http://api-published:3001" \
+            "${WEB_REF}"
+
+          echo "8. Aguardando container Web publicado atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-published 2>/dev/null || echo "starting")
+            echo "Tentativa $i: status=$STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "Web container publicado is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          WEB_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-published)
+          if [ "$WEB_STATUS" != "healthy" ]; then
+            echo "FALHA: Container Web publicado não atingiu status healthy ($WEB_STATUS)"
+            docker logs web-published
+            exit 1
+          fi
+
+          echo "9. Testando endpoint raiz do Web publicado (GET /)..."
+          curl -fsS http://127.0.0.1:8081/ > /dev/null
+          echo "Web Published Root GET /: PASS"
+
+          echo "10. Testando reverse proxy Web -> API via imagens publicadas (GET /hub-api/health)..."
+          PUB_RESP=$(curl -fsS http://127.0.0.1:8081/hub-api/health)
+          echo "Resposta recebida da imagem publicada via proxy: $PUB_RESP"
+          echo "$PUB_RESP" | grep -q '"status":"ok"' || echo "$PUB_RESP" | grep -q '"status": "ok"' || {
+            echo "FALHA: Resposta inesperada de /hub-api/health da imagem publicada!"
+            exit 1
+          }
+          echo "Reverse Proxy Published Smoke (/hub-api/health): PASS"
+
+      - name: Cleanup Registry Smoke Containers
+        if: always()
+        run: |
+          echo "Limpando containers e rede de smoke de registry..."
+          docker rm -f api-published web-published || true
+          docker network rm zafira-hub-registry-smoke || true
+          echo "Cleanup de registry smoke concluído."
+
+  homologation-rehearsal:
+    name: Homologation Rehearsal
+    runs-on: ubuntu-latest
+    needs: [publish-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/hub-2.1'
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR (read-only)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Published Image References
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          WEB_REF="${{ needs.publish-images.outputs.web_ref }}"
+          echo "API Published Ref: $API_REF"
+          echo "Web Published Ref: $WEB_REF"
+
+          export API_IMAGE_REF="$API_REF"
+          export WEB_IMAGE_REF="$WEB_REF"
+          bash scripts/homologation/validate-immutable-images.sh
+
+      - name: Setup CI Staging Network and PostgreSQL
+        run: |
+          echo "Criando rede Docker dedicada para homologação CI..."
+          docker network create zafira-hub-hml-ci
+
+          echo "Baixando imagem do PostgreSQL (com novas tentativas se o registro limitar requisições)..."
+          for i in 1 2 3 4 5; do
+            docker pull public.ecr.aws/docker/library/postgres:16 && break
+            if [ "$i" = "5" ]; then
+              echo "FALHA: não foi possível baixar public.ecr.aws/docker/library/postgres:16 após 5 tentativas"
+              exit 1
+            fi
+            echo "Tentativa $i falhou; aguardando $((i * 20))s..."
+            sleep $((i * 20))
+          done
+
+          echo "Iniciando container PostgreSQL dedicado para homologação (zafira_hub_21_staging)..."
+          docker run -d \
+            --name postgres-hml \
+            --network zafira-hub-hml-ci \
+            -e POSTGRES_USER=postgres_hml \
+            -e POSTGRES_PASSWORD=hml_staging_dummy_pass_123 \
+            -e POSTGRES_DB=zafira_hub_21_staging \
+            public.ecr.aws/docker/library/postgres:16
+
+          echo "Aguardando PostgreSQL ficar pronto (pg_isready)..."
+          for i in $(seq 1 30); do
+            if docker exec postgres-hml pg_isready -U postgres_hml -d zafira_hub_21_staging >/dev/null 2>&1; then
+              echo "PostgreSQL Staging está pronto!"
+              break
+            fi
+            echo "Aguardando PostgreSQL... ($i/30)"
+            sleep 1
+          done
+
+          docker exec postgres-hml pg_isready -U postgres_hml -d zafira_hub_21_staging || {
+            echo "FALHA: PostgreSQL staging não respondeu ao pg_isready"
+            docker logs postgres-hml
+            exit 1
+          }
+
+      - name: Validate Database Target Safety
+        run: |
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+          export DATABASE_URL
+          bash scripts/homologation/validate-database-target.sh
+
+      - name: Run Staging Migrations using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando 'prisma migrate deploy' via imagem publicada no GHCR..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run prisma:migrate:deploy --workspace=@zafira/api
+
+          echo "Executando 'prisma migrate status' via imagem publicada..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run prisma:migrate:status --workspace=@zafira/api
+
+      - name: Verify Applied Migrations Count
+        run: |
+          echo "Verificando contagem dinâmica de migrations no repositório..."
+          EXPECTED_COUNT=$(ls -1d apps/api/prisma/migrations/*/ 2>/dev/null | wc -l | tr -d ' ')
+          echo "Total de migrations no repositório: ${EXPECTED_COUNT}"
+
+          echo "Verificando contagem de migrations aplicadas no PostgreSQL..."
+          MIGRATION_COUNT=$(docker exec postgres-hml psql -U postgres_hml -d zafira_hub_21_staging -t -A -c "SELECT count(*) FROM _prisma_migrations WHERE rolled_back_at IS NULL AND finished_at IS NOT NULL;")
+          echo "Total de migrations aplicadas no banco: ${MIGRATION_COUNT}"
+
+          if [ "${MIGRATION_COUNT}" -ne "${EXPECTED_COUNT}" ]; then
+            echo "FALHA: Esperado ${EXPECTED_COUNT} migrations, encontrado ${MIGRATION_COUNT}!"
+            docker exec postgres-hml psql -U postgres_hml -d zafira_hub_21_staging -c "SELECT migration_name, finished_at FROM _prisma_migrations;"
+            exit 1
+          fi
+          echo "Contagem dinâmica de migrations = ${MIGRATION_COUNT} (PASS)"
+
+      - name: Generate Ephemeral Multi-Org Gate Credentials
+        run: |
+          GATE_PASS_A="$(openssl rand -hex 24)"
+          GATE_PASS_B="$(openssl rand -hex 24)"
+          echo "::add-mask::${GATE_PASS_A}"
+          echo "::add-mask::${GATE_PASS_B}"
+          echo "GATE_PASSWORD_A=${GATE_PASS_A}" >> "$GITHUB_ENV"
+          echo "GATE_PASSWORD_B=${GATE_PASS_B}" >> "$GITHUB_ENV"
+          echo "Ephemeral Multi-Org Gate Credentials Generated and Masked: PASS"
+
+      - name: Verify Multi-Org Gate Secret Hygiene
+        run: |
+          python3 - << 'PYEOF'
+          import re, sys, pathlib
+
+          lit_patt = r'GATE_PASSWORD_[AB]' + r'\s*=\s*["\x27](?!\$\{)[^"\x27]+["\x27]'
+          LITERAL_RE = re.compile(lit_patt)
+
+          legacy_token = ''.join(['Gate', 'Pass', 'Secret'])
+          LEGACY_RE = re.compile(re.escape(legacy_token), re.IGNORECASE)
+
+          scan_paths = [
+              pathlib.Path('.github/workflows/foundation-ci.yml'),
+              *pathlib.Path('scripts/homologation').glob('**/*'),
+          ]
+
+          violations = []
+          for p in scan_paths:
+              if not p.is_file():
+                  continue
+              try:
+                  text = p.read_text(encoding='utf-8', errors='replace')
+              except Exception:
+                  continue
+              for i, line in enumerate(text.splitlines(), 1):
+                  if LITERAL_RE.search(line):
+                      violations.append(f'{p}:{i} -- hardcoded GATE_PASSWORD detected')
+                  if LEGACY_RE.search(line):
+                      violations.append(f'{p}:{i} -- legacy forbidden credential pattern detected')
+
+          if violations:
+              print('[-] SECRET HYGIENE SCAN FAILED:', file=sys.stderr)
+              for v in violations:
+                  print(f'  {v}', file=sys.stderr)
+              sys.exit(1)
+
+          print('CI_GATE_PASSWORD_LITERAL_SCAN=PASS')
+          PYEOF
+
+      - name: Seed Multi-Org Fixture using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando seed de fixture multi-organização via imagem publicada..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            -e GATE_PASSWORD_A \
+            -e GATE_PASSWORD_B \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/seed-multiorg-gate.mjs:/app/seed-multiorg-gate.mjs:ro" \
+            "${API_REF}" \
+            node /app/seed-multiorg-gate.mjs
+
+      - name: Bootstrap RBAC Permissions (First & Second Pass Idempotency)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando 1º bootstrap de RBAC..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run rbac:bootstrap --workspace=@zafira/api
+
+          echo "Executando 2º bootstrap de RBAC (teste de idempotência)..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run rbac:bootstrap --workspace=@zafira/api
+
+      - name: Launch Read-Only Asana Mock (F6 Browser Gate)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          echo "Iniciando Asana simulado somente leitura (dados fictícios)..."
+          docker run -d \
+            --name asana-mock \
+            --network zafira-hub-hml-ci \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/asana-mock.mjs:/app/asana-mock.mjs:ro" \
+            "${API_REF}" \
+            node /app/asana-mock.mjs
+          for i in $(seq 1 20); do
+            if docker exec asana-mock node -e "fetch('http://127.0.0.1:8080/__health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"; then
+              echo "Asana simulado pronto"; break
+            fi
+            sleep 1
+          done
+          docker exec asana-mock node -e "fetch('http://127.0.0.1:8080/__health').then(r=>{if(!r.ok)process.exit(1)})"
+          echo "Read-Only Asana Mock: PASS"
+
+      # F7-3b / DEC-F7-013: Google Calendar SIMULADO (somente leitura; nenhuma conta real)
+      - name: Launch Google Calendar Mock (F7-3 Browser Gate)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          echo "Iniciando Google Calendar simulado (dados ficticios)..."
+          docker run -d \
+            --name google-calendar-mock \
+            --network zafira-hub-hml-ci \
+            -p 127.0.0.1:8091:8091 \
+            -e PORT=8091 \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/google-calendar-mock.mjs:/app/google-calendar-mock.mjs:ro" \
+            "${API_REF}" \
+            node /app/google-calendar-mock.mjs
+          for i in $(seq 1 20); do
+            if curl -fsS -X POST http://127.0.0.1:8091/__control -d '{}' >/dev/null 2>&1; then
+              echo "Google Calendar simulado pronto"; break
+            fi
+            sleep 1
+          done
+          curl -fsS -X POST http://127.0.0.1:8091/__control -d '{}' >/dev/null
+          echo "Google Calendar Mock: PASS"
+
+      # F7-4b / DEC-F7-017: n8n SIMULADO (nenhum n8n real; valor de segredo descartavel de ensaio)
+      - name: Launch n8n Mock (F7-4 Browser Gate)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          echo "Iniciando n8n simulado (dados ficticios)..."
+          docker run -d \
+            --name n8n-mock \
+            --network zafira-hub-hml-ci \
+            -p 127.0.0.1:8092:8092 \
+            -e PORT=8092 \
+            -e N8N_MOCK_SECRET="hml-rehearsal-dummy-n8n-shared-key-32-chars" \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/n8n-mock.mjs:/app/n8n-mock.mjs:ro" \
+            "${API_REF}" \
+            node /app/n8n-mock.mjs
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8092/__requests >/dev/null 2>&1; then
+              echo "n8n simulado pronto"; break
+            fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:8092/__requests >/dev/null
+          echo "n8n Mock: PASS"
+
+      - name: Launch Browser Gate Containers (api-f45-browser & web-f45-browser)
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          WEB_REF="${{ needs.publish-images.outputs.web_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "1. Iniciando container api-f45-browser (NODE_ENV=development para cookie HTTP em localhost)..."
+          docker run -d \
+            --name api-f45-browser \
+            --network zafira-hub-hml-ci \
+            -e NODE_ENV=development \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
+            -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e ASANA_API_BASE_URL="http://asana-mock:8080/api/1.0" \
+            -e ASANA_DEV_PAT="gate-asana-mock-token" \
+            -e INTEGRATION_ENCRYPTION_KEY="hml-rehearsal-dummy-integration-key-32-chars" \
+            -e CALENDAR_IDENTITY_HMAC_KEY="hml-rehearsal-dummy-identity-hmac-key-32" \
+            -e GOOGLE_OAUTH_CLIENT_ID="hml-rehearsal-google-client" \
+            -e GOOGLE_OAUTH_CLIENT_SECRET="hml-rehearsal-google-dummy-value" \
+            -e GOOGLE_OAUTH_REDIRECT_URI="http://127.0.0.1:8083/hub-api/calendar/oauth/callback" \
+            -e GOOGLE_OAUTH_AUTH_URL="http://127.0.0.1:8091/o/oauth2/v2/auth" \
+            -e GOOGLE_OAUTH_TOKEN_URL="http://google-calendar-mock:8091/token" \
+            -e GOOGLE_CALENDAR_API_BASE="http://google-calendar-mock:8091/calendar/v3" \
+            -e GOOGLE_OAUTH_SUCCESS_REDIRECT="/agenda/configuracao" \
+            -e N8N_ALLOWED_HOSTS="n8n-mock" \
+            -e N8N_ALLOW_INSECURE_HTTP="true" \
+            -e N8N_CALLBACK_BASE_URL="http://127.0.0.1:8083/hub-api" \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}"
+
+          echo "2. Aguardando api-f45-browser atingir status healthy..."
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-f45-browser 2>/dev/null || echo "starting")
+            echo "api-f45-browser status ($i): $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "api-f45-browser is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          API_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-f45-browser)
+          if [ "$API_STATUS" != "healthy" ]; then
+            echo "FALHA: api-f45-browser não atingiu status healthy ($API_STATUS)"
+            docker logs api-f45-browser
+            exit 1
+          fi
+
+          echo "Validando liveness e database readiness de api-f45-browser..."
+          docker exec api-f45-browser node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Liveness:', data); if (data.status !== 'ok') process.exit(1); })"
+          docker exec api-f45-browser node -e "fetch('http://127.0.0.1:3001/health/database').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Readiness:', data); if (data.status !== 'ok' || data.database !== 'connected') process.exit(1); })"
+
+          echo "3. Iniciando container web-f45-browser na porta 8083..."
+          docker run -d \
+            --name web-f45-browser \
+            --network zafira-hub-hml-ci \
+            -p 8083:80 \
+            -e API_UPSTREAM="http://api-f45-browser:3001" \
+            "${WEB_REF}"
+
+          echo "4. Aguardando web-f45-browser atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-f45-browser 2>/dev/null || echo "starting")
+            echo "web-f45-browser status ($i): $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "web-f45-browser is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          WEB_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-f45-browser)
+          if [ "$WEB_STATUS" != "healthy" ]; then
+            echo "FALHA: web-f45-browser não atingiu status healthy ($WEB_STATUS)"
+            docker logs web-f45-browser
+            exit 1
+          fi
+
+          echo "5. Validando resposta raiz GET / em http://127.0.0.1:8083..."
+          curl -fsS http://127.0.0.1:8083/ > /dev/null
+          echo "Browser Gate Containers Launch & Health: PASS"
+
+      - name: Install Playwright for Browser Runtime Gate
+        run: |
+          echo "Instalando Playwright (versão fixa 1.48.0) e dependências do Chromium..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install playwright==1.48.0
+          python3 -m playwright install --with-deps chromium
+          echo "Playwright Installation: PASS"
+
+      - name: Run Authenticated Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execução do Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export ORG_A_ID="11111111-1111-4111-8111-111111111111"
+          export ORG_B_ID="22222222-2222-4222-8222-222222222222"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ARTIFACT_DIR="artifacts/dashboard-browser"
+
+          python3 scripts/homologation/dashboard-browser-gate.py
+          echo "Authenticated Browser Runtime Gate: PASS"
+
+      - name: Upload Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f45-dashboard-browser-${{ github.sha }}
+          path: artifacts/dashboard-browser/
+          retention-days: 14
+
+      - name: Run F5 Client Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execução do F5 Client Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export ORG_A_ID="11111111-1111-4111-8111-111111111111"
+          export ORG_B_ID="22222222-2222-4222-8222-222222222222"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ARTIFACT_DIR="artifacts/client-browser"
+
+          python3 scripts/homologation/client-browser-gate.py
+          echo "F5 Client Browser Runtime Gate: PASS"
+
+      - name: Upload F5 Client Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f5-client-browser-${{ github.sha }}
+          path: artifacts/client-browser/
+          retention-days: 14
+
+      - name: Seed F6 Projects Gate Fixture using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando seed F6 (clientes, integrações Asana, entregas e histórico fictícios)..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            -v "$GITHUB_WORKSPACE/scripts/homologation/seed-f6-gate.mjs:/app/seed-f6-gate.mjs:ro" \
+            "${API_REF}" \
+            node /app/seed-f6-gate.mjs
+
+      - name: Run F6 Projects Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execução do F6 Projects Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export ORG_A_ID="11111111-1111-4111-8111-111111111111"
+          export ORG_B_ID="22222222-2222-4222-8222-222222222222"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ASANA_MOCK_INTERNAL_URL="http://asana-mock:8080"
+          export ARTIFACT_DIR="artifacts/projects-browser"
+
+          python3 scripts/homologation/projects-browser-gate.py
+          echo "F6 Projects Browser Runtime Gate: PASS"
+
+      - name: Upload F6 Projects Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f6-projects-browser-${{ github.sha }}
+          path: artifacts/projects-browser/
+          retention-days: 14
+
+      # F7-1b / DEC-F7-005: Browser Gate do construtor de onboarding (pessoas ficticias; modelos criados pela interface)
+      - name: Seed F7 Onboarding Gate Fixture (people only) using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando seed F7 (gestor, membro e pessoas de operacao ficticias; nenhum modelo)..."
+          docker run --rm             --network zafira-hub-hml-ci             -e DATABASE_URL="${DATABASE_URL}"             -e GATE_PASSWORD_A             -v "$GITHUB_WORKSPACE/scripts/homologation/seed-f7-gate.mjs:/app/seed-f7-gate.mjs:ro"             "${API_REF}"             node /app/seed-f7-gate.mjs
+
+      - name: Run F7-1 Onboarding Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execucao do F7-1 Onboarding Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ASANA_MOCK_INTERNAL_URL="http://asana-mock:8080"
+          export ARTIFACT_DIR="artifacts/onboarding-browser"
+
+          python3 scripts/homologation/onboarding-browser-gate.py
+          echo "F7-1 Onboarding Browser Runtime Gate: PASS"
+
+      - name: Upload F7-1 Onboarding Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f7-onboarding-browser-${{ github.sha }}
+          path: artifacts/onboarding-browser/
+          retention-days: 14
+
+      # F7-2b / DEC-F7-009: Browser Gate da execucao do onboarding (clientes e pessoas ficticios; nada de modelo/execucao semeado)
+      - name: Seed F7-2 Execution Gate Fixture (clients and portfolio only) using Published API Image
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Executando seed F7-2 (clientes, carteira e usuario sem visao; nenhum modelo/execucao)..."
+          docker run --rm             --network zafira-hub-hml-ci             -e DATABASE_URL="${DATABASE_URL}"             -e GATE_PASSWORD_A             -v "$GITHUB_WORKSPACE/scripts/homologation/seed-f7-exec-gate.mjs:/app/seed-f7-exec-gate.mjs:ro"             "${API_REF}"             node /app/seed-f7-exec-gate.mjs
+
+          echo "Reiniciando api-f45-browser para isolamento do ambiente de teste e reset de estado em memoria..."
+          docker restart api-f45-browser
+          for i in $(seq 1 30); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-f45-browser 2>/dev/null || echo "starting")
+            echo "api-f45-browser status ($i): $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "api-f45-browser reiniciado e healthy!"
+              break
+            fi
+            sleep 1
+          done
+          API_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-f45-browser)
+          if [ "$API_STATUS" != "healthy" ]; then
+            echo "FALHA: api-f45-browser não atingiu status healthy após reinício ($API_STATUS)"
+            docker logs api-f45-browser
+            exit 1
+          fi
+
+      - name: Run F7-2 Onboarding Execution Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execucao do F7-2 Onboarding Execution Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ASANA_MOCK_INTERNAL_URL="http://asana-mock:8080"
+          export ARTIFACT_DIR="artifacts/onboarding-execution-browser"
+
+          python3 scripts/homologation/onboarding-execution-browser-gate.py
+          echo "F7-2 Onboarding Execution Browser Runtime Gate: PASS"
+
+      - name: Upload F7-2 Onboarding Execution Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f7-onboarding-execution-browser-${{ github.sha }}
+          path: artifacts/onboarding-execution-browser/
+          retention-days: 14
+
+      - name: Run F7-3 Google Calendar Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execucao do F7-3 Google Calendar Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export GOOGLE_MOCK_URL="http://127.0.0.1:8091"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ARTIFACT_DIR="artifacts/calendar-browser"
+
+          python3 scripts/homologation/calendar-browser-gate.py
+          echo "F7-3 Google Calendar Browser Runtime Gate: PASS"
+
+      - name: Upload F7-3 Google Calendar Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f7-calendar-browser-${{ github.sha }}
+          path: artifacts/calendar-browser/
+          retention-days: 14
+
+      - name: Run F7-4 n8n Automation Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execucao do F7-4 n8n Automation Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export N8N_MOCK_URL="http://127.0.0.1:8092"
+          export N8N_MOCK_INTERNAL_HOST="n8n-mock:8092"
+          export GATE_N8N_SECRET="hml-rehearsal-dummy-n8n-shared-key-32-chars"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ARTIFACT_DIR="artifacts/automation-browser"
+
+          python3 scripts/homologation/automation-browser-gate.py
+          echo "F7-4 n8n Automation Browser Runtime Gate: PASS"
+
+      - name: Upload F7-4 n8n Automation Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f7-automation-browser-${{ github.sha }}
+          path: artifacts/automation-browser/
+          retention-days: 14
+
+      - name: Run F8 Content and Client Approval Browser Runtime Gate (Playwright)
+        run: |
+          echo "Iniciando execucao do F8 Content and Client Approval Browser Runtime Gate..."
+          export WEB_BASE_URL="http://127.0.0.1:8083"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+          export API_CONTAINER_NAME="api-f45-browser"
+          export ARTIFACT_DIR="artifacts/content-browser"
+
+          python3 scripts/homologation/content-approval-browser-gate.py
+          echo "F8 Content and Client Approval Browser Runtime Gate: PASS"
+
+      - name: Upload F8 Content and Client Approval Browser Runtime Gate Artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: f8-content-browser-${{ github.sha }}
+          path: artifacts/content-browser/
+          retention-days: 14
+
+      - name: Cleanup Browser Gate Containers
+        if: always()
+        run: |
+          echo "Limpando containers dedicados do Browser Gate..."
+          docker rm -f api-f45-browser web-f45-browser asana-mock google-calendar-mock n8n-mock || true
+          echo "Cleanup Browser Gate Containers: PASS"
+
+      - name: Launch Staging API Container
+        run: |
+          API_REF="${{ needs.publish-images.outputs.api_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "Iniciando container api-hml..."
+          docker run -d \
+            --name api-hml \
+            --network zafira-hub-hml-ci \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
+            -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}"
+
+          echo "Aguardando container api-hml atingir status healthy..."
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
+            echo "api-hml status ($i): $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "api-hml is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          API_STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml)
+          if [ "$API_STATUS" != "healthy" ]; then
+            echo "FALHA: api-hml não atingiu status healthy ($API_STATUS)"
+            docker logs api-hml
+            exit 1
+          fi
+
+          echo "Validando liveness e readiness da API..."
+          docker exec api-hml node -e "fetch('http://127.0.0.1:3001/health').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Liveness:', data); if (data.status !== 'ok') process.exit(1); })"
+          docker exec api-hml node -e "fetch('http://127.0.0.1:3001/health/database').then(r => { if (!r.ok) process.exit(1); return r.json(); }).then(data => { console.log('Readiness:', data); if (data.status !== 'ok' || data.database !== 'connected') process.exit(1); })"
+          echo "API Liveness & Database Readiness: PASS"
+
+      - name: Launch Staging Web Container
+        run: |
+          WEB_REF="${{ needs.publish-images.outputs.web_ref }}"
+
+          echo "Iniciando container web-hml na porta 8082..."
+          docker run -d \
+            --name web-hml \
+            --network zafira-hub-hml-ci \
+            -p 8082:80 \
+            -e API_UPSTREAM="http://api-hml:3001" \
+            "${WEB_REF}"
+
+          echo "Aguardando container web-hml atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-hml 2>/dev/null || echo "starting")
+            echo "web-hml status ($i): $STATUS"
+            if [ "$STATUS" = "healthy" ]; then
+              echo "web-hml is healthy!"
+              break
+            fi
+            sleep 2
+          done
+
+          WEB_STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-hml)
+          if [ "$WEB_STATUS" != "healthy" ]; then
+            echo "FALHA: web-hml não atingiu status healthy ($WEB_STATUS)"
+            docker logs web-hml
+            exit 1
+          fi
+          echo "Web Container Healthy: PASS"
+
+      - name: Run Staging Smoke Tests (Current Images)
+        run: |
+          export WEB_BASE_URL="http://127.0.0.1:8082"
+          export HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123"
+          bash scripts/homologation/smoke.sh
+
+      - name: Rehearse Multi-Organization Final Gate via HTTP
+        run: |
+          echo "Iniciando bateria de testes do portão de isolamento multi-organização via HTTP..."
+          export WEB_BASE_URL="http://127.0.0.1:8082"
+          export ORG_A_ID="11111111-1111-4111-8111-111111111111"
+          export ORG_B_ID="22222222-2222-4222-8222-222222222222"
+          export GATE_EMAIL_A="gate-a@zafira.invalid"
+          export GATE_EMAIL_B="gate-b@zafira.invalid"
+
+          bash scripts/homologation/multiorg-isolation-gate.sh
+
+      - name: Rehearsal Rollback Mechanics (Baseline Pair)
+        run: |
+          CURRENT_API="${{ needs.publish-images.outputs.api_ref }}"
+          CURRENT_WEB="${{ needs.publish-images.outputs.web_ref }}"
+          ROLLBACK_API="ghcr.io/julianogdc/zafira-hub-api@sha256:945e08e705aa34fa032081c9127988210290a0b4844dce286a6f70881791cb87"
+          ROLLBACK_WEB="ghcr.io/julianogdc/zafira-hub-web@sha256:ae653b585e9e90aa63fcda7f0581d0971acc4009a2571d94b8025c8aa7b7dda2"
+
+          echo "1. Validando par de rollback..."
+          export CURRENT_API_REF="${CURRENT_API}"
+          export CURRENT_WEB_REF="${CURRENT_WEB}"
+          export ROLLBACK_API_REF="${ROLLBACK_API}"
+          export ROLLBACK_WEB_REF="${ROLLBACK_WEB}"
+          bash scripts/homologation/validate-rollback-pair.sh
+
+          echo "2. Parando containers atuais (sem tocar no banco de dados PostgreSQL)..."
+          docker rm -f api-hml web-hml
+
+          echo "3. Subindo API com digest de rollback..."
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+          docker run -d \
+            --name api-hml \
+            --network zafira-hub-hml-ci \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
+            -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${ROLLBACK_API}"
+
+          echo "Aguardando api-hml (rollback) atingir status healthy..."
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
+            if [ "$STATUS" = "healthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "4. Subindo Web com digest de rollback..."
+          docker run -d \
+            --name web-hml \
+            --network zafira-hub-hml-ci \
+            -p 8082:80 \
+            -e API_UPSTREAM="http://api-hml:3001" \
+            "${ROLLBACK_WEB}"
+
+          echo "Aguardando web-hml (rollback) atingir status healthy..."
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-hml 2>/dev/null || echo "starting")
+            if [ "$STATUS" = "healthy" ]; then
+              break
+            fi
+            sleep 2
+          done
+
+          echo "5. Executando smoke tests no par de rollback..."
+          export WEB_BASE_URL="http://127.0.0.1:8082"
+          export HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123"
+          bash scripts/homologation/smoke.sh
+          echo "Rollback Mechanics Rehearsal: PASS"
+
+      - name: Redeploy Current Image Pair
+        run: |
+          CURRENT_API="${{ needs.publish-images.outputs.api_ref }}"
+          CURRENT_WEB="${{ needs.publish-images.outputs.web_ref }}"
+          DATABASE_URL="postgresql://postgres_hml:hml_staging_dummy_pass_123@postgres-hml:5432/zafira_hub_21_staging?schema=public"
+
+          echo "1. Parando containers de rollback..."
+          docker rm -f api-hml web-hml
+
+          echo "2. Re-implantando par atual (${CURRENT_API})..."
+          docker run -d \
+            --name api-hml \
+            --network zafira-hub-hml-ci \
+            -e NODE_ENV=production \
+            -e PORT=3001 \
+            -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
+            -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
+            -e HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123" \
+            -e BRIGHTBEAN_API_URL="http://brightbean-mock:8000/api/v1" \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${CURRENT_API}"
+
+          for i in $(seq 1 40); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' api-hml 2>/dev/null || echo "starting")
+            if [ "$STATUS" = "healthy" ]; then break; fi
+            sleep 2
+          done
+
+          docker run -d \
+            --name web-hml \
+            --network zafira-hub-hml-ci \
+            -p 8082:80 \
+            -e API_UPSTREAM="http://api-hml:3001" \
+            "${CURRENT_WEB}"
+
+          for i in $(seq 1 20); do
+            STATUS=$(docker inspect -f '{{.State.Health.Status}}' web-hml 2>/dev/null || echo "starting")
+            if [ "$STATUS" = "healthy" ]; then break; fi
+            sleep 2
+          done
+
+          echo "3. Smoke test após redeploy..."
+          export WEB_BASE_URL="http://127.0.0.1:8082"
+          export HUB_INTERNAL_API_KEY="hml-rehearsal-dummy-internal-key-123"
+          bash scripts/homologation/smoke.sh
+          echo "Redeploy Current Pair Smoke: PASS"
+
+      - name: Cleanup Homologation Rehearsal Resources
+        if: always()
+        run: |
+          echo "Limpando recursos do Homologation Rehearsal..."
+          docker rm -f api-hml web-hml postgres-hml api-f45-browser web-f45-browser || true
+          docker network rm zafira-hub-hml-ci || true
+          echo "Cleanup de Homologation Rehearsal concluído."

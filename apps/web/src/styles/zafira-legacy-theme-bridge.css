@@ -1,0 +1,148 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — PONTE DE COMPATIBILIDADE DE TEMA LEGADO (F3.4B)
+   Local: apps/web/src/styles/zafira-legacy-theme-bridge.css
+
+   Finalidade:
+   Garantir coerência visual imediata do Dashboard e páginas legadas sob
+   o modo Light ([data-theme='light']), sem modificar os componentes internos
+   ou reescrever as telas legadas antes da Fase 4.
+
+   Regras invioláveis:
+   1. NÃO altera o modo Dark (preserva :root e .dark existentes).
+   2. Converte variáveis Tailwind/shadcn para valores neutros e de alto contraste sob [data-theme='light'].
+   3. Normaliza classes legadas utilitárias (.text-white, .bg-zinc-*, .border-white/*)
+      dentro de <main> para que não gerem overlays acinzentados ou textos invisíveis.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. VARIÁVEIS SHADCN / TAILWIND (HSL) NO MODO LIGHT
+   Tailwind consome via hsl(var(--variable)).
+   Exemplo: --background: 220 14% 96% -> hsl(220 14% 96%) = #F5F6F8 aprox.
+   -------------------------------------------------------------------------- */
+[data-theme='light'] {
+  /* Fundo da página e texto base */
+  --background: 220 14% 97%;          /* #F5F6F8 */
+  --foreground: 240 12% 12%;          /* #1C1B22 */
+
+  /* Cards e superfícies estruturais: branco puro sólido (#FFFFFF) */
+  --card: 0 0% 100%;
+  --card-foreground: 240 12% 12%;     /* #1C1B22 */
+
+  /* Popover / Menus / Dropdowns */
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 12% 12%;
+
+  /* Marca Primária (Roxo estrutural #412493 no Light) */
+  --primary: 256 61% 36%;             /* #412493 */
+  --primary-foreground: 0 0% 100%;    /* Branco */
+
+  /* Secundário / Hover */
+  --secondary: 220 14% 95%;           /* #F0F1F4 */
+  --secondary-foreground: 240 12% 12%;
+
+  /* Muted / Desabilitado / Apoio */
+  --muted: 220 14% 95%;
+  --muted-foreground: 240 5% 51%;     /* #7B7B88 */
+
+  /* Destaque / Accent */
+  --accent: 256 61% 36%;              /* #412493 */
+  --accent-foreground: 0 0% 100%;
+
+  /* Destrutivo / Erro */
+  --destructive: 350 85% 45%;         /* Vermelho acessível */
+  --destructive-foreground: 0 0% 100%;
+
+  /* Bordas e Inputs: cinza neutro sutil (#E2E4E9) */
+  --border: 220 13% 90%;              /* #E2E4E9 */
+  --input: 220 13% 90%;
+  --ring: 256 61% 36%;                /* #412493 */
+
+  color-scheme: light;
+}
+
+/* --------------------------------------------------------------------------
+   2. COMPATIBILIZAÇÃO DAS CLASSES LEGADAS DE CARD / SUPERFÍCIE NO LIGHT
+   O Dashboard legado utilizava bg-zinc-950/50, bg-zinc-950/30, bg-zinc-900
+   e bordas border-white/10 com backdrop-blur-sm.
+   Sob [data-theme='light'], transformamos em superfícies brancas sólidas (#FFFFFF)
+   com bordas neutras (#E2E4E9) e sombras discretas do Design System.
+   -------------------------------------------------------------------------- */
+[data-theme='light'] main [class*="bg-zinc-950"],
+[data-theme='light'] main [class*="bg-zinc-900"] {
+  background-color: #FFFFFF !important;
+  color: var(--z-text-primary) !important;
+  border-color: var(--z-border-default) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: var(--z-shadow-card);
+}
+
+/* Suporte específico para itens internos que precisam de fundo secundário claro (#FAFAFC / #F5F6F8) */
+[data-theme='light'] main [class*="bg-zinc-900/50"],
+[data-theme='light'] main [class*="bg-zinc-950/30"] {
+  background-color: var(--z-surface-secondary) !important;
+}
+
+/* Accordion do Dashboard legado (Analytics e Metas) */
+[data-theme='light'] main .border-white\/10 {
+  border-color: var(--z-border-default) !important;
+}
+[data-theme='light'] main .border-white\/5 {
+  border-color: var(--z-border-subtle) !important;
+}
+[data-theme='light'] main .border-white\/20 {
+  border-color: var(--z-border-hover) !important;
+}
+
+/* --------------------------------------------------------------------------
+   3. COMPATIBILIZAÇÃO TIPOGRÁFICA LEGADA NO LIGHT
+   O Dashboard continha .text-white forçado em títulos h1, h3 e métricas.
+   Sob [data-theme='light'], redirecionamos para var(--z-text-primary) (#1C1B22).
+   Textos zinc-400 / zinc-500 tornam-se var(--z-text-secondary) (#7B7B88).
+   -------------------------------------------------------------------------- */
+[data-theme='light'] main h1.text-white,
+[data-theme='light'] main h2.text-white,
+[data-theme='light'] main h3.text-white,
+[data-theme='light'] main h4.text-white,
+[data-theme='light'] main span.text-white,
+[data-theme='light'] main p.text-white,
+[data-theme='light'] main .text-zinc-100,
+[data-theme='light'] main .text-zinc-200 {
+  color: var(--z-text-primary) !important;
+}
+
+[data-theme='light'] main .text-zinc-400,
+[data-theme='light'] main .text-zinc-500 {
+  color: var(--z-text-secondary) !important;
+}
+
+[data-theme='light'] main .text-zinc-300 {
+  color: var(--z-text-primary) !important;
+}
+
+/* Ícones e badges de fundos escuros no legado */
+[data-theme='light'] main .text-white {
+  color: var(--z-text-primary) !important;
+}
+
+/* Exceções de preservação: badges semânticos que já possuem cor própria */
+[data-theme='light'] main .text-emerald-400,
+[data-theme='light'] main .text-emerald-500 {
+  color: #0E7F5E !important;
+}
+[data-theme='light'] main .text-red-400,
+[data-theme='light'] main .text-red-500 {
+  color: #BA1A2E !important;
+}
+[data-theme='light'] main .text-purple-400,
+[data-theme='light'] main .text-purple-500 {
+  color: #412493 !important;
+}
+
+/* Insight do Dia (MotivationalQuote / InsightPanel) — Preservação elegante
+   Conforme item 7 do briefing: pode preservar estilo especial escuro se legível,
+   ou receber tratamento de contraste limpo */
+[data-theme='light'] main [class*="MotivationalQuote"] blockquote,
+[data-theme='light'] main .group:has(blockquote) blockquote {
+  color: #FFFFFF !important; /* Preserva texto branco apenas se o card do Insight for escuro */
+}

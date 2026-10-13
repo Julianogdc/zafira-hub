@@ -1,0 +1,150 @@
+/* F8-2 - Pre-visualizacao inspirada no Instagram (ilustrativa). Usa apenas tokens --z-* do Design System. */
+.frame {
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto;
+  background: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-lg);
+  overflow: hidden;
+  color: var(--z-text-primary);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3);
+  padding: var(--z-space-3) var(--z-space-4);
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--z-radius-full);
+  background: var(--z-color-purple-surface);
+  color: var(--z-text-purple);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex: none;
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.kind {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--z-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex: none;
+}
+
+.stage {
+  position: relative;
+  width: 100%;
+  background: #000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.stage[data-format='FEED_IMAGE'] { aspect-ratio: 1 / 1; }
+.stage[data-format='CAROUSEL'] { aspect-ratio: 4 / 5; }
+.stage[data-format='REEL'],
+.stage[data-format='STORY'] { aspect-ratio: 9 / 16; max-height: 70vh; }
+
+.media {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.empty {
+  color: var(--z-text-muted);
+  font-size: 0.85rem;
+  padding: var(--z-space-4);
+  text-align: center;
+}
+
+.nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: var(--z-radius-full);
+  border: 0;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  cursor: pointer;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.nav:focus-visible { outline: 2px solid var(--z-color-accent); }
+.prev { left: var(--z-space-2); }
+.next { right: var(--z-space-2); }
+
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  padding: var(--z-space-2) 0 0;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--z-radius-full);
+  background: var(--z-border-default);
+}
+.dotOn { background: var(--z-color-primary); }
+
+.bars {
+  position: absolute;
+  top: var(--z-space-2);
+  left: var(--z-space-2);
+  right: var(--z-space-2);
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+.bar { height: 3px; flex: 1; background: rgba(255, 255, 255, 0.4); border-radius: 2px; }
+.barOn { background: #fff; }
+
+.actions {
+  display: flex;
+  gap: var(--z-space-4);
+  padding: var(--z-space-3) var(--z-space-4) 0;
+  color: var(--z-text-secondary);
+  font-size: 1.15rem;
+}
+
+.caption {
+  padding: var(--z-space-3) var(--z-space-4) var(--z-space-4);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.caption strong { margin-right: var(--z-space-2); }
+.more {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--z-text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.note {
+  text-align: center;
+  color: var(--z-text-muted);
+  font-size: 0.75rem;
+  margin-top: var(--z-space-2);
+}

@@ -1,0 +1,1980 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  INVITED
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  MEMBER
+}
+
+enum OrganizationMemberStatus {
+  ACTIVE
+  INVITED
+  SUSPENDED
+}
+
+enum ClientStatus {
+  LEAD
+  ACTIVE
+  PAUSED
+  INACTIVE
+}
+
+enum IntegrationProvider {
+  TWENTY
+  ASANA
+  POSTIZ
+  META
+  GOOGLE_ADS
+  ASAAS
+  BRIGHTBEAN
+  GOOGLE_CALENDAR
+  N8N
+}
+
+enum IntegrationAuthType {
+  API_KEY
+  OAUTH2
+  TOKEN
+}
+
+enum IntegrationConnectionStatus {
+  ACTIVE
+  DISCONNECTED
+  ERROR
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum WebhookEventStatus {
+  RECEIVED
+  PROCESSED
+  FAILED
+  IGNORED
+}
+
+enum AsaasPaymentStatus {
+  PENDING
+  RECEIVED
+  CONFIRMED
+  OVERDUE
+  REFUNDED
+  DELETED
+  CANCELLED
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members                OrganizationMember[]
+  clients                Client[]
+  clientContacts         ClientContact[]
+  clientMeetingNotes     ClientMeetingNote[]
+  integrations           OrganizationIntegration[]
+  oauthStates            OAuthState[]
+  asanaSubscriptions     AsanaWebhookSubscription[]
+  asaasPayments          AsaasPayment[]
+  financialAccounts      FinancialAccount[]
+  financialCategories    FinancialCategory[]
+  financialCategoryRules FinancialCategoryRule[]
+  financialTransactions  FinancialTransaction[]
+  financialTransfers     FinancialTransfer[]
+
+  permissions            OrganizationMemberPermission[]
+  teams                  Team[]
+  auditLogs              AuditLog[]
+  teamMembers            TeamMember[]
+  userClientAssignments  UserClientAssignment[]
+  teamClientAssignments  TeamClientAssignment[]
+  config                 OrganizationConfig?
+  featureFlags           OrganizationFeatureFlag[]
+  invitations            OrganizationInvitation[]
+  integrationConnections IntegrationConnection[]
+  syncRuns               SyncRun[]
+  webhookEvents          WebhookEvent[]
+  integrationErrors      IntegrationError[]
+  deliverablePlans       DeliverablePlan[]
+  deliverableItems       DeliverableItem[]
+  deliverableLinks       DeliverableLink[]
+  deliverableEvents      DeliverableEvent[]
+  deliverableTemplates   DeliverableTemplate[]
+  deliverablePieces      DeliverablePiece[]
+  asanaProjectMirrors    AsanaProjectMirror[]
+  asanaTaskMirrors       AsanaTaskMirror[]
+  asanaTaskChanges       AsanaTaskChange[]
+  asanaProjectSnapshots  AsanaProjectSnapshot[]
+  organizationFunctions  OrganizationFunction[]
+  onboardingTemplates    OnboardingTemplate[]
+  onboardingExecutions   OnboardingExecution[]
+  calendarSources       CalendarSource[]
+  calendarEvents         CalendarEvent[]
+  calendarEventLinks     CalendarEventLink[]
+  calendarIdentities     CalendarMemberIdentity[]
+  automationFlows        AutomationFlow[]
+  automationOutbox       AutomationOutbox[]
+  contentItems           ContentItem[]
+  contentVersions        ContentVersion[]
+  contentMedia           ContentMedia[]
+  contentEvents          ContentEvent[]
+  approvalLinks          ApprovalLink[]
+  approvalDecisions      ApprovalDecision[]
+
+  @@map("organizations")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  name         String
+  email        String     @unique
+  passwordHash String?
+  avatarUrl    String?
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  memberships                 OrganizationMember[]
+  responsibleClients          Client[]
+  clientMeetingNotes          ClientMeetingNote[]
+  oauthStates                 OAuthState[]
+  closedDeliverablePlans      DeliverablePlan[]           @relation("PlanClosedByUser")
+  deliveredDeliverableItems   DeliverableItem[]           @relation("ItemDeliveredByUser")
+  deliverableEvents           DeliverableEvent[]          @relation("DeliverableEventActor")
+  producedDeliverablePieces   DeliverablePiece[]          @relation("PieceProducedByUser")
+  approvedDeliverablePieces   DeliverablePiece[]          @relation("PieceApprovedByUser")
+  deliveredDeliverablePieces  DeliverablePiece[]          @relation("PieceDeliveredByUser")
+  createdOnboardingTemplates  OnboardingTemplate[]        @relation("OnboardingTemplateCreatedBy")
+  publishedOnboardingVersions OnboardingTemplateVersion[] @relation("OnboardingVersionPublishedBy")
+  onboardingEvents            OnboardingEvent[]           @relation("OnboardingEventActor")
+
+  actorAuditLogs     AuditLog[]
+  createdInvitations OrganizationInvitation[] @relation("CreatedInvitations")
+
+  @@map("users")
+}
+
+model OrganizationMember {
+  id             String                   @id @default(uuid())
+  organizationId String
+  userId         String
+  role           Role                     @default(MEMBER)
+  status         OrganizationMemberStatus @default(ACTIVE)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  organization      Organization                   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User                           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permissions       OrganizationMemberPermission[]
+  functionLinks     OrganizationFunctionMember[]
+  teams             TeamMember[]
+  clientAssignments UserClientAssignment[]
+  invitation        OrganizationInvitation?
+  calendarIdentities CalendarMemberIdentity[]
+
+  @@unique([organizationId, userId])
+  @@unique([organizationId, id])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+model OrganizationInvitation {
+  id                   String    @id @default(uuid())
+  organizationId       String
+  organizationMemberId String
+  tokenHash            String    @unique
+  expiresAt            DateTime
+  acceptedAt           DateTime?
+  createdByUserId      String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member        OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+  createdByUser User?              @relation("CreatedInvitations", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, organizationMemberId])
+  @@index([organizationId])
+  @@index([organizationMemberId])
+  @@map("organization_invitations")
+}
+
+model Client {
+  id                 String       @id @default(uuid())
+  organizationId     String
+  name               String
+  legalName          String?
+  document           String?
+  email              String?
+  phone              String?
+  status             ClientStatus @default(ACTIVE)
+  responsibleUserId  String?
+  contractValue      Decimal?     @db.Decimal(12, 2)
+  startDate          DateTime?
+  endDate            DateTime?
+  notes              String?      @db.Text
+  briefing           Json?
+  brandKit           Json?
+  addressStreet      String?
+  addressNumber      String?
+  addressComplement  String?
+  addressDistrict    String?
+  addressCity        String?
+  addressState       String?
+  addressPostalCode  String?
+  addressCountryCode String?      @db.VarChar(2)
+  addressLatitude    Decimal?     @db.Decimal(9, 6)
+  addressLongitude   Decimal?     @db.Decimal(9, 6)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  organization           Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  responsibleUser        User?                   @relation(fields: [responsibleUserId], references: [id], onDelete: SetNull)
+  contacts               ClientContact[]
+  meetingNotes           ClientMeetingNote[]
+  integrations           ClientIntegration[]
+  asaasPayments          AsaasPayment[]
+  financialTransactions  FinancialTransaction[]  @relation("ClientTransactions")
+  suggestedTransactions  FinancialTransaction[]  @relation("SuggestedClientTransactions")
+  financialCategoryRules FinancialCategoryRule[]
+  assignedMembers        UserClientAssignment[]
+  teamAssignments        TeamClientAssignment[]
+  onboardingExecutions   OnboardingExecution[]
+  calendarEventLinks     CalendarEventLink[]
+  integrationConnections IntegrationConnection[]
+  syncRuns               SyncRun[]
+  integrationErrors      IntegrationError[]
+  deliverablePlans       DeliverablePlan[]
+  asanaProjectMirrors    AsanaProjectMirror[]
+  asanaTaskMirrors       AsanaTaskMirror[]
+  asanaTaskChanges       AsanaTaskChange[]
+  asanaProjectSnapshots  AsanaProjectSnapshot[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([status])
+  @@index([responsibleUserId])
+  @@map("clients")
+  contentItems ContentItem[]
+}
+
+model IntegrationConnection {
+  id                   String                      @id @default(uuid())
+  organizationId       String
+  clientId             String?
+  provider             IntegrationProvider
+  authType             IntegrationAuthType
+  externalScopeId      String?
+  displayName          String?
+  credentialCiphertext String?                     @db.Text
+  metadata             Json?
+  status               IntegrationConnectionStatus @default(ACTIVE)
+  lastValidatedAt      DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client            Client?            @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  syncRuns          SyncRun[]
+  webhookEvents     WebhookEvent[]
+  integrationErrors IntegrationError[]
+  calendarSources   CalendarSource[]
+
+  @@unique([organizationId, provider, externalScopeId])
+  @@unique([clientId, provider])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([status])
+  @@map("integration_connections")
+}
+
+model SyncRun {
+  id             String              @id @default(uuid())
+  organizationId String
+  clientId       String?
+  connectionId   String?
+  provider       IntegrationProvider
+  operation      String
+  status         SyncRunStatus       @default(RUNNING)
+  startedAt      DateTime            @default(now())
+  finishedAt     DateTime?
+  itemsProcessed Int                 @default(0)
+  itemsSucceeded Int                 @default(0)
+  itemsFailed    Int                 @default(0)
+  errorSummary   String?             @db.Text
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("sync_runs")
+}
+
+model WebhookEvent {
+  id              String              @id @default(uuid())
+  organizationId  String
+  connectionId    String?
+  provider        IntegrationProvider
+  externalEventId String?
+  dedupeKey       String              @unique
+  eventType       String
+  status          WebhookEventStatus  @default(RECEIVED)
+  receivedAt      DateTime            @default(now())
+  processedAt     DateTime?
+  errorMessage    String?             @db.Text
+  payload         Json?
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([dedupeKey])
+  @@map("webhook_events")
+}
+
+model IntegrationError {
+  id             String              @id @default(uuid())
+  organizationId String
+  clientId       String?
+  connectionId   String?
+  provider       IntegrationProvider
+  operation      String
+  code           String?
+  message        String              @db.Text
+  retryable      Boolean             @default(false)
+  resolvedAt     DateTime?
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?                @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([provider])
+  @@index([connectionId])
+  @@index([code])
+  @@index([retryable])
+  @@index([createdAt])
+  @@map("integration_errors")
+}
+
+model ClientIntegration {
+  id         String              @id @default(uuid())
+  clientId   String
+  provider   IntegrationProvider
+  externalId String
+  metadata   Json?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, provider, externalId])
+  @@index([provider, externalId])
+  @@map("client_integrations")
+}
+
+model OrganizationIntegration {
+  id             String              @id @default(uuid())
+  organizationId String
+  provider       IntegrationProvider
+  accessToken    String?             @db.Text
+  refreshToken   String?             @db.Text
+  expiresAt      DateTime?
+  workspaceId    String?
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@index([provider])
+  @@map("organization_integrations")
+}
+
+model OAuthState {
+  id             String              @id @default(uuid())
+  nonce          String              @unique
+  organizationId String
+  userId         String
+  provider       IntegrationProvider @default(ASANA)
+  expiresAt      DateTime
+  consumedAt     DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([provider, nonce])
+  @@index([expiresAt])
+  @@map("oauth_states")
+}
+
+model AsanaWebhookSubscription {
+  id             String    @id @default(uuid())
+  organizationId String
+  resourceGid    String
+  webhookGid     String?
+  target         String
+  secret         String    @db.Text
+  active         Boolean   @default(false)
+  lastEventAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, resourceGid])
+  @@index([resourceGid])
+  @@index([webhookGid])
+  @@map("asana_webhook_subscriptions")
+}
+
+model AsaasPayment {
+  id                String             @id @default(uuid())
+  organizationId    String
+  clientId          String?
+  asaasCustomerId   String
+  externalId        String             @unique
+  installmentNumber Int?
+  description       String?
+  value             Decimal            @db.Decimal(12, 2)
+  netValue          Decimal?           @db.Decimal(12, 2)
+  originalValue     Decimal?           @db.Decimal(12, 2)
+  interestValue     Decimal?           @db.Decimal(12, 2)
+  billingType       String             @default("UNDEFINED")
+  status            AsaasPaymentStatus @default(PENDING)
+  dueDate           DateTime
+  paymentDate       DateTime?
+  clientPaymentDate DateTime?
+  invoiceUrl        String?
+  bankSlipUrl       String?
+  rawPayload        Json?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([asaasCustomerId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("asaas_payments")
+}
+
+model AsaasWebhookEvent {
+  id                String   @id @default(uuid())
+  dedupeKey         String   @unique
+  eventId           String?
+  event             String
+  paymentExternalId String?
+  processedAt       DateTime @default(now())
+  payload           Json?
+
+  @@index([paymentExternalId])
+  @@index([dedupeKey])
+  @@map("asaas_webhook_events")
+}
+
+enum FinancialAccountProvider {
+  ASAAS
+  INTER
+}
+
+enum FinancialTransactionDirection {
+  CREDIT
+  DEBIT
+}
+
+enum FinancialTransactionKind {
+  CUSTOMER_PAYMENT
+  TRANSFER_INTERNAL
+  FEE
+  EXPENSE
+  TAX
+  ADJUSTMENT
+  OTHER
+}
+
+enum FinancialCategorizationSource {
+  PROVIDER
+  AUTO_RULE
+  MANUAL
+  PENDING
+}
+
+enum FinancialDatePrecision {
+  DATE_ONLY
+  DATETIME
+}
+
+enum FinancialTransferStatus {
+  UNMATCHED
+  REVIEW
+  AUTO_MATCHED
+  CONFIRMED
+}
+
+enum FinancialCategoryType {
+  INCOME
+  EXPENSE
+  TRANSFER
+  FEE
+  TAX
+  OTHER
+}
+
+enum FinancialMatchField {
+  DESCRIPTION
+  COUNTERPARTY_NAME
+  COUNTERPARTY_DOCUMENT
+}
+
+enum FinancialMatchType {
+  CONTAINS
+  EXACT
+}
+
+model FinancialAccount {
+  id             String                   @id @default(uuid())
+  organizationId String
+  provider       FinancialAccountProvider
+  name           String
+  currency       String                   @default("BRL")
+  currentBalance Decimal                  @default(0) @db.Decimal(14, 2)
+  balanceAsOf    DateTime?
+  lastSyncedAt   DateTime?
+  isActive       Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions    FinancialTransaction[]
+  sourceTransfers FinancialTransfer[]    @relation("SourceAccountTransfers")
+  destTransfers   FinancialTransfer[]    @relation("DestAccountTransfers")
+
+  @@unique([organizationId, provider, name])
+  @@index([organizationId])
+  @@index([provider])
+  @@map("financial_accounts")
+}
+
+model FinancialCategory {
+  id             String                @id @default(uuid())
+  organizationId String
+  name           String
+  type           FinancialCategoryType
+  color          String?
+  isSystem       Boolean               @default(false)
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rules        FinancialCategoryRule[]
+  transactions FinancialTransaction[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@index([type])
+  @@map("financial_categories")
+}
+
+model FinancialCategoryRule {
+  id                   String              @id @default(uuid())
+  organizationId       String
+  categoryId           String
+  clientId             String?
+  matchField           FinancialMatchField
+  matchType            FinancialMatchType
+  matchValueNormalized String
+  priority             Int                 @default(0)
+  isActive             Boolean             @default(true)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     FinancialCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  client       Client?           @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([categoryId])
+  @@index([clientId])
+  @@index([priority])
+  @@map("financial_category_rules")
+}
+
+model FinancialTransaction {
+  id                       String                        @id @default(uuid())
+  organizationId           String
+  accountId                String
+  externalId               String
+  occurredAt               DateTime
+  datePrecision            FinancialDatePrecision        @default(DATE_ONLY)
+  direction                FinancialTransactionDirection
+  kind                     FinancialTransactionKind
+  amount                   Decimal                       @db.Decimal(14, 2)
+  description              String
+  counterpartyName         String?
+  counterpartyDocument     String?
+  externalReference        String?
+  categoryId               String?
+  clientId                 String?
+  suggestedClientId        String?
+  categorizationSource     FinancialCategorizationSource @default(PENDING)
+  categorizationConfidence Decimal?                      @db.Decimal(5, 2)
+  rawPayload               Json?
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  account         FinancialAccount   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  category        FinancialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  client          Client?            @relation("ClientTransactions", fields: [clientId], references: [id], onDelete: SetNull)
+  suggestedClient Client?            @relation("SuggestedClientTransactions", fields: [suggestedClientId], references: [id], onDelete: SetNull)
+  sourceTransfer  FinancialTransfer? @relation("SourceTransactionTransfer")
+  destTransfer    FinancialTransfer? @relation("DestTransactionTransfer")
+
+  @@unique([accountId, externalId])
+  @@index([organizationId])
+  @@index([accountId])
+  @@index([occurredAt])
+  @@index([direction])
+  @@index([kind])
+  @@index([categoryId])
+  @@index([clientId])
+  @@index([suggestedClientId])
+  @@index([categorizationSource])
+  @@map("financial_transactions")
+}
+
+model FinancialTransfer {
+  id                       String                  @id @default(uuid())
+  organizationId           String
+  sourceAccountId          String
+  destinationAccountId     String
+  sourceTransactionId      String                  @unique
+  destinationTransactionId String?                 @unique
+  amount                   Decimal                 @db.Decimal(14, 2)
+  transferredAt            DateTime
+  status                   FinancialTransferStatus @default(UNMATCHED)
+  confidence               Decimal                 @default(0) @db.Decimal(5, 2)
+  matchReason              String?
+  confirmedAt              DateTime?
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+
+  organization           Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sourceAccount          FinancialAccount      @relation("SourceAccountTransfers", fields: [sourceAccountId], references: [id], onDelete: Cascade)
+  destinationAccount     FinancialAccount      @relation("DestAccountTransfers", fields: [destinationAccountId], references: [id], onDelete: Cascade)
+  sourceTransaction      FinancialTransaction  @relation("SourceTransactionTransfer", fields: [sourceTransactionId], references: [id], onDelete: Cascade)
+  destinationTransaction FinancialTransaction? @relation("DestTransactionTransfer", fields: [destinationTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([sourceAccountId])
+  @@index([destinationAccountId])
+  @@index([status])
+  @@index([transferredAt])
+  @@map("financial_transfers")
+}
+
+model Permission {
+  code        String   @id
+  area        String
+  description String
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+  memberOverrides OrganizationMemberPermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role           Role
+  permissionCode String
+  createdAt      DateTime @default(now())
+
+  permission Permission @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([role, permissionCode])
+  @@index([permissionCode])
+  @@map("role_permissions")
+}
+
+model OrganizationMemberPermission {
+  organizationId       String
+  organizationMemberId String
+  permissionCode       String
+  allowed              Boolean
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+  permission         Permission         @relation(fields: [permissionCode], references: [code], onDelete: Cascade)
+
+  @@id([organizationMemberId, permissionCode])
+  @@index([organizationId])
+  @@index([permissionCode])
+  @@map("organization_member_permissions")
+}
+
+model Team {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization      Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members           TeamMember[]
+  clientAssignments TeamClientAssignment[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("teams")
+}
+
+model TeamMember {
+  organizationId       String
+  teamId               String
+  organizationMemberId String
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team               Team               @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([teamId, organizationMemberId])
+  @@index([organizationId])
+  @@index([organizationMemberId])
+  @@map("team_members")
+}
+
+model TeamClientAssignment {
+  organizationId String
+  teamId         String
+  clientId       String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  team         Team         @relation(fields: [organizationId, teamId], references: [organizationId, id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([teamId, clientId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("team_client_assignments")
+}
+
+model UserClientAssignment {
+  organizationId       String
+  organizationMemberId String
+  clientId             String
+  createdAt            DateTime @default(now())
+
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationMember OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+  client             Client             @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([organizationMemberId, clientId])
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("user_client_assignments")
+}
+
+model AuditLog {
+  id             String   @id @default(uuid())
+  organizationId String
+  actorUserId    String?
+  action         String
+  entityType     String
+  entityId       String?
+  before         Json?
+  after          Json?
+  metadata       Json?
+  requestId      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorUser    User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId])
+  @@index([actorUserId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model OrganizationConfig {
+  organizationId String   @id
+  locale         String   @default("pt-BR")
+  timezone       String   @default("America/Sao_Paulo") // DEC-F6-005
+  currency       String   @default("BRL")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("organization_configs")
+}
+
+model OrganizationFeatureFlag {
+  organizationId String
+  key            String
+  enabled        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, key])
+  @@index([organizationId])
+  @@map("organization_feature_flags")
+}
+
+model ClientContact {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  name           String
+  role           String?
+  email          String?
+  phone          String?
+  isPrimary      Boolean  @default(false)
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, clientId])
+  @@map("client_contacts")
+}
+
+model ClientMeetingNote {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  title          String
+  meetingDate    DateTime
+  summary        String   @db.Text
+  actionItems    String?  @db.Text
+  externalLink   String?
+  authorUserId   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+  authorUser   User?        @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, clientId])
+  @@index([meetingDate])
+  @@map("client_meeting_notes")
+}
+
+// ============================================================================
+// F6-IMP.6: ENTREGAS PRÓPRIAS ZAFIRA (DELIVERABLES FOUNDATION)
+// Fonte mestre no Hub 2.1 — estritamente segregada de tarefas operacionais Asana
+// ============================================================================
+
+enum DeliverablePlanStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  CANCELLED
+}
+
+enum DeliverableItemStatus {
+  PENDING
+  IN_PROGRESS
+  DELIVERED
+  CANCELLED
+}
+
+enum DeliverableLinkType {
+  ASANA_TASK
+  CONTENT_ITEM
+  FILE_URL
+  EXTERNAL_URL
+}
+
+// Nomes alinhados ao contrato @zafira/contracts (F6-IMP.7B, migration 20261011120000)
+enum DeliverableEventType {
+  PLAN_CREATED
+  TARGET_ADJUSTED
+  ITEM_ADDED
+  ITEM_DELIVERED
+  ITEM_REMOVED
+  PLAN_CLOSED
+  PLAN_REOPENED
+  STATUS_CHANGED
+  LINK_ATTACHED
+  LINK_DETACHED
+  PIECE_ADDED
+  PIECE_ADVANCED
+  PIECE_REVERTED
+  PIECE_CANCELLED
+}
+
+// Etapas de uma peça (DEC-F6-002): produzida → aprovada → entregue/postada
+enum DeliverablePieceStage {
+  PRODUCED
+  APPROVED
+  DELIVERED
+  CANCELLED
+}
+
+model DeliverablePlan {
+  id             String                @id @default(uuid())
+  organizationId String
+  clientId       String
+  title          String
+  period         String // Competência mensal: YYYY-MM (ex: 2026-10)
+  status         DeliverablePlanStatus @default(ACTIVE)
+  startDate      DateTime?
+  endDate        DateTime?
+  targetCount    Int                   @default(0) // Meta total contratual do período
+  notes          String?               @db.Text
+  closedAt       DateTime?
+  closedByUserId String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+  closedByUser User?        @relation("PlanClosedByUser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+
+  items  DeliverableItem[]
+  events DeliverableEvent[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, clientId, period])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([period])
+  @@index([status])
+  @@map("deliverable_plans")
+}
+
+model DeliverableItem {
+  id                   String                @id @default(uuid())
+  organizationId       String
+  planId               String
+  title                String
+  description          String?               @db.Text
+  type                 String // ex: POST_FEED, REELS, STORIES, ARTIGO_BLOG, RELATORIO
+  unit                 String                @default("unidade")
+  targetQuantity       Int                   @default(1)
+  deliveredQuantity    Int                   @default(0)
+  status               DeliverableItemStatus @default(PENDING)
+  isExtra              Boolean               @default(false)
+  expectedDeliveryDate DateTime?
+  deliveredAt          DateTime?
+  deliveredByUserId    String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan            DeliverablePlan @relation(fields: [organizationId, planId], references: [organizationId, id], onDelete: Cascade)
+  deliveredByUser User?           @relation("ItemDeliveredByUser", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
+
+  links  DeliverableLink[]
+  events DeliverableEvent[]
+  pieces DeliverablePiece[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([planId])
+  @@index([status])
+  @@index([type])
+  @@map("deliverable_items")
+}
+
+model DeliverableLink {
+  id             String              @id @default(uuid())
+  organizationId String
+  itemId         String
+  type           DeliverableLinkType
+  title          String?
+  externalId     String? // GID do Asana, ID do ContentItem, etc.
+  targetUrl      String? // URL externa validada
+  metadata       Json?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         DeliverableItem @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([type])
+  @@map("deliverable_links")
+}
+
+model DeliverableEvent {
+  id             String               @id @default(uuid())
+  organizationId String
+  planId         String?
+  itemId         String?
+  eventType      DeliverableEventType
+  actorUserId    String?
+  reason         String?              @db.Text // Justificativa obrigatória em ajustes/reaberturas
+  before         Json?
+  after          Json?
+  createdAt      DateTime             @default(now())
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         DeliverablePlan? @relation(fields: [organizationId, planId], references: [organizationId, id], onDelete: Cascade)
+  item         DeliverableItem? @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Cascade)
+  actorUser    User?            @relation("DeliverableEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([planId])
+  @@index([itemId])
+  @@index([eventType])
+  @@map("deliverable_events")
+}
+
+// Peça individual de uma linha do plano (F6-IMP.7B). Conta como entregue só na etapa DELIVERED.
+model DeliverablePiece {
+  id                String                @id @default(uuid())
+  organizationId    String
+  itemId            String
+  title             String
+  format            String? // CONTEUDO_SOCIAL: FEED, CARROSSEL, REELS, STORIES
+  stage             DeliverablePieceStage @default(PRODUCED)
+  url               String? // link opcional (publicação, material)
+  producedAt        DateTime              @default(now())
+  producedByUserId  String?
+  approvedAt        DateTime?
+  approvedByUserId  String?
+  deliveredAt       DateTime?
+  deliveredByUserId String?
+  cancelledAt       DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item            DeliverableItem @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Cascade)
+  producedByUser  User?           @relation("PieceProducedByUser", fields: [producedByUserId], references: [id], onDelete: SetNull)
+  approvedByUser  User?           @relation("PieceApprovedByUser", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  deliveredByUser User?           @relation("PieceDeliveredByUser", fields: [deliveredByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([itemId])
+  @@index([stage])
+  @@map("deliverable_pieces")
+}
+
+model DeliverableTemplate {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  description    String?
+  defaultItems   Json // Array de especificações de itens padrão
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("deliverable_templates")
+}
+
+// ============================================================================
+// F6-IMP.8: ESPELHO E SNAPSHOTS DO ASANA (DEC-F6-003)
+// Somente leitura do Asana. Histórico guardado no Hub por 13 meses.
+// ============================================================================
+
+// Situação do espelho de um projeto vinculado a um cliente.
+model AsanaProjectMirror {
+  id             String    @id @default(uuid())
+  organizationId String
+  clientId       String
+  projectGid     String
+  name           String?
+  baselineAt     DateTime? // primeira conferência bem-sucedida (ponto de partida do histórico)
+  lastSyncedAt   DateTime? // última conferência bem-sucedida
+  lastAttemptAt  DateTime?
+  lastSyncStatus String? // SUCCESS | FAILED
+  lastSyncError  String?   @db.Text
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, clientId, projectGid])
+  @@index([organizationId])
+  @@index([projectGid])
+  @@map("asana_project_mirrors")
+}
+
+// Último estado conhecido de cada tarefa. Tarefa que some do projeto é marcada (removedAt), não apagada.
+model AsanaTaskMirror {
+  id             String    @id @default(uuid())
+  organizationId String
+  clientId       String
+  projectGid     String
+  taskGid        String
+  name           String
+  completed      Boolean   @default(false)
+  dueOn          String?
+  dueAt          String?
+  assigneeGid    String?
+  assigneeName   String?
+  sectionGid     String?
+  sectionName    String?
+  permalinkUrl   String?
+  firstSeenAt    DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  removedAt      DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, clientId, projectGid, taskGid])
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([removedAt])
+  @@map("asana_task_mirrors")
+}
+
+// Mudança relevante detectada numa tarefa (conclusão, prazo, responsável, seção, nome, criação, remoção).
+model AsanaTaskChange {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  projectGid     String
+  taskGid        String
+  taskName       String
+  field          String
+  before         Json?
+  after          Json?
+  detectedAt     DateTime @default(now())
+  syncRunId      String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, clientId, detectedAt])
+  @@index([detectedAt])
+  @@map("asana_task_changes")
+}
+
+// Foto diária dos números de um projeto. Uma por dia; a última conferência bem-sucedida do dia prevalece.
+model AsanaProjectSnapshot {
+  id             String   @id @default(uuid())
+  organizationId String
+  clientId       String
+  projectGid     String
+  snapshotDate   String // YYYY-MM-DD no fuso de referência (America/Sao_Paulo)
+  totalTasks     Int
+  completedTasks Int
+  pendingTasks   Int
+  overdueTasks   Int
+  capturedAt     DateTime @default(now())
+  syncRunId      String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, clientId, projectGid, snapshotDate])
+  @@index([organizationId, clientId, snapshotDate])
+  @@index([snapshotDate])
+  @@map("asana_project_snapshots")
+}
+
+// Trava de execução única entre instâncias da API (agendador interno).
+model SchedulerLease {
+  name       String   @id
+  holder     String
+  expiresAt  DateTime
+  acquiredAt DateTime @default(now())
+
+  @@map("scheduler_leases")
+}
+
+// ============================================================================
+// F7-1a: CONSTRUTOR DE ONBOARDING CONFIGURÁVEL (DEC-F7-004 / DEC-F7-005)
+// Nenhuma linha é criada por migration ou seed de produção. Versões PUBLICADAS são
+// imutáveis (gatilhos na migration). Execuções (F7-2) NÃO existem nesta etapa.
+// ============================================================================
+
+enum OnboardingTemplateScopeKind {
+  GENERAL
+  SERVICE
+  PACKAGE
+  CLIENT_TYPE
+}
+
+enum OnboardingTemplateStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum OnboardingVersionStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum OnboardingStepKind {
+  MANUAL
+  CONFIRM_ASANA_PROJECT
+  CALENDAR_EVENT
+  AUTOMATION
+}
+
+enum OnboardingAssigneeMode {
+  NONE
+  FUNCTION
+  MEMBER
+}
+
+enum OnboardingDueAnchor {
+  START
+  RELEASED
+}
+
+enum OnboardingEvidenceKind {
+  NONE
+  LINK
+  NOTE
+}
+
+enum OnboardingCompletionCondition {
+  CONFIRMATION
+  EVIDENCE_PROVIDED
+  ASANA_PROJECT_LINKED
+  CALENDAR_EVENT_LINKED
+  AUTOMATION_SUCCEEDED
+}
+
+// Função operacional da agência. INDEPENDENTE do RBAC: nunca concede permissão.
+model OrganizationFunction {
+  id             String   @id @default(uuid())
+  organizationId String
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      OrganizationFunctionMember[]
+  steps        OnboardingStepDefinition[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("organization_functions")
+}
+
+model OrganizationFunctionMember {
+  organizationId       String
+  functionId           String
+  organizationMemberId String
+  createdAt            DateTime @default(now())
+
+  function OrganizationFunction @relation(fields: [organizationId, functionId], references: [organizationId, id], onDelete: Cascade)
+  member   OrganizationMember   @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([functionId, organizationMemberId])
+  @@index([organizationId])
+  @@index([organizationMemberId])
+  @@map("organization_function_members")
+}
+
+model OnboardingTemplate {
+  id              String                      @id @default(uuid())
+  organizationId  String
+  name            String
+  description     String?                     @db.Text
+  scopeKind       OnboardingTemplateScopeKind @default(GENERAL)
+  scopeLabel      String?
+  status          OnboardingTemplateStatus    @default(ACTIVE)
+  createdByUserId String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+
+  organization Organization                @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    User?                       @relation("OnboardingTemplateCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  versions     OnboardingTemplateVersion[]
+  events       OnboardingEvent[]
+  executions   OnboardingExecution[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("onboarding_templates")
+}
+
+// Sem FK direta para Organization (a cascata passa pelo modelo): o gatilho de imutabilidade
+// precisa de uma ordem de remoção previsível.
+model OnboardingTemplateVersion {
+  id                String                  @id @default(uuid())
+  organizationId    String
+  templateId        String
+  versionNumber     Int
+  status            OnboardingVersionStatus @default(DRAFT)
+  changeNote        String?                 @db.Text
+  basedOnVersionId  String?
+  publishedAt       DateTime?
+  publishedByUserId String?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  template    OnboardingTemplate         @relation(fields: [organizationId, templateId], references: [organizationId, id], onDelete: Cascade)
+  publishedBy User?                      @relation("OnboardingVersionPublishedBy", fields: [publishedByUserId], references: [id], onDelete: SetNull)
+  steps       OnboardingStepDefinition[]
+  executions  OnboardingExecution[]
+
+  @@unique([organizationId, id])
+  @@unique([templateId, versionNumber])
+  @@index([organizationId])
+  @@index([templateId])
+  @@map("onboarding_template_versions")
+}
+
+model OnboardingStepDefinition {
+  id                  String                        @id @default(uuid())
+  organizationId      String
+  versionId           String
+  stepKey             String
+  position            Int
+  title               String
+  description         String?                       @db.Text
+  kind                OnboardingStepKind            @default(MANUAL)
+  assigneeMode        OnboardingAssigneeMode        @default(NONE)
+  functionId          String?
+  memberId            String?
+  dueBusinessDays     Int?
+  dueAnchor           OnboardingDueAnchor           @default(RELEASED)
+  evidenceKind        OnboardingEvidenceKind        @default(NONE)
+  evidenceRequired    Boolean                       @default(false)
+  completionCondition OnboardingCompletionCondition @default(CONFIRMATION)
+  blocksCompletion    Boolean                       @default(false)
+  // F7-4a: fluxo n8n acionado por etapa AUTOMATION (da lista da organizacao)
+  automationKey       String?
+  createdAt           DateTime                      @default(now())
+
+  version      OnboardingTemplateVersion  @relation(fields: [organizationId, versionId], references: [organizationId, id], onDelete: Cascade)
+  function     OrganizationFunction?      @relation(fields: [organizationId, functionId], references: [organizationId, id], onDelete: NoAction)
+  dependencies OnboardingStepDependency[] @relation("StepDependencies")
+  dependents   OnboardingStepDependency[] @relation("StepDependents")
+  runs         OnboardingStepRun[]
+
+  @@unique([versionId, stepKey])
+  @@unique([versionId, position])
+  @@index([organizationId])
+  @@index([functionId])
+  @@map("onboarding_step_definitions")
+}
+
+model OnboardingStepDependency {
+  organizationId   String
+  versionId        String
+  stepKey          String
+  dependsOnStepKey String
+
+  step      OnboardingStepDefinition @relation("StepDependencies", fields: [versionId, stepKey], references: [versionId, stepKey], onDelete: Cascade)
+  dependsOn OnboardingStepDefinition @relation("StepDependents", fields: [versionId, dependsOnStepKey], references: [versionId, stepKey], onDelete: Cascade)
+
+  @@id([versionId, stepKey, dependsOnStepKey])
+  @@index([organizationId])
+  @@map("onboarding_step_dependencies")
+}
+
+// Trilha do MODELO (criar, editar, publicar, arquivar, duplicar...). Complementa o AuditLog.
+model OnboardingEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  templateId     String
+  versionId      String?
+  type           String
+  actorUserId    String?
+  reason         String?  @db.Text
+  before         Json?
+  after          Json?
+  createdAt      DateTime @default(now())
+
+  template OnboardingTemplate @relation(fields: [organizationId, templateId], references: [organizationId, id], onDelete: Cascade)
+  actor    User?              @relation("OnboardingEventActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, templateId, createdAt])
+  @@map("onboarding_events")
+}
+
+// ==========================================================================
+// F7-2a - Execucao do onboarding por cliente (DEC-F7-008).
+// Regras no banco que o Prisma nao expressa (indice unico parcial B2, CHECKs, gatilhos) estao
+// na migration 20261012040000 e NAO devem ser removidas (ver ESTADO_ATUAL / DEC-F7-007).
+// ==========================================================================
+
+enum OnboardingExecutionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum OnboardingStepRunStatus {
+  WAITING
+  READY
+  IN_PROGRESS
+  DONE
+  SKIPPED
+  CANCELLED
+}
+
+// Gatilho de contrato assinado (F9) entra por migration propria; hoje so MANUAL.
+enum OnboardingStartTrigger {
+  MANUAL
+}
+
+enum OnboardingAssigneeSource {
+  NONE
+  MODEL_MEMBER
+  FUNCTION_RESOLVED
+  MANUAL
+}
+
+// Cliente, modelo e versao sao IMUTAVEIS (gatilho). Usuarios sem FK: desativar/remover pessoa nao toca o historico.
+model OnboardingExecution {
+  id                String                    @id @default(uuid())
+  organizationId    String
+  clientId          String
+  templateId        String
+  versionId         String
+  status            OnboardingExecutionStatus @default(ACTIVE)
+  startTrigger      OnboardingStartTrigger    @default(MANUAL)
+  sourceRef         String?
+  requestId         String?
+  startedAt         DateTime                  @default(now())
+  startedByUserId   String?
+  completedAt       DateTime?
+  completedByUserId String?
+  completionMode    String?
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelReason      String?                   @db.Text
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client                    @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+  template     OnboardingTemplate        @relation(fields: [organizationId, templateId], references: [organizationId, id], onDelete: NoAction)
+  version      OnboardingTemplateVersion @relation(fields: [organizationId, versionId], references: [organizationId, id], onDelete: NoAction)
+  stepRuns     OnboardingStepRun[]
+  events       OnboardingExecutionEvent[]
+  automationOutbox AutomationOutbox[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, id, versionId])
+  @@unique([organizationId, requestId])
+  @@index([organizationId, status])
+  @@index([organizationId, clientId])
+  @@index([templateId])
+  @@map("onboarding_executions")
+}
+
+model OnboardingStepRun {
+  id                String                   @id @default(uuid())
+  organizationId    String
+  executionId       String
+  versionId         String
+  stepKey           String
+  status            OnboardingStepRunStatus
+  blocked           Boolean                  @default(false)
+  blockedReason     String?                  @db.Text
+  blockedAt         DateTime?
+  assigneeMemberId  String?
+  assigneeSource    OnboardingAssigneeSource @default(NONE)
+  functionId        String?
+  releasedAt        DateTime?
+  dueDate           DateTime?                @db.Date
+  startedAt         DateTime?
+  completedAt       DateTime?
+  completedByUserId String?
+  evidenceLink      String?
+  evidenceNote      String?                  @db.Text
+  asanaProjectGid   String?
+  // F7-3c: instantaneo do evento do Calendar usado na conclusao (historico; sem FK, o evento pode sair da janela)
+  calendarEventId       String?
+  calendarEventTitle    String?
+  calendarEventStartAt  DateTime?
+  // F7-4a: conclusao por resultado autenticado da automacao (sem pessoa)
+  completedBySystem     Boolean                  @default(false)
+  skipReason        String?                  @db.Text
+  skippedByUserId   String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  execution  OnboardingExecution      @relation(fields: [organizationId, executionId, versionId], references: [organizationId, id, versionId], onDelete: Cascade)
+  definition OnboardingStepDefinition @relation(fields: [versionId, stepKey], references: [versionId, stepKey], onDelete: NoAction)
+
+  @@unique([executionId, stepKey])
+  @@unique([organizationId, id])
+  @@index([organizationId, assigneeMemberId, status])
+  @@index([executionId])
+  @@map("onboarding_step_runs")
+}
+
+// Append-only (gatilho): sem UPDATE e sem DELETE direto.
+model OnboardingExecutionEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  executionId    String
+  stepKey        String?
+  type           String
+  actorUserId    String?
+  reason         String?  @db.Text
+  before         Json?
+  after          Json?
+  createdAt      DateTime @default(now())
+
+  execution OnboardingExecution @relation(fields: [organizationId, executionId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([executionId, createdAt])
+  @@index([organizationId, createdAt])
+  @@map("onboarding_execution_events")
+}
+
+// ==========================================================================
+// F7-3a - Agenda Google Calendar (SOMENTE LEITURA) - DEC-F7-011/012.
+// Indices GIN/parciais, CHECKs e gatilhos estao na migration 20261012050000 e NAO devem ser removidos.
+// ==========================================================================
+
+enum CalendarEventStatus {
+  CONFIRMED
+  TENTATIVE
+  CANCELLED
+}
+
+enum CalendarEventCategory {
+  MEETING
+  CAPTURE
+  TECHNICAL_VISIT
+  PRESENTATION
+  TRAINING
+  OTHER
+}
+
+enum CalendarLinkScope {
+  EVENT
+  SERIES
+}
+
+model CalendarSource {
+  id               String                 @id @default(uuid())
+  organizationId   String
+  connectionId     String
+  googleCalendarId String
+  name             String
+  accessRole       String
+  timeZone         String?
+  color            String?
+  isMonitored      Boolean                @default(false)
+  defaultCategory  CalendarEventCategory?
+  syncCursorAt     DateTime?
+  lastSyncedAt     DateTime?
+  lastReconciledAt DateTime?
+  lastError        String?                @db.Text
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connection   IntegrationConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  events       CalendarEvent[]
+
+  @@unique([connectionId, googleCalendarId])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("calendar_sources")
+}
+
+// Dados minimos: sem descricao, e-mails, link de videoconferencia ou payload bruto. Participantes so como HMAC.
+model CalendarEvent {
+  id                     String              @id @default(uuid())
+  organizationId         String
+  sourceId               String
+  googleEventId          String
+  recurringEventId       String?
+  originalStartDateTime  DateTime?
+  originalStartDate      DateTime?           @db.Date
+  originalStartTimeZone  String?
+  iCalUID                String?
+  title                  String
+  isAllDay               Boolean             @default(false)
+  startAt                DateTime?
+  startDate              DateTime?           @db.Date
+  endAt                  DateTime?
+  endDate                DateTime?           @db.Date
+  timeZone               String?
+  status                 CalendarEventStatus @default(CONFIRMED)
+  visibility             String              @default("default")
+  location               String?
+  htmlLink               String?
+  attendeeCount          Int                 @default(0)
+  attendeeHashes         String[]
+  googleUpdatedAt        DateTime?
+  syncedAt               DateTime            @default(now())
+  missingFromSourceAt    DateTime?
+  createdAt              DateTime            @default(now())
+  updatedAt              DateTime            @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  source       CalendarSource      @relation(fields: [organizationId, sourceId], references: [organizationId, id], onDelete: Cascade)
+  links        CalendarEventLink[]
+
+  @@unique([sourceId, googleEventId])
+  @@unique([organizationId, id])
+  @@index([organizationId, startAt])
+  @@index([organizationId, startDate])
+  @@index([organizationId, sourceId, recurringEventId])
+  @@map("calendar_events")
+}
+
+// Vinculo LOCAL (nunca volta ao Google). EVENT = uma ocorrencia; SERIES = por recurringEventId.
+model CalendarEventLink {
+  id               String                @id @default(uuid())
+  organizationId   String
+  scope            CalendarLinkScope
+  eventId          String?
+  sourceId         String?
+  recurringEventId String?
+  clientId         String?
+  asanaProjectGid  String?
+  category         CalendarEventCategory @default(OTHER)
+  notes            String?               @db.Text
+  createdByUserId  String?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        CalendarEvent? @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Cascade)
+  client       Client?        @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, clientId])
+  @@index([organizationId, sourceId, recurringEventId])
+  @@map("calendar_event_links")
+}
+
+// Associacao EXPLICITA membro do Hub <-> identidade Google (somente HMAC; e-mail em texto e descartado).
+model CalendarMemberIdentity {
+  id                   String   @id @default(uuid())
+  organizationId       String
+  organizationMemberId String
+  identityHash         String
+  displayHint          String
+  createdByUserId      String?
+  createdAt            DateTime @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       OrganizationMember @relation(fields: [organizationId, organizationMemberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, organizationMemberId, identityHash])
+  @@index([organizationId, identityHash])
+  @@map("calendar_member_identities")
+}
+
+// ==========================================================================
+// F7-4a - Automacoes n8n do onboarding (DEC-F7-016). Infraestrutura generica.
+// Indice unico da caixa de saida, CHECKs e gatilho estao na migration 20261012070000: NAO remover.
+// O n8n NUNCA escreve no Asana por estas automacoes (D1). Credencial em IntegrationConnection (provider N8N).
+// ==========================================================================
+
+enum AutomationOutboxStatus {
+  PENDING
+  SENT
+  RETRYING
+  SUCCEEDED
+  FAILED
+  TIMED_OUT
+  DEAD
+}
+
+enum AutomationEventType {
+  STEP_AUTOMATION
+  EXECUTION_STARTED
+  EXECUTION_COMPLETED
+  EXECUTION_CANCELLED
+}
+
+model AutomationFlow {
+  id                 String   @id @default(uuid())
+  organizationId     String
+  key                String
+  name               String
+  description        String?  @db.Text
+  webhookUrl         String
+  enabled            Boolean  @default(true)
+  subscribeLifecycle Boolean  @default(false)
+  includeClientName  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@map("automation_flows")
+}
+
+// Persistida ANTES do envio (outbox). A chave de idempotencia e estavel em reenvios.
+model AutomationOutbox {
+  id               String                 @id @default(uuid())
+  organizationId   String
+  executionId      String
+  stepKey          String?
+  flowKey          String
+  eventType        AutomationEventType
+  generation       Int                    @default(1)
+  idempotencyKey   String                 @unique
+  status           AutomationOutboxStatus @default(PENDING)
+  attempts         Int                    @default(0)
+  nextAttemptAt    DateTime               @default(now())
+  sentAt           DateTime?
+  finishedAt       DateTime?
+  lastError        String?                @db.Text
+  resultCode       String?
+  resultMessage    String?
+  externalRefs     Json?
+  appliedAt        DateTime?
+  requestedByUserId String?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution    OnboardingExecution @relation(fields: [organizationId, executionId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, executionId])
+  @@map("automation_outbox")
+}
+
+// ---------------------------------------------------------------------------
+// F8-1 (DEC-F8-003): conteudo - arquivos finais versionados. Nada e apagado (D2/P28):
+// FK do cliente em RESTRICT e gatilhos no banco bloqueiam DELETE e alteracao de historico.
+// ---------------------------------------------------------------------------
+enum ContentFormat {
+  FEED_IMAGE
+  CAROUSEL
+  REEL
+  STORY
+}
+
+enum ContentMediaKind {
+  IMAGE
+  VIDEO
+}
+
+model ContentItem {
+  id                 String        @id @default(uuid())
+  organizationId     String
+  clientId           String
+  title              String
+  format             ContentFormat
+  asanaTaskGid       String? // vinculo local; nenhuma escrita no Asana
+  deliverablePieceId String? // vinculo com Entregas; sem alterar contadores (F8-3)
+  createdByUserId    String?
+  archivedAt         DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client          @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  versions     ContentVersion[]
+  media        ContentMedia[]
+  events       ContentEvent[]
+  approvalLinks     ApprovalLink[]
+  approvalDecisions ApprovalDecision[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, clientId])
+  @@map("content_items")
+}
+
+model ContentVersion {
+  id                String    @id @default(uuid())
+  organizationId    String
+  itemId            String
+  number            Int
+  caption           String    @default("") @db.Text
+  contentHash       String
+  sentForApprovalAt DateTime? // F8-2: depois disso a versao e imutavel
+  createdByUserId   String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  media        ContentMedia[]
+  approvalLinks ApprovalLink[]
+  decision      ApprovalDecision?
+
+  @@unique([itemId, number])
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@map("content_versions")
+}
+
+model ContentMedia {
+  id               String           @id @default(uuid())
+  organizationId   String
+  itemId           String
+  versionId        String
+  position         Int
+  kind             ContentMediaKind
+  mimeType         String
+  sizeBytes        Int
+  sha256           String
+  storageKey       String
+  originalFilename String
+  uploadedByUserId String?
+  createdAt        DateTime         @default(now())
+  removedAt        DateTime?
+  removedByUserId  String?
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  version      ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([versionId])
+  @@map("content_media")
+}
+
+model ContentEvent {
+  id             String   @id @default(uuid())
+  organizationId String
+  itemId         String
+  versionId      String?
+  type           String
+  actorUserId    String?
+  data           Json?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         ContentItem  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([itemId, createdAt])
+  @@map("content_events")
+}
+
+// ---------------------------------------------------------------------------
+// F8-2 (DEC-F8-004): aprovacao do cliente por link seguro. O token (256 bits) nunca e guardado:
+// so o hash. N1 = identificacao DECLARADA (nao e identidade autenticada). Decisao unica por versao.
+// ---------------------------------------------------------------------------
+enum ApprovalDecisionKind {
+  APPROVED
+  CHANGES_REQUESTED
+}
+
+enum ApprovalChannel {
+  WHATSAPP
+  EMAIL
+  OTHER
+}
+
+model ApprovalLink {
+  id                  String          @id @default(uuid())
+  organizationId      String
+  itemId              String
+  versionId           String
+  tokenHash           String          @unique
+  expiresAt           DateTime
+  revokedAt           DateTime?
+  revokedByUserId     String?
+  revokeReason        String?
+  recipientLabel      String?
+  channel             ApprovalChannel @default(OTHER)
+  identificationLevel String          @default("N1")
+  contentHashAtSend   String
+  createdByUserId     String?
+  accessCount         Int             @default(0)
+  lastAccessedAt      DateTime?
+  createdAt           DateTime        @default(now())
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         ContentItem        @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  version      ContentVersion     @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  decisions    ApprovalDecision[]
+
+  @@index([organizationId])
+  @@index([versionId])
+  @@map("approval_links")
+}
+
+model ApprovalDecision {
+  id                    String               @id @default(uuid())
+  organizationId        String
+  itemId                String
+  versionId             String               @unique
+  linkId                String
+  decision              ApprovalDecisionKind
+  comment               String?              @db.Text
+  approverName          String
+  approverContact       String
+  authorityDeclared     Boolean
+  channel               ApprovalChannel
+  identificationLevel   String
+  contentHashAtDecision String
+  ipHash                String?
+  userAgentHash         String?
+  createdAt             DateTime             @default(now())
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  item         ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  version      ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  link         ApprovalLink   @relation(fields: [linkId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([itemId])
+  @@map("approval_decisions")
+}

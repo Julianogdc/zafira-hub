@@ -1,0 +1,619 @@
+import { FinancialTransactionDirection, FinancialDatePrecision, Prisma } from '@prisma/client';
+
+/**
+ * Normalizador robusto de datas do extrato do Banco Inter PJ.
+ * Suporta múltiplos formatos retornados pela API Banking v2:
+ * - ISO completo: "2026-09-17T14:30:00.663504" ou "2026-09-17T14:30:00Z"
+ * - ISO com espaço: "2026-09-17 14:30:00" ou "2026-09-17 14:30:00.000"
+ * - ISO date-only: "2026-09-17" (normalizado para 12:00:00 UTC para evitar divergência de dia civil)
+ * - Padrão brasileiro: "17/09/2026" ou "17/09/2026 14:30:00"
+ * - Timestamp numérico em milissegundos ou segundos
+ * - Instância de Date
+ *
+ * REGRA INEGOCIÁVEL:
+ * NUNCA utiliza a data atual (new Date()) como fallback silencioso.
+ * Se o valor for nulo, indefinido, vazio ou irrecuperável, lança erro explícito.
+ */
+export function normalizeInterDate(rawDate: unknown): Date {
+  if (rawDate === null || rawDate === undefined || rawDate === '') {
+    throw new Error('DATA_EXTRATO_INVALIDA: Campo de data do Banco Inter está ausente ou vazio.');
+  }
+
+  if (rawDate instanceof Date) {
+    if (isNaN(rawDate.getTime())) {
+      throw new Error('DATA_EXTRATO_INVALIDA: Objeto Date inválido fornecido.');
+    }
+    return rawDate;
+  }
+
+  if (typeof rawDate === 'number') {
+    // Timestamp em segundos vs milissegundos
+    const ts = rawDate < 10000000000 ? rawDate * 1000 : rawDate;
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) {
+      throw new Error(`DATA_EXTRATO_INVALIDA: Timestamp numérico inválido (${rawDate}).`);
+    }
+    return d;
+  }
+
+  if (typeof rawDate === 'string') {
+    const trimmed = rawDate.trim();
+    if (!trimmed) {
+      throw new Error('DATA_EXTRATO_INVALIDA: String de data em branco.');
+    }
+
+    // 1. Formato brasileiro: DD/MM/YYYY ou DD/MM/YYYY HH:mm:ss
+    const brMatch = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?/);
+    if (brMatch) {
+      const day = brMatch[1].padStart(2, '0');
+      const month = brMatch[2].padStart(2, '0');
+      const year = brMatch[3];
+      const hours = (brMatch[4] || '12').padStart(2, '0');
+      const minutes = (brMatch[5] || '00').padStart(2, '0');
+      const seconds = (brMatch[6] || '00').padStart(2, '0');
+      const isoStr = `${year}-${month}-${day}T${hours}:${minutes}:${seconds}Z`;
+      const parsed = new Date(isoStr);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+
+    // 2. Formato ISO date-only: YYYY-MM-DD
+    const isoDateOnlyMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDateOnlyMatch) {
+      // Normaliza para meio-dia UTC para prevenir desvio de dia por fuso horário local
+      const parsed = new Date(`${trimmed}T12:00:00.000Z`);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+
+    // 3. Formato ISO com espaço entre data e hora: YYYY-MM-DD HH:mm:ss...
+    const isoSpaceMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?.*)$/);
+    if (isoSpaceMatch) {
+      const parsed = new Date(`${isoSpaceMatch[1]}T${isoSpaceMatch[2]}Z`);
+      if (!isNaN(parsed.getTime())) {
+        return parsed;
+      }
+    }
+
+    // 4. Tentativa padrão ISO
+    const standardParsed = new Date(trimmed);
+    if (!isNaN(standardParsed.getTime())) {
+      return standardParsed;
+    }
+  }
+
+  throw new Error(`DATA_EXTRATO_INVALIDA: Não foi possível converter '${String(rawDate)}' em uma data válida.`);
+}
+
+/**
+ * Normalizador robusto da direção de transação (CREDIT / DEBIT) do extrato Inter PJ.
+ *
+ * REGRA INEGOCIÁVEL:
+ * - Usa os campos estruturados oficiais do payload do Inter (tipoOperacao, tipoTransacao, operacao, titulo).
+ * - Não assume débitos por omissão.
+ * - PIX RECEBIDO -> CREDIT (Entradas operacionais)
+ * - PIX ENVIADO, pagamento de fatura, compra no cartão, tarifas -> DEBIT (Saídas operacionais)
+ */
+export function normalizeInterDirection(item: any): FinancialTransactionDirection {
+  if (!item || typeof item !== 'object') {
+    return 'DEBIT';
+  }
+
+  // 1. Campo estruturado primário oficial do Banco Inter: tipoOperacao ou operacao
+  const rawOp = String(item.tipoOperacao || item.operacao || '').trim().toUpperCase();
+
+  if (rawOp === 'C' || rawOp === 'CREDITO' || rawOp === 'CREDIT') {
+    return 'CREDIT';
+  }
+  if (rawOp === 'D' || rawOp === 'DEBITO' || rawOp === 'DEBIT') {
+    return 'DEBIT';
+  }
+
+  // 2. Campo estruturado secundário oficial: tipoTransacao
+  const rawType = String(item.tipoTransacao || '').trim().toUpperCase();
+
+  if (
+    rawType.includes('RECEBIDO') ||
+    rawType.includes('RECEBIMENTO') ||
+    rawType.includes('CREDITO') ||
+    rawType === 'PIX_RECEBIDO' ||
+    rawType === 'TED_RECEBIDA' ||
+    rawType === 'DOC_RECEBIDO' ||
+    rawType === 'DEPOSITO' ||
+    rawType === 'RESGATE'
+  ) {
+    return 'CREDIT';
+  }
+
+  if (
+    rawType.includes('ENVIADO') ||
+    rawType.includes('PAGAMENTO') ||
+    rawType.includes('DEBITO') ||
+    rawType.includes('COMPRA') ||
+    rawType.includes('TARIFA') ||
+    rawType === 'PIX_ENVIADO' ||
+    rawType === 'TED_ENVIADA' ||
+    rawType === 'PAGAMENTO_FATURA' ||
+    rawType === 'COMPRA_CARTAO'
+  ) {
+    return 'DEBIT';
+  }
+
+  // 3. Campo estruturado complementar: titulo do lançamento (ex: 'PIX RECEBIDO', 'PIX ENVIADO', 'PAGAMENTO DE FATURA')
+  const rawTitle = String(item.titulo || '').trim().toUpperCase();
+
+  if (
+    rawTitle.includes('PIX RECEBIDO') ||
+    rawTitle.includes('RECEBIDO') ||
+    rawTitle.includes('RECEBIMENTO') ||
+    rawTitle.includes('TRANSFERENCIA RECEBIDA') ||
+    rawTitle.includes('CRÉDITO') ||
+    rawTitle.includes('CREDITO') ||
+    rawTitle.includes('ESTORNO RECEBIDO')
+  ) {
+    return 'CREDIT';
+  }
+
+  if (
+    rawTitle.includes('PIX ENVIADO') ||
+    rawTitle.includes('PAGAMENTO') ||
+    rawTitle.includes('FATURA') ||
+    rawTitle.includes('COMPRA') ||
+    rawTitle.includes('DÉBITO') ||
+    rawTitle.includes('DEBITO') ||
+    rawTitle.includes('TARIFA') ||
+    rawTitle.includes('APLICAÇÃO') ||
+    rawTitle.includes('APLICACAO')
+  ) {
+    return 'DEBIT';
+  }
+
+  // 4. Descrição do lançamento (último recurso se campos estruturados estiverem vazios)
+  const rawDesc = String(item.descricao || '').trim().toUpperCase();
+  if (
+    rawDesc.includes('PIX RECEBIDO') ||
+    rawDesc.includes('RECEBIMENTO') ||
+    rawDesc.includes('TRANSFERENCIA RECEBIDA')
+  ) {
+    return 'CREDIT';
+  }
+
+  return 'DEBIT';
+}
+
+/**
+ * Converte com segurança qualquer valor monetário (Prisma.Decimal, Decimal.js, number, string)
+ * para uma instância de Prisma.Decimal.
+ * Retorna null se o valor for nulo, indefinido, vazio ou não puder ser convertido.
+ */
+export function toPrismaDecimal(value: unknown): Prisma.Decimal | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (value instanceof Prisma.Decimal) {
+    return value;
+  }
+
+  // Suporte a objetos Decimal de outras instâncias ou bibliotecas com método isZero/toNumber
+  if (typeof value === 'object') {
+    if (typeof (value as any).toNumber === 'function' || typeof (value as any).isZero === 'function') {
+      try {
+        return new Prisma.Decimal((value as any).toString());
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  if (typeof value === 'number') {
+    if (isNaN(value) || !isFinite(value)) return null;
+    return new Prisma.Decimal(value);
+  }
+
+  if (typeof value === 'string') {
+    let clean = value.trim();
+    if (!clean) return null;
+
+    if (clean.includes(',') && clean.includes('.')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else if (clean.includes(',')) {
+      clean = clean.replace(',', '.');
+    }
+
+    try {
+      const parsed = new Prisma.Decimal(clean);
+      if (isNaN(parsed.toNumber()) || !isFinite(parsed.toNumber())) return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Verifica se um valor monetário é estritamente igual a R$ 0,00.
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function isZeroDecimal(value: unknown): boolean {
+  if (value === 0 || value === '0' || value === '0.00' || value === '0,00') return true;
+  const dec = toPrismaDecimal(value);
+  if (!dec) return false;
+  return dec.isZero();
+}
+
+/**
+ * Verifica se um valor monetário é estritamente positivo (> 0).
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function isPositiveDecimal(value: unknown): boolean {
+  const dec = toPrismaDecimal(value);
+  if (!dec) return false;
+  return dec.gt(0);
+}
+
+/**
+ * Compara se dois valores monetários são exatamente iguais.
+ * Suporta Prisma.Decimal, Decimal.js, number e string.
+ */
+export function areDecimalsEqual(a: unknown, b: unknown): boolean {
+  const decA = toPrismaDecimal(a);
+  const decB = toPrismaDecimal(b);
+  if (!decA || !decB) return false;
+  return decA.eq(decB);
+}
+
+/**
+ * Converte com segurança para number JavaScript.
+ */
+export function toSafeNumber(value: unknown): number {
+  const dec = toPrismaDecimal(value);
+  if (!dec) return 0;
+  return dec.toNumber();
+}
+
+/**
+ * Normaliza o valor da transação garantindo magnitude positiva absoluta.
+ * Retorna null se o valor for ausente, inválido ou não interpretável.
+ * O sinal e a cor da transação são determinados exclusivamente pela direção (CREDIT / DEBIT).
+ */
+export function normalizeInterAmount(rawAmount: unknown): number | null {
+  if (rawAmount === null || rawAmount === undefined) {
+    return null;
+  }
+
+  // Suporte direto a Prisma.Decimal e Decimal.js
+  if (typeof rawAmount === 'object') {
+    const dec = toPrismaDecimal(rawAmount);
+    if (dec) {
+      const num = dec.toNumber();
+      if (!isNaN(num) && isFinite(num)) {
+        return Math.abs(num);
+      }
+    }
+    return null;
+  }
+
+  if (typeof rawAmount === 'number') {
+    if (isNaN(rawAmount) || !isFinite(rawAmount)) return null;
+    return Math.abs(rawAmount);
+  }
+
+  if (typeof rawAmount === 'string') {
+    let clean = rawAmount.trim();
+    if (!clean) return null;
+
+    // Se estiver no formato brasileiro '1.250,50'
+    if (clean.includes(',') && clean.includes('.')) {
+      clean = clean.replace(/\./g, '').replace(',', '.');
+    } else if (clean.includes(',')) {
+      clean = clean.replace(',', '.');
+    }
+
+    const parsed = Number(clean);
+    if (isNaN(parsed) || !isFinite(parsed)) return null;
+    return Math.abs(parsed);
+  }
+
+  return null;
+}
+
+/**
+ * Gera um externalId determinístico, imutável e robusto para itens do extrato do Banco Inter.
+ * Prioriza identificador único bancário oficial do Inter (idTransacao, codigoTransacao, nossoNumero).
+ * Fallback composto normalizado que previne variações de string e colisões espúrias.
+ */
+export function generateInterExternalId(
+  item: any,
+  occurredAt: Date,
+  direction: FinancialTransactionDirection,
+  amount: number
+): string {
+  if (!item || typeof item !== 'object') {
+    const dateStr = occurredAt.toISOString().slice(0, 10);
+    return `inter_${dateStr}_${direction}_${amount}`;
+  }
+
+  // 1. Identificadores oficiais do Banco Inter
+  const officialId = String(item.idTransacao || item.codigoTransacao || item.nossoNumero || '').trim();
+  if (officialId) {
+    return officialId;
+  }
+
+  // 2. Fallback determinístico estruturado
+  const dateStr = occurredAt.toISOString().slice(0, 10);
+  const cleanTitle = String(item.titulo || item.descricao || 'transacao')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '_')
+    .slice(0, 40);
+
+  // Contraparte (documento ou nome limpo) para desambiguar lançamentos múltiplos no mesmo dia
+  const cpDoc = String(item.contraparte?.cpfCnpj || '').replace(/\D/g, '').trim();
+  const cpName = String(item.contraparte?.nome || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '_')
+    .slice(0, 30);
+  const cpSuffix = cpDoc || cpName || 'SEM_CP';
+
+  return `inter_${dateStr}_${direction}_${amount}_${cleanTitle}_${cpSuffix}`;
+}
+
+/**
+ * Mascara com segurança CPF ou CNPJ para exibição na gaveta de detalhes, protegendo a privacidade.
+ */
+export function maskDocument(rawDoc?: string | null): string {
+  if (!rawDoc) return 'Documento não informado';
+  const clean = rawDoc.replace(/\D/g, '').trim();
+  if (!clean) return 'Documento não informado';
+
+  if (clean.length === 11) {
+    // CPF: ***.456.789-**
+    return `***.${clean.slice(3, 6)}.${clean.slice(6, 9)}-**`;
+  }
+
+  if (clean.length === 14) {
+    // CNPJ: **.345.678/0001-**
+    return `**.${clean.slice(2, 5)}.${clean.slice(5, 8)}/${clean.slice(8, 12)}-**`;
+  }
+
+  // Fallback genérico seguro
+  if (clean.length > 4) {
+    return `***${clean.slice(-4)}`;
+  }
+
+  return '***';
+}
+
+/**
+ * Identifica rigorosamente a precisão temporal do lançamento do Banco Inter PJ:
+ * - dataHoraMovimento contendo hora real => DATETIME
+ * - hora ou horario presente e preenchido => DATETIME
+ * - dataMovimento, dataEntrada ou formato somente data (ex: YYYY-MM-DD) => DATE_ONLY
+ * - Horário técnico "12:00:00" nunca é considerado horário real do Inter se a string original for date-only.
+ */
+/**
+ * Valida se uma string de horário representa um horário bancário real e não um horário técnico (00:00 ou 12:00).
+ */
+function isRealBankTime(timeStr: string): boolean {
+  const clean = timeStr.trim();
+  return (
+    clean !== '12:00' &&
+    clean !== '12:00:00' &&
+    clean !== '00:00' &&
+    clean !== '00:00:00'
+  );
+}
+
+/**
+ * Identifica rigorosamente a precisão temporal do lançamento do Banco Inter PJ:
+ * - dataHoraMovimento, dataHoraLancamento, dataHora, dataInclusao, horario contendo hora real => DATETIME
+ * - hora, horaLancamento, horaMovimento presentes e preenchidos com hora real => DATETIME
+ * - Campos aninhados (transacao, pix, detalhes) com hora real => DATETIME
+ * - dataMovimento, dataEntrada ou formato somente data (ex: YYYY-MM-DD) => DATE_ONLY
+ * - Horários técnicos "12:00" ou "00:00" nunca são considerados horários reais do Inter.
+ */
+export function extractInterDatePrecision(item: any): FinancialDatePrecision {
+  if (!item || typeof item !== 'object') return 'DATE_ONLY';
+
+  // 1. Campos explícitos de hora preenchidos (raiz ou aninhados)
+  const explicitHourCandidates = [
+    item.hora,
+    item.horaLancamento,
+    item.horaMovimento,
+    item.horario,
+    item.transacao?.hora,
+    item.transacao?.horario,
+    item.pix?.horario,
+    item.pix?.hora,
+    item.detalhes?.hora,
+  ];
+
+  for (const cand of explicitHourCandidates) {
+    if (typeof cand === 'string' && cand.trim() && cand.includes(':')) {
+      const match = cand.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return 'DATETIME';
+      }
+    }
+  }
+
+  // 2. Campos com data e hora combinados (raiz ou aninhados)
+  const combinedCandidates = [
+    item.dataHoraMovimento,
+    item.dataHoraLancamento,
+    item.dataHora,
+    item.dataHoraTransacao,
+    item.dataInclusao,
+    item.timestamp,
+    item.transacao?.dataHora,
+    item.transacao?.dataHoraLancamento,
+    item.pix?.dataHora,
+  ];
+
+  for (const cand of combinedCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.trim().match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return 'DATETIME';
+      }
+    }
+  }
+
+  // 3. Demais casos (dataEntrada, dataMovimento, data, strings YYYY-MM-DD ou horários técnicos 00:00/12:00)
+  return 'DATE_ONLY';
+}
+
+/**
+ * Extrai o horário informado pelo banco se existir de forma comprovável.
+ * Se o banco não tiver informado horário (ex: date-only ou normalizado), retorna null.
+ * REGRA INEGOCIÁVEL: NUNCA inventar horário se o banco não informou e nunca aceitar 12:00 ou 00:00.
+ */
+export function extractInterTime(rawPayload: any): string | null {
+  if (!rawPayload || typeof rawPayload !== 'object') return null;
+
+  const precision = extractInterDatePrecision(rawPayload);
+  if (precision !== 'DATETIME') {
+    return null;
+  }
+
+  // 1. Campos explícitos de hora
+  const explicitHourCandidates = [
+    rawPayload.hora,
+    rawPayload.horaLancamento,
+    rawPayload.horaMovimento,
+    rawPayload.horario,
+    rawPayload.transacao?.hora,
+    rawPayload.transacao?.horario,
+    rawPayload.pix?.horario,
+    rawPayload.pix?.hora,
+    rawPayload.detalhes?.hora,
+  ];
+
+  for (const cand of explicitHourCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.match(/(\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return match[1];
+      }
+    }
+  }
+
+  // 2. Campos combinados de data e hora
+  const combinedCandidates = [
+    rawPayload.dataHoraMovimento,
+    rawPayload.dataHoraLancamento,
+    rawPayload.dataHora,
+    rawPayload.dataHoraTransacao,
+    rawPayload.dataInclusao,
+    rawPayload.timestamp,
+    rawPayload.transacao?.dataHora,
+    rawPayload.transacao?.dataHoraLancamento,
+    rawPayload.pix?.dataHora,
+  ];
+
+  for (const cand of combinedCandidates) {
+    if (typeof cand === 'string' && cand.trim()) {
+      const match = cand.trim().match(/[ T](\d{2}:\d{2}(?::\d{2})?)/);
+      if (match && isRealBankTime(match[1])) {
+        return match[1];
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Formatação da exibição de data e horário da movimentação bancária.
+ * REGRA INEGOCIÁVEL:
+ * - O sufixo "às" SÓ pode existir quando houver horário real confirmado pelo banco.
+ * - Se datePrecision === 'DATE_ONLY' ou time for nulo/vazio/técnico: NUNCA concatena "às".
+ * - A string "às" nunca pode ficar sozinha.
+ */
+export function formatBankDateTimeDisplay(
+  rawDate: string | Date | null | undefined,
+  precision?: FinancialDatePrecision,
+  time?: string | null
+): {
+  dateOnly: string;
+  hasRealTime: boolean;
+  time: string | null;
+  displayWithTime: string;
+} {
+  if (!rawDate) {
+    return {
+      dateOnly: '-',
+      hasRealTime: false,
+      time: null,
+      displayWithTime: '-',
+    };
+  }
+
+  let dateOnly = '-';
+  try {
+    const d = typeof rawDate === 'string' ? new Date(rawDate) : rawDate;
+    if (d && !isNaN(d.getTime())) {
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const year = d.getUTCFullYear();
+      dateOnly = `${day}/${month}/${year}`;
+    }
+  } catch {
+    dateOnly = '-';
+  }
+
+  const cleanTime = typeof time === 'string' ? time.trim() : '';
+  const isTimeTechnical = cleanTime === '12:00' || cleanTime === '12:00:00' || cleanTime === '00:00' || cleanTime === '00:00:00';
+  const isTimeValid = cleanTime.length > 0 && !isTimeTechnical;
+
+  const hasRealTime = precision === 'DATETIME' && isTimeValid;
+
+  if (hasRealTime && cleanTime) {
+    return {
+      dateOnly,
+      hasRealTime: true,
+      time: cleanTime,
+      displayWithTime: `${dateOnly} às ${cleanTime}`,
+    };
+  }
+
+  return {
+    dateOnly,
+    hasRealTime: false,
+    time: null,
+    displayWithTime: dateOnly, // NUNCA inclui 'às' se não houver horário real
+  };
+}
+
+/**
+ * Normaliza e formata o nome da contraparte para exibição.
+ * - Não usa "Informado pelo banco" como se fosse o nome de uma pessoa/empresa.
+ * - Quando não houver contraparte identificada, retorna: "Não informada pelo banco".
+ */
+export function formatCounterpartyDisplay(name?: string | null): string {
+  if (!name || typeof name !== 'string') {
+    return 'Não informada pelo banco';
+  }
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (
+    !trimmed ||
+    lower === 'informado pelo banco' ||
+    lower === 'informada pelo banco' ||
+    lower === 'não informado' ||
+    lower === 'nao informado' ||
+    lower === 'sem contraparte' ||
+    lower === 'null' ||
+    lower === 'undefined'
+  ) {
+    return 'Não informada pelo banco';
+  }
+  return trimmed;
+}
+

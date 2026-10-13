@@ -1,0 +1,183 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — ESTADOS TRANSVERSAIS (DESIGN SYSTEM F3.6)
+   Consome exclusivamente tokens --z-* da F3.2 (Light & Dark nativos)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. CONTAINER BASE DOS ESTADOS (Empty / Error / Permission)
+   -------------------------------------------------------------------------- */
+.stateContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--z-space-8) var(--z-space-6);
+  min-height: 280px;
+  width: 100%;
+  font-family: var(--z-font-ui);
+  box-sizing: border-box;
+}
+
+.stateContainerCompact {
+  padding: var(--z-space-5) var(--z-space-4);
+  min-height: 180px;
+}
+
+.stateContainerFullHeight {
+  min-height: 100vh;
+  background-color: var(--z-surface-bg);
+}
+
+/* --------------------------------------------------------------------------
+   2. ÍCONES E EMBLEMAS
+   -------------------------------------------------------------------------- */
+.iconWrapper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--z-space-4);
+  border-radius: var(--z-radius-full);
+  padding: var(--z-space-3);
+  transition: transform var(--z-transition);
+}
+
+.iconWrapperCompact {
+  margin-bottom: var(--z-space-2);
+  padding: var(--z-space-2);
+}
+
+/* Variantes visuais do wrapper de ícone */
+.iconWrapperEmpty {
+  color: var(--z-text-muted);
+  background-color: var(--z-surface-secondary);
+  border: 1px solid var(--z-border-default);
+}
+
+.iconWrapperError {
+  color: var(--z-danger-text);
+  background-color: var(--z-danger-bg);
+  border: 1px solid var(--z-danger-border);
+}
+
+.iconWrapperPermission {
+  color: var(--z-warning-text);
+  background-color: var(--z-warning-bg);
+  border: 1px solid var(--z-warning-border);
+}
+
+/* --------------------------------------------------------------------------
+   3. TIPOGRAFIA DOS ESTADOS
+   -------------------------------------------------------------------------- */
+.title {
+  margin: 0 0 var(--z-space-2) 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--z-text-primary);
+  font-family: var(--z-font-ui);
+  max-width: 480px;
+}
+
+.titleCompact {
+  font-size: 0.9375rem;
+  margin-bottom: var(--z-space-1);
+}
+
+.description {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--z-text-secondary);
+  font-family: var(--z-font-ui);
+  max-width: 420px;
+}
+
+.descriptionCompact {
+  font-size: 0.8125rem;
+}
+
+/* --------------------------------------------------------------------------
+   4. AÇÕES
+   -------------------------------------------------------------------------- */
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--z-space-3);
+  margin-top: var(--z-space-5);
+  flex-wrap: wrap;
+}
+
+.actionsCompact {
+  margin-top: var(--z-space-3);
+  gap: var(--z-space-2);
+}
+
+/* --------------------------------------------------------------------------
+   5. LOADING STATE
+   -------------------------------------------------------------------------- */
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--z-space-6);
+  min-height: 200px;
+  width: 100%;
+  box-sizing: border-box;
+  font-family: var(--z-font-ui);
+}
+
+.loadingFullHeight {
+  min-height: 100vh;
+  background-color: var(--z-surface-bg);
+}
+
+.loadingSpinner {
+  display: inline-block;
+  border-radius: var(--z-radius-full);
+  border-style: solid;
+  border-color: var(--z-border-default);
+  border-top-color: var(--z-color-accent);
+  animation: stateSpin 0.75s linear infinite;
+  box-sizing: border-box;
+}
+
+.loadingSpinnerSm {
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+}
+
+.loadingSpinnerMd {
+  width: 28px;
+  height: 28px;
+  border-width: 2.5px;
+}
+
+.loadingSpinnerLg {
+  width: 38px;
+  height: 38px;
+  border-width: 3px;
+}
+
+.loadingMessage {
+  margin-top: var(--z-space-3);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--z-text-secondary);
+  font-family: var(--z-font-ui);
+}
+
+.loadingMessageSm {
+  font-size: 0.75rem;
+  margin-top: var(--z-space-2);
+}
+
+@keyframes stateSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}

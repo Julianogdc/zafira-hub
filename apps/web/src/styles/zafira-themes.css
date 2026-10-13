@@ -1,0 +1,125 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — TEMAS LIGHT & DARK (DESIGN SYSTEM)
+   Responde a :root (default Dark), [data-theme='dark'], .dark e [data-theme='light']
+   Princípio de Alto Contraste & Superfícies Neutras
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. TEMA DARK (Default em :root, [data-theme='dark'] e classe .dark)
+   Preserva o estado efetivo atual do Hub real (Dark por CSS estático).
+   Carvão profundo neutro sem subtom violeta.
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme='dark'],
+.dark {
+  /* Superfícies Neutras — Dark */
+  --z-surface-bg: #0F0F12;
+  --z-surface-card: #18181D;
+  --z-surface-panel: #18181D;
+  --z-surface-secondary: #141418;
+  --z-surface-hover: #141418;
+  --z-surface-elevated: #1E1E24;
+
+  /* Topbar Tokens — Dark */
+  --z-topbar-bg: #111114;
+  --z-topbar-border: #2A2A31;
+  --z-topbar-search-bg: #141418;
+  --z-topbar-search-border: #2A2A31;
+  --z-topbar-search-text: #F5F5F7;
+
+  /* Textos — Dark */
+  --z-text-primary: #F5F5F7;
+  --z-text-secondary: #9696A1;
+  --z-text-muted: #9696A1;
+
+  /* REGRA CONSOLIDADA DE FOREGROUND ROXO (Ponto Crítico P5.7E / P5.10A):
+     No Dark, NUNCA usar #412493 como texto sobre carvão (contraste falha).
+     Usar #B39DFF para leitura clara de KPIs, valores e destaques. */
+  --z-text-purple: #B39DFF;
+  --z-color-kpi: var(--z-text-purple);
+
+  /* Bordas — Dark */
+  --z-border-default: #2A2A31;
+  --z-border-subtle: #2A2A31;
+  --z-border-hover: #7256C5;
+
+  /* Sombras Discretas — Dark (Sem glow, sem exagero) */
+  --z-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --z-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --z-shadow-dropdown: 0 6px 20px rgba(0, 0, 0, 0.5);
+
+  /* Variantes Semânticas Sutis — Dark */
+  --z-success-bg: rgba(38, 201, 154, 0.15);
+  --z-success-border: rgba(38, 201, 154, 0.3);
+  --z-success-text: #26C99A;
+
+  --z-warning-bg: rgba(243, 168, 91, 0.15);
+  --z-warning-border: rgba(243, 168, 91, 0.3);
+  --z-warning-text: #F3A85B;
+
+  --z-danger-bg: rgba(241, 92, 105, 0.15);
+  --z-danger-border: rgba(241, 92, 105, 0.3);
+  --z-danger-text: #F15C69;
+
+  --z-info-bg: rgba(111, 168, 255, 0.15);
+  --z-info-border: rgba(111, 168, 255, 0.3);
+  --z-info-text: #6FA8FF;
+}
+
+/* --------------------------------------------------------------------------
+   2. TEMA LIGHT ([data-theme='light'])
+   Superfícies neutras limpas (#FFFFFF, #FAFAFC, #F5F6F8) sem banho lilás estrutural.
+   -------------------------------------------------------------------------- */
+[data-theme='light'] {
+  /* Superfícies Neutras — Light */
+  --z-surface-bg: #F5F6F8;
+  --z-surface-card: #FFFFFF;
+  --z-surface-panel: #FFFFFF;
+  --z-surface-secondary: #FAFAFC;
+  --z-surface-hover: #F5F6F8;
+  --z-surface-elevated: #FFFFFF;
+
+  /* Topbar Tokens — Light */
+  --z-topbar-bg: #FFFFFF;
+  --z-topbar-border: #E2E4E9;
+  --z-topbar-search-bg: #F5F6F8;
+  --z-topbar-search-border: #E2E4E9;
+  --z-topbar-search-text: #1C1B22;
+
+  /* Textos — Light */
+  --z-text-primary: #1C1B22;
+  --z-text-secondary: #7B7B88;
+  --z-text-muted: #7B7B88;
+
+  /* REGRA CONSOLIDADA DE FOREGROUND ROXO (Ponto Crítico):
+     No Light, o roxo institucional #412493 tem contraste ótimo (> 7:1) */
+  --z-text-purple: #412493;
+  --z-color-kpi: var(--z-text-purple);
+
+  /* Bordas — Light */
+  --z-border-default: #E2E4E9;
+  --z-border-subtle: #E2E4E9;
+  --z-border-hover: #CFC5EA;
+
+  /* Sombras Discretas — Light */
+  --z-shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --z-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --z-shadow-dropdown: 0 4px 16px rgba(0, 0, 0, 0.08);
+
+  /* Variantes Semânticas Sutis — Light */
+  --z-success-bg: rgba(38, 201, 154, 0.12);
+  --z-success-border: rgba(38, 201, 154, 0.25);
+  --z-success-text: #0E7F5E;
+
+  --z-warning-bg: rgba(243, 168, 91, 0.12);
+  --z-warning-border: rgba(243, 168, 91, 0.25);
+  --z-warning-text: #A75D0C;
+
+  --z-danger-bg: rgba(241, 92, 105, 0.12);
+  --z-danger-border: rgba(241, 92, 105, 0.25);
+  --z-danger-text: #BA1A2E;
+
+  --z-info-bg: rgba(111, 168, 255, 0.12);
+  --z-info-border: rgba(111, 168, 255, 0.25);
+  --z-info-text: #1958B7;
+}

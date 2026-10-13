@@ -1,0 +1,88 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — TOKENS ESTRUTURAIS E MARCA (DESIGN SYSTEM)
+   Princípio de Isolamento: Todos os tokens usam namespace --z-*
+   ZERO colisão com variáveis globais do Tailwind/shadcn (--background, etc.)
+   ========================================================================== */
+
+:root {
+  /* ==========================================================================
+     1. PALETA INSTITUCIONAL ZAFIRA
+     ========================================================================== */
+  --z-color-primary: #412493;
+  --z-color-primary-active: #5738AD;
+  --z-color-accent: #7256C5;
+  --z-color-purple-light: #CFC5EA;
+  --z-color-purple-surface: #F0EDF7;
+
+  /* ==========================================================================
+     2. CORES SEMÂNTICAS BASE
+     ========================================================================== */
+  --z-color-success: #26C99A;
+  --z-color-danger: #F15C69;
+  --z-color-warning: #F3A85B;
+  --z-color-info: #6FA8FF;
+
+  /* ==========================================================================
+     3. ESCALA DE ESPAÇAMENTO (AgencyFlow Scale)
+     ========================================================================== */
+  --z-space-1: 4px;
+  --z-space-2: 8px;
+  --z-space-3: 12px;
+  --z-space-4: 16px;
+  --z-space-5: 20px;
+  --z-space-6: 24px;
+  --z-space-8: 32px;
+
+  /* ==========================================================================
+     4. ESCALA DE RAIO (Radius Scale)
+     ========================================================================== */
+  --z-radius-xs: 4px;
+  --z-radius-sm: 5px;
+  --z-radius-md: 7px;
+  --z-radius-lg: 9px;
+  --z-radius-xl: 12px;
+  --z-radius-full: 9999px;
+
+  /* ==========================================================================
+     5. TRANSIÇÕES E ANIMAÇÕES
+     ========================================================================== */
+  --z-transition: 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ==========================================================================
+     6. DIMENSÕES E CAMADAS DO SHELL
+     ========================================================================== */
+  --z-sidebar-width: 240px;
+  --z-sidebar-collapsed-width: 68px;
+  --z-topbar-height: 56px;
+
+  --z-index-drawer: 9999;
+  --z-index-modal: 10000;
+  --z-index-toast: 10010;
+  --z-index-dropdown: 10020;
+
+  /* ==========================================================================
+     7. TOKENS DA SIDEBAR ROXA ZAFIRA (P1R.1C)
+     Constante em ambos os modos (identidade forte e contrastada)
+     ========================================================================== */
+  --z-sidebar-gradient-start: #412493;
+  --z-sidebar-gradient-end: #5738AD;
+  --z-sidebar-bg: linear-gradient(
+    180deg,
+    var(--z-sidebar-gradient-start) 0%,
+    var(--z-sidebar-gradient-end) 100%
+  );
+  --z-sidebar-border: rgba(255, 255, 255, 0.12);
+  --z-sidebar-text: #FFFFFF;
+  --z-sidebar-text-muted: rgba(255, 255, 255, 0.75);
+  --z-sidebar-section-title: #CFC5EA;
+  --z-sidebar-item-hover-bg: rgba(255, 255, 255, 0.08);
+  --z-sidebar-item-hover-text: #FFFFFF;
+  --z-sidebar-item-active-bg: #5738AD;
+  --z-sidebar-item-active-text: #FFFFFF;
+  --z-sidebar-item-active-border: rgba(255, 255, 255, 0.18);
+  --z-sidebar-item-active-indicator: #CFC5EA;
+  --z-sidebar-badge-bg: rgba(207, 197, 234, 0.2);
+  --z-sidebar-badge-text: #FFFFFF;
+  --z-sidebar-user-bg: transparent;
+  --z-sidebar-user-border: rgba(255, 255, 255, 0.12);
+}

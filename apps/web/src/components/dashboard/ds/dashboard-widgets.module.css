@@ -1,0 +1,720 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — DASHBOARD WIDGETS DESIGN SYSTEM MODULE
+   Consome estritamente os tokens oficiais --z-* (zafira-tokens.css / zafira-themes.css)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. KPI CARD DO DASHBOARD
+   -------------------------------------------------------------------------- */
+.kpiCard {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-md);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color var(--z-transition), box-shadow var(--z-transition), transform var(--z-transition);
+  outline: none;
+  position: relative;
+}
+
+.kpiCardInteractive {
+  cursor: pointer;
+}
+
+.kpiCardInteractive:hover {
+  border-color: var(--z-border-hover);
+  box-shadow: var(--z-shadow-card);
+  transform: translateY(-1px);
+}
+
+.kpiCardInteractive:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 2px;
+}
+
+.kpiHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.kpiTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}
+
+.kpiIcon {
+  color: var(--z-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.kpiValue {
+  font-family: var(--z-font-numeric);
+  font-weight: 700;
+  font-size: 26px;
+  color: var(--z-color-kpi);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+
+.kpiContext {
+  font-size: 12px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}
+
+.kpiFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.kpiTrend {
+  font-family: var(--z-font-numeric);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.kpiTrendUp {
+  color: var(--z-color-success);
+}
+
+.kpiTrendDown {
+  color: var(--z-color-danger);
+}
+
+.kpiTrendNeutral {
+  color: var(--z-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   2. SECTION CARD (CONTAINER DE WIDGET)
+   -------------------------------------------------------------------------- */
+.sectionCard {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-md);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sectionCardHeader {
+  padding: 16px 20px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--z-border-default);
+  gap: 12px;
+}
+
+.sectionCardTitleWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sectionCardTitle {
+  font-family: var(--z-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  line-height: 1.3;
+}
+
+.sectionCardSubtitle {
+  font-size: 12px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}
+
+.sectionCardBody {
+  padding: 16px 20px;
+  flex: 1;
+}
+
+.sectionCardAction {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--z-text-purple);
+  cursor: pointer;
+  text-decoration: none;
+  transition: opacity var(--z-transition);
+  font-family: var(--z-font-ui);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sectionCardAction:hover {
+  opacity: 0.8;
+}
+
+.sectionCardAction:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 2px;
+  border-radius: var(--z-radius-xs);
+}
+
+/* --------------------------------------------------------------------------
+   3. PRIORIDADES LIST
+   -------------------------------------------------------------------------- */
+.prioridadesList {
+  display: flex;
+  flex-direction: column;
+}
+
+.prioridadeItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--z-border-default);
+  cursor: pointer;
+  transition: background-color var(--z-transition), padding var(--z-transition);
+  border-radius: var(--z-radius-xs);
+  text-decoration: none;
+  color: inherit;
+}
+
+.prioridadeItem:last-child {
+  border-bottom: none;
+}
+
+.prioridadeItem:hover {
+  background-color: var(--z-surface-secondary);
+  padding-left: 8px;
+  padding-right: 8px;
+  margin: 0 -8px;
+}
+
+.prioridadeItem:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 2px;
+}
+
+.prioridadeContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prioridadeCliente {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--z-font-ui);
+}
+
+.prioridadeProblema {
+  font-size: 12px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prioridadeRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   4. PROGRESS BAR
+   -------------------------------------------------------------------------- */
+.progressBarContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.progressBarValue {
+  font-family: var(--z-font-numeric);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.progressBarTrack {
+  flex: 1;
+  height: 4px;
+  background-color: var(--z-surface-secondary);
+  border-radius: var(--z-radius-full);
+  overflow: hidden;
+  min-width: 60px;
+}
+
+.progressBarFill {
+  height: 100%;
+  border-radius: var(--z-radius-full);
+  transition: width 0.4s ease;
+}
+
+/* --------------------------------------------------------------------------
+   5. CARTEIRA BARRAS (DISTRIBUIÇÃO HORIZONTAL)
+   -------------------------------------------------------------------------- */
+.carteiraContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.carteiraRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.carteiraLabel {
+  font-size: 13px;
+  color: var(--z-text-muted);
+  width: 80px;
+  flex-shrink: 0;
+  font-family: var(--z-font-ui);
+}
+
+.carteiraTrack {
+  flex: 1;
+  height: 6px;
+  background-color: var(--z-surface-secondary);
+  border-radius: var(--z-radius-full);
+  overflow: hidden;
+}
+
+.carteiraFill {
+  height: 100%;
+  border-radius: var(--z-radius-full);
+  transition: width 0.5s ease;
+}
+
+.carteiraValue {
+  font-family: var(--z-font-numeric);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   6. PRÓXIMOS COMPROMISSOS
+   -------------------------------------------------------------------------- */
+.compromissosList {
+  display: flex;
+  flex-direction: column;
+}
+
+.compromissoItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--z-border-default);
+  text-decoration: none;
+  color: inherit;
+}
+
+.compromissoItem:last-child {
+  border-bottom: none;
+}
+
+.compromissoIconWrap {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--z-radius-sm);
+  background-color: var(--z-surface-secondary);
+  color: var(--z-text-purple);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.compromissoContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.compromissoTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--z-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--z-font-ui);
+}
+
+.compromissoClient {
+  font-size: 12px;
+  color: var(--z-text-muted);
+  margin-top: 2px;
+  font-family: var(--z-font-ui);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compromissoTimeWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex-shrink: 0;
+}
+
+.compromissoTime {
+  font-family: var(--z-font-numeric);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.compromissoDate {
+  font-size: 12px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}
+
+/* --------------------------------------------------------------------------
+   7. RESPONSÁVEL CELL
+   -------------------------------------------------------------------------- */
+.responsavelCell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.responsavelAvatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--z-radius-full);
+  background-color: var(--z-surface-secondary);
+  border: 1px solid var(--z-border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--z-text-purple);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.responsavelName {
+  font-size: 13px;
+  color: var(--z-text-primary);
+  font-family: var(--z-font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------------------
+   8. FINANCEIRO RESUMO
+   -------------------------------------------------------------------------- */
+.finRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--z-border-default);
+}
+
+.finRow:last-of-type {
+  border-bottom: none;
+}
+
+.finLabel {
+  font-size: 13px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}
+
+.finValue {
+  font-family: var(--z-font-numeric);
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.finValueSuccess {
+  color: var(--z-color-success);
+}
+
+.finValuePending {
+  color: var(--z-color-kpi);
+}
+
+.finValueDanger {
+  color: var(--z-color-danger);
+}
+
+.finValueMuted {
+  color: var(--z-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   9. DASHBOARD HEADER
+   -------------------------------------------------------------------------- */
+.headerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.headerLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.headerTitle {
+  font-family: var(--z-font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--z-text-primary);
+  line-height: 1.2;
+}
+
+.headerSubtitle {
+  font-family: var(--z-font-ui);
+  font-size: 13px;
+  color: var(--z-text-muted);
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.freshnessBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--z-text-muted);
+  font-weight: 500;
+  font-family: var(--z-font-ui);
+  margin-right: 4px;
+}
+
+.selectWrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.selectInput {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-md);
+  color: var(--z-text-primary);
+  font-family: var(--z-font-ui);
+  font-size: 13px;
+  padding: 6px 28px 6px 10px;
+  cursor: pointer;
+  appearance: none;
+  outline: none;
+  transition: border-color var(--z-transition);
+}
+
+.selectInput:hover {
+  border-color: var(--z-border-hover);
+}
+
+.selectInput:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 1px;
+}
+
+.selectChevron {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--z-text-muted);
+}
+
+.refreshButtonRotating {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   10. ESTADO VAZIO COMPACTO
+   -------------------------------------------------------------------------- */
+.emptyStateCompact {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--z-text-muted);
+  font-size: 13px;
+  font-family: var(--z-font-ui);
+}
+
+/* --------------------------------------------------------------------------
+   11. TOOLTIP DO RECHARTS
+   -------------------------------------------------------------------------- */
+.chartTooltip {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-sm);
+  padding: 8px 12px;
+  box-shadow: var(--z-shadow-dropdown);
+  color: var(--z-text-primary);
+  font-size: 12px;
+  font-family: var(--z-font-ui);
+}
+
+.chartTooltipLabel {
+  margin: 0 0 6px 0;
+  font-size: 11px;
+  color: var(--z-text-muted);
+  font-weight: 500;
+}
+
+.chartTooltipItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 3px 0;
+}
+
+.chartTooltipDot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--z-radius-full);
+  flex-shrink: 0;
+}
+
+.chartTooltipName {
+  color: var(--z-text-muted);
+  font-size: 11.5px;
+}
+
+.chartTooltipValue {
+  font-family: var(--z-font-numeric);
+  color: var(--z-text-primary);
+  font-weight: 600;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --------------------------------------------------------------------------
+   12. LAYOUT GRIDS DO DASHBOARD (P3 BASELINE OFICIAL)
+   -------------------------------------------------------------------------- */
+.pageContainer {
+  padding: 24px 32px 48px;
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.mainGrid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+}
+
+.bottomGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1280px) {
+  .pageContainer {
+    padding: 20px 20px 40px;
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .mainGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .bottomGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .pageContainer {
+    padding: 16px 12px 32px;
+    gap: 16px;
+  }
+
+  .kpiGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .headerRight {
+    width: 100%;
+  }
+
+  .selectWrapper {
+    width: 100% !important;
+  }
+
+  .selectInput {
+    width: 100% !important;
+  }
+
+  .freshnessBadge {
+    width: 100%;
+    margin-right: 0;
+    margin-bottom: 2px;
+  }
+}

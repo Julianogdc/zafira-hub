@@ -1,0 +1,7 @@
+{
+  "recordedAt": "2026-10-12",
+  "scope": "npm audit --omit=dev (dependências de produção)",
+  "critical": 0,
+  "high": 20,
+  "note": "Linha de base após a P27 passo 1 (remoção de jspdf, axios e Tiptap sem uso): antes 1 crítica/25 altas; depois 0 críticas/20 altas. Passos 2 a 4 da P27 dependem de autorização."
+}

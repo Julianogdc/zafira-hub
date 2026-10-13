@@ -1,0 +1,1851 @@
+import crypto from 'node:crypto';
+import { prisma as defaultPrisma } from '../../../lib/prisma.js';
+import { AsaasClient, AsaasIntegrationError, AsaasPaymentRaw } from './asaas.client.js';
+import { AsaasPaymentStatus } from '@prisma/client';
+import { FinancialCategoryService } from '../../financial/financial-category.service.js';
+import { FinancialReconciliationService } from '../../financial/financial-reconciliation.service.js';
+
+export type AsaasLinkStatus = 'LINKED' | 'NOT_FOUND' | 'AMBIGUOUS' | 'NO_DOCUMENT';
+
+export interface ClientFinancialKPIs {
+  pending: number;
+  pendingCount: number;
+  receivedMonth: number;
+  receivedMonthCount: number;
+  overdue: number;
+  overdueCount: number;
+}
+
+export interface ClientFinancialSummaryResponse {
+  clientId: string;
+  isLinked: boolean;
+  linkStatus: AsaasLinkStatus;
+  linkStatusLabel: string;
+  asaasCustomerId: string | null;
+  kpis: ClientFinancialKPIs;
+  payments: FormattedAsaasPayment[];
+  totalPayments: number;
+}
+
+export interface FormattedAsaasPayment {
+  id: string;
+  externalId: string;
+  description: string;
+  value: number;
+  netValue: number | null;
+  billingType: string;
+  status: AsaasPaymentStatus;
+  statusLabel: string;
+  dueDate: string;
+  paymentDate: string | null;
+  invoiceUrl: string | null;
+  bankSlipUrl: string | null;
+  isOverdue: boolean;
+}
+
+export interface ClientSyncResult {
+  success: boolean;
+  clientId: string;
+  linkStatus: AsaasLinkStatus;
+  linkStatusLabel: string;
+  asaasCustomerId: string | null;
+  syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
+  timestamp: string;
+}
+
+export interface AsaasSyncResult {
+  success: boolean;
+  syncedCustomers: number;
+  linkedClients: number;
+  unlinkedCustomers: number;
+  syncedPayments: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
+  timestamp: string;
+}
+
+export interface AsaasWalletSyncResult {
+  success: boolean;
+  totalCustomersAsaas: number;
+  linkedClients: number;
+  createdClients: number;
+  syncedPayments: number;
+  ignoredWithoutDoc: number;
+  ambiguousCount: number;
+  reconciledActivePayments?: number;
+  reconciledDeletedPayments?: number;
+  reconciliationErrors?: string[];
+  errors: string[];
+  timestamp: string;
+}
+
+
+
+
+export interface FinancialOverviewFilters {
+  period?: 'current-month' | 'last-month' | 'current-year' | 'all' | 'custom' | string;
+  startDate?: string;
+  endDate?: string;
+  clientId?: string;
+  clientIds?: string[];
+  status?: string;
+  search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface FinancialOverviewKPIs {
+  receivedMonth: number;
+  receivedMonthCount: number;
+  pending: number;
+  pendingCount: number;
+  overdue: number;
+  overdueCount: number;
+  nextDueDate: {
+    date: string | null;
+    value: number | null;
+    clientName: string | null;
+  } | null;
+  statusCounts: {
+    pending: number;
+    received: number;
+    overdue: number;
+    refunded: number;
+    cancelled: number;
+  };
+  incompletePaymentsCount?: number;
+}
+
+export interface TimeSeriesPoint {
+  month: string;
+  label: string;
+  value: number;
+  count: number;
+}
+
+export interface FinancialOverviewPaymentItem extends FormattedAsaasPayment {
+  client: {
+    id: string;
+    name: string;
+  } | null;
+}
+
+export interface FinancialOverviewResponse {
+  kpis: FinancialOverviewKPIs;
+  recebidosTimeSeries: TimeSeriesPoint[];
+  previstosTimeSeries: TimeSeriesPoint[];
+  payments: FinancialOverviewPaymentItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+  hasUnsyncedData: boolean;
+  disclaimer: string;
+}
+
+
+/**
+ * Higieniza strings de documento removendo pontuação e espaços.
+ */
+export function sanitizeDocument(doc?: string | null): string {
+  if (!doc) return '';
+  return doc.replace(/\D/g, '').trim();
+}
+
+/**
+ * Validação de token em tempo constante para prevenir timing attacks.
+ */
+export function safeCompareTokens(a?: string | null, b?: string | null): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+/**
+ * Gera chave determinística SHA-256 para controle rigoroso de idempotência de webhooks.
+ * Baseia-se no evento + externalId do pagamento + payload normalizado.
+ */
+export function generateWebhookDedupeKey(event: string, paymentId: string, paymentPayload: any): string {
+  const cleanEvent = String(event || '').trim().toUpperCase();
+  const cleanPaymentId = String(paymentId || '').trim();
+
+  if (!cleanEvent || !cleanPaymentId) {
+    throw new AsaasIntegrationError(
+      'Evento e ID de pagamento são obrigatórios para cálculo de dedupeKey',
+      400,
+      'INVALID_WEBHOOK_DATA'
+    );
+  }
+
+  const normalize = (obj: any): any => {
+    if (obj === null || typeof obj !== 'object') return obj;
+    if (Array.isArray(obj)) return obj.map(normalize);
+    return Object.keys(obj)
+      .sort()
+      .reduce((acc: any, key: string) => {
+        acc[key] = normalize(obj[key]);
+        return acc;
+      }, {});
+  };
+
+  const payloadToHash = normalize({
+    event: cleanEvent,
+    paymentId: cleanPaymentId,
+    payment: paymentPayload || {},
+  });
+
+  return crypto.createHash('sha256').update(JSON.stringify(payloadToHash)).digest('hex');
+}
+
+/**
+ * Mapeia o status de cobrança do Asaas para o enum AsaasPaymentStatus do Prisma.
+ * Cobranças removidas/excluídas no Asaas possuem deleted === true ou status === 'DELETED'.
+ */
+export function mapAsaasPaymentStatus(
+  status?: string | null,
+  deleted?: boolean | null,
+  event?: string | null
+): AsaasPaymentStatus {
+  if (deleted === true || event === 'PAYMENT_DELETED') {
+    return AsaasPaymentStatus.DELETED;
+  }
+  const upper = String(status || '').toUpperCase();
+  switch (upper) {
+    case 'RECEIVED':
+      return AsaasPaymentStatus.RECEIVED;
+    case 'CONFIRMED':
+      return AsaasPaymentStatus.CONFIRMED;
+    case 'OVERDUE':
+      return AsaasPaymentStatus.OVERDUE;
+    case 'REFUNDED':
+    case 'REFUND_REQUESTED':
+    case 'REFUND_IN_PROGRESS':
+      return AsaasPaymentStatus.REFUNDED;
+    case 'DELETED':
+      return AsaasPaymentStatus.DELETED;
+    case 'CANCELLED':
+      return AsaasPaymentStatus.CANCELLED;
+    case 'PENDING':
+    case 'AWAITING_RISK_ANALYSIS':
+    default:
+      return AsaasPaymentStatus.PENDING;
+  }
+}
+
+export function getAsaasStatusLabel(status: AsaasPaymentStatus): string {
+  switch (status) {
+    case AsaasPaymentStatus.RECEIVED:
+    case AsaasPaymentStatus.CONFIRMED:
+      return 'Pago';
+    case AsaasPaymentStatus.OVERDUE:
+      return 'Vencido';
+    case AsaasPaymentStatus.REFUNDED:
+      return 'Estornado';
+    case AsaasPaymentStatus.DELETED:
+    case AsaasPaymentStatus.CANCELLED:
+      return 'Cancelado';
+    case AsaasPaymentStatus.PENDING:
+    default:
+      return 'Pendente';
+  }
+}
+
+/**
+ * Converte uma data de calendário (ex: '2026-09-20' ou ISO) para Date
+ * fixando meio-dia UTC (12:00:00.000Z).
+ * Isso impede que variações de fuso horário (-11h a +11h) cruzem a meia-noite
+ * e alterem o dia civil do vencimento no Brasil.
+ */
+export function parseCalendarDate(dateStr?: string | null): Date | null {
+  if (!dateStr) return null;
+  const match = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12, 0, 0, 0));
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Formata uma data preservando estritamente o dia de calendário civil (DD/MM/YYYY),
+ * sem converter para o horário local ou recuar 1 dia.
+ */
+export function formatCalendarDate(date?: Date | string | null): string {
+  if (!date) return '-';
+  const str = typeof date === 'string' ? date : date.toISOString();
+  const match = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const [, year, month, day] = match;
+    return `${day}/${month}/${year}`;
+  }
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (isNaN(d.getTime())) return '-';
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const year = d.getUTCFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+export function getPeriodDateRange(
+  period: string = 'current-month',
+  startDate?: string,
+  endDate?: string,
+  now: Date = new Date()
+): { start: Date | null; end: Date | null } {
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  if (period === 'current-month') {
+    return {
+      start: new Date(currentYear, currentMonth, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'last-month') {
+    return {
+      start: new Date(currentYear, currentMonth - 1, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, currentMonth, 0, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'current-year') {
+    return {
+      start: new Date(currentYear, 0, 1, 0, 0, 0, 0),
+      end: new Date(currentYear, 11, 31, 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'custom' && startDate && endDate) {
+    const s = new Date(startDate);
+    const e = new Date(endDate);
+    return {
+      start: new Date(s.getFullYear(), s.getMonth(), s.getDate(), 0, 0, 0, 0),
+      end: new Date(e.getFullYear(), e.getMonth(), e.getDate(), 23, 59, 59, 999),
+    };
+  }
+
+  if (period === 'all') {
+    return { start: null, end: null };
+  }
+
+  return {
+    start: new Date(currentYear, currentMonth, 1, 0, 0, 0, 0),
+    end: new Date(currentYear, currentMonth + 1, 0, 23, 59, 59, 999),
+  };
+}
+
+export class AsaasService {
+  private readonly client: AsaasClient;
+  private readonly prismaClient: typeof defaultPrisma;
+
+  constructor(clientOrPrisma?: any, prismaClient?: any) {
+    if (
+      clientOrPrisma &&
+      (clientOrPrisma.financialAccount ||
+        clientOrPrisma.asaasPayment ||
+        clientOrPrisma.client ||
+        typeof clientOrPrisma.$transaction === 'function')
+    ) {
+      this.client = prismaClient || new AsaasClient();
+      this.prismaClient = clientOrPrisma;
+    } else {
+      this.client = clientOrPrisma || new AsaasClient();
+      this.prismaClient = prismaClient || defaultPrisma;
+    }
+  }
+
+  /**
+   * Consulta o extrato e resumo financeiro do cliente no Hub a partir das cobranças do Asaas.
+   */
+  async getClientFinancialSummary(
+    clientId: string,
+    organizationId?: string
+  ): Promise<ClientFinancialSummaryResponse> {
+    if (!clientId || !clientId.trim()) {
+      throw new AsaasIntegrationError('ID do cliente é obrigatório', 400, 'INVALID_CLIENT_ID');
+    }
+
+    // 1. Valida se o cliente existe e pertence à organização
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, organizationId: true, document: true, name: true },
+    });
+
+    if (!client || (organizationId && client.organizationId !== organizationId)) {
+      throw new AsaasIntegrationError('Cliente não encontrado', 404, 'CLIENT_NOT_FOUND');
+    }
+
+    // 2. Busca vínculo do cliente com o Asaas
+    const integration = await this.prismaClient.clientIntegration.findFirst({
+      where: {
+        clientId,
+        provider: 'ASAAS',
+      },
+    });
+
+    const asaasCustomerId = integration?.externalId || null;
+    const isLinked = Boolean(asaasCustomerId);
+
+    let linkStatus: AsaasLinkStatus = 'NOT_FOUND';
+    let linkStatusLabel = 'Cliente não encontrado no Asaas';
+
+    const cleanDoc = sanitizeDocument(client.document);
+    if (isLinked) {
+      linkStatus = 'LINKED';
+      linkStatusLabel = 'Vinculado';
+    } else if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+      linkStatus = 'NO_DOCUMENT';
+      linkStatusLabel = 'Cliente sem CPF/CNPJ cadastrado';
+    }
+
+    // 3. Busca cobranças registradas no banco para este cliente
+    const payments = await this.prismaClient.asaasPayment.findMany({
+      where: {
+        clientId,
+        ...(organizationId ? { organizationId } : {}),
+      },
+      orderBy: {
+        dueDate: 'desc',
+      },
+    });
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    let pending = 0;
+    let pendingCount = 0;
+    let receivedMonth = 0;
+    let receivedMonthCount = 0;
+    let overdue = 0;
+    let overdueCount = 0;
+
+    const formattedPayments: FormattedAsaasPayment[] = payments.map((p) => {
+      const numValue = Number(p.value);
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const effectiveStatus = isDeleted ? AsaasPaymentStatus.DELETED : p.status;
+      const isPaid = !isDeleted && (effectiveStatus === AsaasPaymentStatus.RECEIVED || effectiveStatus === AsaasPaymentStatus.CONFIRMED);
+      const isOverdue = !isDeleted && !isPaid && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+
+      if (isPaid) {
+        const payDate = p.paymentDate ?? p.clientPaymentDate;
+        if (payDate && payDate.getMonth() === currentMonth && payDate.getFullYear() === currentYear) {
+          receivedMonth += numValue;
+          receivedMonthCount += 1;
+        }
+      } else if (isOverdue) {
+        overdue += numValue;
+        overdueCount += 1;
+      } else if (!isDeleted && effectiveStatus === AsaasPaymentStatus.PENDING) {
+        pending += numValue;
+        pendingCount += 1;
+      }
+
+      return {
+        id: p.id,
+        externalId: p.externalId,
+        description: p.description || 'Cobrança Asaas',
+        value: numValue,
+        netValue: p.netValue ? Number(p.netValue) : null,
+        billingType: p.billingType,
+        status: effectiveStatus,
+        statusLabel: getAsaasStatusLabel(effectiveStatus),
+        dueDate: p.dueDate ? p.dueDate.toISOString().split('T')[0] : p.dueDate,
+        paymentDate: (p.paymentDate ?? p.clientPaymentDate) ? (p.paymentDate ?? p.clientPaymentDate)!.toISOString().split('T')[0] : null,
+        invoiceUrl: p.invoiceUrl,
+        bankSlipUrl: p.bankSlipUrl,
+        isOverdue,
+      };
+    });
+
+    return {
+      clientId,
+      isLinked,
+      linkStatus,
+      linkStatusLabel,
+      asaasCustomerId,
+      kpis: {
+        pending,
+        pendingCount,
+        receivedMonth,
+        receivedMonthCount,
+        overdue,
+        overdueCount,
+      },
+      payments: formattedPayments,
+      totalPayments: formattedPayments.length,
+    };
+  }
+
+  /**
+   * Reconcilia cobranças locais ainda ativas (PENDING ou OVERDUE) consultando individualmente
+   * o endpoint GET /payments/{externalId} do Asaas com concorrência baixa (máximo 5 por vez).
+   * 
+   * Casos fundamentais atendidos:
+   * 1. Cobranças removidas/canceladas no Asaas que deixam de constar nas listagens gerais paginadas.
+   * 2. Cobranças onde a listagem geral vem sem o campo deleted: true, mas o GET individual retorna deleted: true.
+   * 3. Atualização de status e valores oficiais do Asaas.
+   * 
+   * Regras de integridade:
+   * - Apenas chamadas GET são feitas ao Asaas (getPaymentById).
+   * - Se a consulta individual falhar, não marcar como deletada por suposição; registrar em errors.
+   */
+  private async reconcileActivePayments(
+    filterWhere: { organizationId?: string; clientId?: string }
+  ): Promise<{
+    reconciledCount: number;
+    deletedCount: number;
+    errors: string[];
+  }> {
+    const hasFindMany = typeof this.prismaClient?.asaasPayment?.findMany === 'function';
+    const hasGetPaymentById = typeof this.client?.getPaymentById === 'function';
+
+    if (!hasFindMany || !hasGetPaymentById) {
+      const missing = [
+        !hasFindMany ? 'prisma.asaasPayment.findMany' : null,
+        !hasGetPaymentById ? 'client.getPaymentById' : null,
+      ]
+        .filter(Boolean)
+        .join(', ');
+      const errorMsg = `[RECONCILIATION_DEPENDENCY_ERROR] Dependência obrigatória indisponível para reconciliação: ${missing}`;
+      console.error(errorMsg);
+      return {
+        reconciledCount: 0,
+        deletedCount: 0,
+        errors: [errorMsg],
+      };
+    }
+
+    const activePayments = await this.prismaClient.asaasPayment.findMany({
+      where: {
+        ...(filterWhere.organizationId ? { organizationId: filterWhere.organizationId } : {}),
+        ...(filterWhere.clientId ? { clientId: filterWhere.clientId } : {}),
+        status: { in: [AsaasPaymentStatus.PENDING, AsaasPaymentStatus.OVERDUE] },
+        externalId: { not: '' },
+      },
+      select: {
+        id: true,
+        externalId: true,
+        status: true,
+        value: true,
+        netValue: true,
+        dueDate: true,
+        paymentDate: true,
+        clientPaymentDate: true,
+        invoiceUrl: true,
+        bankSlipUrl: true,
+      },
+    });
+
+    const validPayments = activePayments.filter((p) => p.externalId && p.externalId.trim().length > 0);
+
+    let reconciledCount = 0;
+    let deletedCount = 0;
+    const errors: string[] = [];
+
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < validPayments.length; i += BATCH_SIZE) {
+      const batch = validPayments.slice(i, i + BATCH_SIZE);
+      await Promise.all(
+        batch.map(async (localPayment) => {
+          try {
+            const remote = await this.client.getPaymentById(localPayment.externalId);
+            reconciledCount += 1;
+
+            const isDeleted = remote.deleted === true || remote.status === 'DELETED';
+            const mappedStatus = mapAsaasPaymentStatus(remote.status, remote.deleted);
+            const effectiveStatus = isDeleted ? AsaasPaymentStatus.DELETED : mappedStatus;
+
+            if (isDeleted || effectiveStatus === AsaasPaymentStatus.DELETED) {
+              deletedCount += 1;
+            }
+
+            const dueDate = parseCalendarDate(remote.dueDate) || (remote.dueDate ? new Date(remote.dueDate) : localPayment.dueDate);
+            const paymentDate = remote.paymentDate ? (parseCalendarDate(remote.paymentDate) || new Date(remote.paymentDate)) : null;
+            const clientPaymentDate = remote.clientPaymentDate ? (parseCalendarDate(remote.clientPaymentDate) || new Date(remote.clientPaymentDate)) : null;
+
+            if (typeof this.prismaClient?.asaasPayment?.update === 'function') {
+              await this.prismaClient.asaasPayment.update({
+                where: { id: localPayment.id },
+                data: {
+                  status: effectiveStatus,
+                  value: remote.value !== undefined ? remote.value : localPayment.value,
+                  netValue: remote.netValue !== undefined ? remote.netValue : localPayment.netValue,
+                  dueDate,
+                  paymentDate,
+                  clientPaymentDate,
+                  invoiceUrl: remote.invoiceUrl || localPayment.invoiceUrl,
+                  bankSlipUrl: remote.bankSlipUrl || localPayment.bankSlipUrl,
+                  rawPayload: remote as any,
+                },
+              });
+            }
+          } catch (err: any) {
+            errors.push(
+              `[RECONCILIATION_ERROR] Falha ao consultar cobrança individual ${localPayment.externalId}: ${err?.message || 'Erro desconhecido'}`
+            );
+          }
+        })
+      );
+    }
+
+    return {
+      reconciledCount,
+      deletedCount,
+      errors,
+    };
+  }
+
+  /**
+   * Sincronização granular restrita a um único cliente (Etapa 4B Hardening).
+   * Consulta e sincroniza SOMENTE os dados deste cliente Hub no Asaas.
+   * Não afeta outros clientes nem faz varredura ampla.
+   */
+  async syncClientAsaasData(clientId: string, organizationId: string): Promise<ClientSyncResult> {
+    if (!clientId || !clientId.trim()) {
+      throw new AsaasIntegrationError('ID do cliente é obrigatório', 400, 'INVALID_CLIENT_ID');
+    }
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    // 1. Valida se o cliente existe e pertence à organização
+    const client = await this.prismaClient.client.findUnique({
+      where: { id: clientId },
+      select: { id: true, organizationId: true, document: true, name: true },
+    });
+
+    if (!client || client.organizationId !== organizationId) {
+      throw new AsaasIntegrationError('Cliente não encontrado na organização', 404, 'CLIENT_NOT_FOUND');
+    }
+
+    // 2. Verifica se já há integração registrada
+    let existingIntegration = await this.prismaClient.clientIntegration.findFirst({
+      where: {
+        clientId,
+        provider: 'ASAAS',
+      },
+    });
+
+    let asaasCustomerId = existingIntegration?.externalId || null;
+
+    // Se ainda não estiver vinculado, busca no Asaas por CPF/CNPJ higienizado
+    if (!asaasCustomerId) {
+      const cleanDoc = sanitizeDocument(client.document);
+
+      // Regra de segurança: se não houver documento válido, não vincular
+      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'NO_DOCUMENT',
+          linkStatusLabel: 'Cliente não possui CPF/CNPJ válido cadastrado',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Consulta no Asaas estritamente pelo CPF/CNPJ do cliente
+      const asaasRes = await this.client.getCustomers({ cpfCnpj: cleanDoc });
+      const matches = asaasRes.data || [];
+
+      if (matches.length === 0) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'NOT_FOUND',
+          linkStatusLabel: 'Cliente não encontrado no Asaas',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Regra de segurança: se houver mais de um registro, ambiguidade impede vínculo automático
+      if (matches.length > 1) {
+        return {
+          success: false,
+          clientId,
+          linkStatus: 'AMBIGUOUS',
+          linkStatusLabel: 'Vínculo ambíguo — requer revisão',
+          asaasCustomerId: null,
+          syncedPayments: 0,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Exatamente 1 cliente encontrado: vínculo seguro garantido
+      const matchedCustomer = matches[0];
+      asaasCustomerId = matchedCustomer.id;
+
+      await this.prismaClient.clientIntegration.upsert({
+        where: {
+          clientId_provider_externalId: {
+            clientId,
+            provider: 'ASAAS',
+            externalId: asaasCustomerId,
+          },
+        },
+        create: {
+          clientId,
+          provider: 'ASAAS',
+          externalId: asaasCustomerId,
+          metadata: {
+            name: matchedCustomer.name,
+            email: matchedCustomer.email,
+            cpfCnpj: matchedCustomer.cpfCnpj,
+            phone: matchedCustomer.phone || matchedCustomer.mobilePhone,
+          },
+        },
+        update: {
+          metadata: {
+            name: matchedCustomer.name,
+            email: matchedCustomer.email,
+            cpfCnpj: matchedCustomer.cpfCnpj,
+            phone: matchedCustomer.phone || matchedCustomer.mobilePhone,
+          },
+        },
+      });
+    }
+
+    // 3. Consulta cobranças SOMENTE para este customer do Asaas
+    const paymentsRes = await this.client.getPayments({
+      customer: asaasCustomerId,
+      limit: 100,
+    });
+    const payments = paymentsRes.data || [];
+
+    let syncedPayments = 0;
+
+    const localDeletedRecords = typeof this.prismaClient?.asaasPayment?.findMany === 'function'
+      ? await this.prismaClient.asaasPayment.findMany({
+          where: {
+            organizationId,
+            clientId,
+            status: AsaasPaymentStatus.DELETED,
+          },
+          select: { externalId: true },
+        })
+      : [];
+    const locallyDeletedIds = new Set(localDeletedRecords.map((p: any) => p.externalId));
+
+    for (const p of payments) {
+      let status = mapAsaasPaymentStatus(p.status, p.deleted);
+      const isLocallyDeleted = locallyDeletedIds.has(p.id);
+
+      if (isLocallyDeleted && (status === AsaasPaymentStatus.PENDING || status === AsaasPaymentStatus.OVERDUE)) {
+        status = AsaasPaymentStatus.DELETED;
+      }
+
+      const rawPayloadToSave = isLocallyDeleted && status === AsaasPaymentStatus.DELETED
+        ? { ...(p as any), deleted: true }
+        : (p as any);
+
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: p.id },
+        create: {
+          organizationId,
+          clientId,
+          asaasCustomerId: p.customer,
+          externalId: p.id,
+          installmentNumber: p.installmentNumber || null,
+          description: p.description || null,
+          value: p.value,
+          netValue: p.netValue || null,
+          originalValue: p.originalValue || null,
+          interestValue: p.interestValue || null,
+          billingType: p.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+        update: {
+          clientId, // Assegura o vínculo deste cliente
+          value: p.value,
+          netValue: p.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+      });
+
+      syncedPayments += 1;
+    }
+
+    // 4. Reconcilia cobranças ativas locais (PENDING/OVERDUE) deste cliente via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ clientId, organizationId });
+    const isSuccess = reconciliation.errors.length === 0;
+
+    return {
+      success: isSuccess,
+      clientId,
+      linkStatus: 'LINKED',
+      linkStatusLabel: 'Vinculado',
+      asaasCustomerId,
+      syncedPayments,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Sincronização manual segura global (Modo Somente Leitura).
+   */
+  async syncAsaasData(organizationId: string): Promise<AsaasSyncResult> {
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória para sincronização', 400, 'ORG_REQUIRED');
+    }
+
+    const hubClients = await this.prismaClient.client.findMany({
+      where: { organizationId },
+      select: { id: true, document: true, name: true },
+    });
+
+    const clientsByDoc = new Map<string, string>();
+    for (const c of hubClients) {
+      const cleanDoc = sanitizeDocument(c.document);
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        clientsByDoc.set(cleanDoc, c.id);
+      }
+    }
+
+    const asaasCustomersRes = await this.client.getCustomers({ limit: 100 });
+    const asaasCustomers = asaasCustomersRes.data || [];
+
+    let linkedClients = 0;
+    let unlinkedCustomers = 0;
+    const customerToClientMap = new Map<string, string>();
+
+    const existingIntegrations = await this.prismaClient.clientIntegration.findMany({
+      where: {
+        provider: 'ASAAS',
+        client: { organizationId },
+      },
+      select: { clientId: true, externalId: true },
+    });
+
+    for (const integ of existingIntegrations) {
+      customerToClientMap.set(integ.externalId, integ.clientId);
+    }
+
+    for (const ac of asaasCustomers) {
+      const cleanDoc = sanitizeDocument(ac.cpfCnpj);
+      let matchedClientId = cleanDoc ? clientsByDoc.get(cleanDoc) : undefined;
+
+      if (matchedClientId) {
+        customerToClientMap.set(ac.id, matchedClientId);
+        await this.prismaClient.clientIntegration.upsert({
+          where: {
+            clientId_provider_externalId: {
+              clientId: matchedClientId,
+              provider: 'ASAAS',
+              externalId: ac.id,
+            },
+          },
+          create: {
+            clientId: matchedClientId,
+            provider: 'ASAAS',
+            externalId: ac.id,
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+          update: {
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+        });
+        linkedClients += 1;
+      } else if (customerToClientMap.has(ac.id)) {
+        linkedClients += 1;
+      } else {
+        unlinkedCustomers += 1;
+      }
+    }
+
+    const asaasPaymentsRes = await this.client.getPayments({ limit: 100 });
+    const asaasPayments = asaasPaymentsRes.data || [];
+
+    let syncedPayments = 0;
+
+    const localDeletedRecords = typeof this.prismaClient?.asaasPayment?.findMany === 'function'
+      ? await this.prismaClient.asaasPayment.findMany({
+          where: {
+            organizationId,
+            status: AsaasPaymentStatus.DELETED,
+          },
+          select: { externalId: true },
+        })
+      : [];
+    const locallyDeletedIds = new Set(localDeletedRecords.map((p: any) => p.externalId));
+
+    for (const p of asaasPayments) {
+      const matchedClientId = customerToClientMap.get(p.customer) || null;
+      let status = mapAsaasPaymentStatus(p.status, p.deleted);
+      const isLocallyDeleted = locallyDeletedIds.has(p.id);
+
+      if (isLocallyDeleted && (status === AsaasPaymentStatus.PENDING || status === AsaasPaymentStatus.OVERDUE)) {
+        status = AsaasPaymentStatus.DELETED;
+      }
+
+      const rawPayloadToSave = isLocallyDeleted && status === AsaasPaymentStatus.DELETED
+        ? { ...(p as any), deleted: true }
+        : (p as any);
+
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: p.id },
+        create: {
+          organizationId,
+          clientId: matchedClientId,
+          asaasCustomerId: p.customer,
+          externalId: p.id,
+          installmentNumber: p.installmentNumber || null,
+          description: p.description || null,
+          value: p.value,
+          netValue: p.netValue || null,
+          originalValue: p.originalValue || null,
+          interestValue: p.interestValue || null,
+          billingType: p.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+        update: {
+          clientId: matchedClientId,
+          value: p.value,
+          netValue: p.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+      });
+
+      syncedPayments += 1;
+    }
+
+    // 4. Reconciliação de cobranças ativas locais (PENDING/OVERDUE) via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ organizationId });
+    const isSuccess = reconciliation.errors.length === 0;
+
+    return {
+      success: isSuccess,
+      syncedCustomers: asaasCustomers.length,
+      linkedClients,
+      unlinkedCustomers,
+      syncedPayments,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Sincronização completa da carteira do Asaas com criação automática de clientes no Hub.
+   * Regras:
+   * - Clientes do Asaas ausentes no Hub com CPF/CNPJ válido são criados com status ACTIVE.
+   * - Clientes existentes no Hub NÃO têm seus dados manuais sobrescritos e mantêm seu status.
+   * - Clientes sem CPF/CNPJ válido (11 ou 14 dígitos) não são criados e são contabilizados em ignoredWithoutDoc.
+   * - Cobranças são espelhadas em AsaasPayment vinculadas à organização e aos respectivos clientes.
+   * - Paginação completa de clientes e cobranças (somente GET contra o Asaas).
+   */
+  async syncAllWallet(organizationId: string): Promise<AsaasWalletSyncResult> {
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    // 1. Carrega todos os clientes da organização no Hub
+    const hubClients = await this.prismaClient.client.findMany({
+      where: { organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASAAS' },
+        },
+      },
+    });
+
+    const clientByDoc = new Map<string, typeof hubClients[0]>();
+    const clientByExternalId = new Map<string, typeof hubClients[0]>();
+
+    for (const c of hubClients) {
+      const cleanDoc = sanitizeDocument(c.document);
+      if (cleanDoc && (cleanDoc.length === 11 || cleanDoc.length === 14)) {
+        clientByDoc.set(cleanDoc, c);
+      }
+      for (const integ of c.integrations) {
+        clientByExternalId.set(integ.externalId, c);
+      }
+    }
+
+    // 2. Consulta todos os clientes do Asaas (paginação completa via getAllCustomers)
+    const asaasCustomers = await this.client.getAllCustomers();
+
+    let linkedClients = 0;
+    let createdClients = 0;
+    let ignoredWithoutDoc = 0;
+    let ambiguousCount = 0;
+    const errors: string[] = [];
+
+    const asaasCustomerToHubClientId = new Map<string, string>();
+
+    for (const ac of asaasCustomers) {
+      const cleanDoc = sanitizeDocument(ac.cpfCnpj);
+
+      // Regra de segurança: cliente sem CPF/CNPJ válido é ignorado e não é criado
+      if (!cleanDoc || (cleanDoc.length !== 11 && cleanDoc.length !== 14)) {
+        ignoredWithoutDoc += 1;
+        continue;
+      }
+
+      let matchedClient = clientByExternalId.get(ac.id) || clientByDoc.get(cleanDoc);
+
+      if (matchedClient) {
+        asaasCustomerToHubClientId.set(ac.id, matchedClient.id);
+        linkedClients += 1;
+
+        // Assegura que o vínculo em ClientIntegration existe sem sobrescrever nenhum dado do Client existente
+        await this.prismaClient.clientIntegration.upsert({
+          where: {
+            clientId_provider_externalId: {
+              clientId: matchedClient.id,
+              provider: 'ASAAS',
+              externalId: ac.id,
+            },
+          },
+          create: {
+            clientId: matchedClient.id,
+            provider: 'ASAAS',
+            externalId: ac.id,
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+          update: {
+            metadata: {
+              name: ac.name,
+              email: ac.email,
+              phone: ac.phone || ac.mobilePhone,
+              cpfCnpj: ac.cpfCnpj,
+            },
+          },
+        });
+      } else {
+        // Criação automática no Hub para cliente novo
+        try {
+          const newClient = await this.prismaClient.client.create({
+            data: {
+              organizationId,
+              name: (ac.name || 'Cliente Asaas').trim(),
+              legalName: ac.name || null,
+              document: cleanDoc,
+              email: ac.email?.trim() || null,
+              phone: (ac.phone || ac.mobilePhone || '').trim() || null,
+              status: 'ACTIVE',
+              integrations: {
+                create: {
+                  provider: 'ASAAS',
+                  externalId: ac.id,
+                  metadata: {
+                    name: ac.name,
+                    email: ac.email,
+                    phone: ac.phone || ac.mobilePhone,
+                    cpfCnpj: ac.cpfCnpj,
+                  },
+                },
+              },
+            },
+          });
+
+          clientByDoc.set(cleanDoc, newClient as any);
+          clientByExternalId.set(ac.id, newClient as any);
+          asaasCustomerToHubClientId.set(ac.id, newClient.id);
+          createdClients += 1;
+        } catch (err: any) {
+          errors.push(`Erro ao criar cliente '${ac.name}' (${cleanDoc}): ${err?.message || 'Erro desconhecido'}`);
+        }
+      }
+    }
+
+    // 3. Consulta todas as cobranças do Asaas (paginação completa via getAllPayments)
+    const asaasPayments = await this.client.getAllPayments();
+    let syncedPayments = 0;
+
+    const localDeletedRecords = typeof this.prismaClient?.asaasPayment?.findMany === 'function'
+      ? await this.prismaClient.asaasPayment.findMany({
+          where: {
+            organizationId,
+            status: AsaasPaymentStatus.DELETED,
+          },
+          select: { externalId: true },
+        })
+      : [];
+    const locallyDeletedIds = new Set(localDeletedRecords.map((p: any) => p.externalId));
+
+    for (const p of asaasPayments) {
+      const matchedClientId = asaasCustomerToHubClientId.get(p.customer) || null;
+      let status = mapAsaasPaymentStatus(p.status, p.deleted);
+      const isLocallyDeleted = locallyDeletedIds.has(p.id);
+
+      if (isLocallyDeleted && (status === AsaasPaymentStatus.PENDING || status === AsaasPaymentStatus.OVERDUE)) {
+        status = AsaasPaymentStatus.DELETED;
+      }
+
+      const rawPayloadToSave = isLocallyDeleted && status === AsaasPaymentStatus.DELETED
+        ? { ...(p as any), deleted: true }
+        : (p as any);
+
+      const dueDate = parseCalendarDate(p.dueDate) || new Date(p.dueDate);
+      const paymentDate = p.paymentDate ? (parseCalendarDate(p.paymentDate) || new Date(p.paymentDate)) : null;
+      const clientPaymentDate = p.clientPaymentDate ? (parseCalendarDate(p.clientPaymentDate) || new Date(p.clientPaymentDate)) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: p.id },
+        create: {
+          organizationId,
+          clientId: matchedClientId,
+          asaasCustomerId: p.customer,
+          externalId: p.id,
+          installmentNumber: p.installmentNumber || null,
+          description: p.description || null,
+          value: p.value,
+          netValue: p.netValue || null,
+          originalValue: p.originalValue || null,
+          interestValue: p.interestValue || null,
+          billingType: p.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+        update: {
+          clientId: matchedClientId,
+          value: p.value,
+          netValue: p.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: p.invoiceUrl || null,
+          bankSlipUrl: p.bankSlipUrl || null,
+          rawPayload: rawPayloadToSave,
+        },
+      });
+
+      syncedPayments += 1;
+    }
+
+    // 4. Reconciliação de cobranças ativas locais (PENDING/OVERDUE) via GET individual /payments/{id}
+    const reconciliation = await this.reconcileActivePayments({ organizationId });
+
+    const allErrors = [...errors, ...reconciliation.errors];
+    const isSuccess = errors.length === 0 && reconciliation.errors.length === 0;
+
+    return {
+      success: isSuccess,
+      totalCustomersAsaas: asaasCustomers.length,
+      linkedClients,
+      createdClients,
+      syncedPayments,
+      ignoredWithoutDoc,
+      ambiguousCount,
+      reconciledActivePayments: reconciliation.reconciledCount,
+      reconciledDeletedPayments: reconciliation.deletedCount,
+      reconciliationErrors: reconciliation.errors,
+      errors: allErrors,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Obtém ou cria a conta financeira correspondente ao Asaas na organização.
+   */
+  async getOrCreateAccount(organizationId: string) {
+    const existing = await this.prismaClient.financialAccount.findFirst({
+      where: {
+        organizationId,
+        provider: 'ASAAS',
+      },
+    });
+
+    if (existing) return existing;
+
+    return this.prismaClient.financialAccount.create({
+      data: {
+        organizationId,
+        provider: 'ASAAS',
+        name: 'Conta Asaas',
+        currency: 'BRL',
+        currentBalance: 0,
+        isActive: true,
+      },
+    });
+  }
+
+  /**
+   * Desativado na Etapa 5B: O Asaas é utilizado apenas para contas a receber e visor de cobranças.
+   * O caixa e o extrato são alimentados exclusivamente pelo Banco Inter PJ.
+   * Não executa chamadas de rede nem mutações no banco de dados.
+   */
+  async syncLedger(organizationId: string): Promise<{
+    success: boolean;
+    code: string;
+    message: string;
+    syncedCount?: number;
+    timestamp: string;
+  }> {
+    return {
+      success: false,
+      code: 'ASAAS_LEDGER_DISABLED',
+      message: 'O Asaas é utilizado apenas para contas a receber. O caixa é alimentado exclusivamente pelo Banco Inter PJ.',
+      syncedCount: 0,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+
+  /**
+   * Processamento idempotente e seguro de notificações de Webhook do Asaas (Etapa 4B Hardening).
+   * Utiliza dedupeKey SHA-256 determinística baseada em evento + paymentId + payload normalizado.
+   */
+  async processWebhookEvent(payload: any, tokenHeader?: string): Promise<{ processed: boolean; duplicate?: boolean }> {
+    const configuredToken = process.env.ASAAS_WEBHOOK_TOKEN;
+
+    // 1. Validação de segurança do token com safeCompareTokens
+    if (!configuredToken || !safeCompareTokens(tokenHeader, configuredToken)) {
+      throw new AsaasIntegrationError(
+        'Assinatura ou token de webhook inválido',
+        401,
+        'UNAUTHORIZED_WEBHOOK'
+      );
+    }
+
+    if (!payload || typeof payload !== 'object') {
+      throw new AsaasIntegrationError('Payload de webhook inválido', 400, 'INVALID_WEBHOOK_PAYLOAD');
+    }
+
+    const event = String(payload.event || '').trim().toUpperCase();
+    const supportedEvents = [
+      'PAYMENT_CREATED',
+      'PAYMENT_UPDATED',
+      'PAYMENT_RECEIVED',
+      'PAYMENT_CONFIRMED',
+      'PAYMENT_OVERDUE',
+      'PAYMENT_DELETED',
+      'PAYMENT_REFUNDED',
+    ];
+
+    if (!supportedEvents.includes(event)) {
+      return { processed: false };
+    }
+
+    const payment: AsaasPaymentRaw = payload.payment;
+    if (!payment || !payment.id || !payment.id.trim()) {
+      return { processed: false };
+    }
+
+    // 2. Idempotência real: gera dedupeKey SHA-256 determinística
+    const dedupeKey = generateWebhookDedupeKey(event, payment.id, payment);
+
+    const existingEvent = await this.prismaClient.asaasWebhookEvent.findUnique({
+      where: { dedupeKey },
+    });
+
+    if (existingEvent) {
+      return { processed: true, duplicate: true };
+    }
+
+    // 3. Localiza vínculo de cliente e organização
+    const integration = await this.prismaClient.clientIntegration.findFirst({
+      where: {
+        provider: 'ASAAS',
+        externalId: payment.customer,
+      },
+      include: {
+        client: {
+          select: { id: true, organizationId: true },
+        },
+      },
+    });
+
+    let organizationId = integration?.client?.organizationId;
+    let clientId = integration?.client?.id || null;
+
+    if (!organizationId) {
+      const existingPayment = await this.prismaClient.asaasPayment.findUnique({
+        where: { externalId: payment.id },
+        select: { organizationId: true, clientId: true },
+      });
+      organizationId = existingPayment?.organizationId;
+      clientId = clientId || existingPayment?.clientId || null;
+    }
+
+    if (!organizationId) {
+      const firstOrg = await this.prismaClient.organization.findFirst({
+        select: { id: true },
+      });
+      organizationId = firstOrg?.id;
+    }
+
+    if (organizationId) {
+      const status = mapAsaasPaymentStatus(payment.status, (payment as any).deleted, event);
+      const dueDate = parseCalendarDate(payment.dueDate) || new Date(payment.dueDate);
+      const paymentDate = payment.paymentDate ? (parseCalendarDate(payment.paymentDate) || new Date(payment.paymentDate)) : null;
+      const clientPaymentDate = payment.clientPaymentDate ? (parseCalendarDate(payment.clientPaymentDate) || new Date(payment.clientPaymentDate)) : null;
+
+      await this.prismaClient.asaasPayment.upsert({
+        where: { externalId: payment.id },
+        create: {
+          organizationId,
+          clientId,
+          asaasCustomerId: payment.customer,
+          externalId: payment.id,
+          installmentNumber: payment.installmentNumber || null,
+          description: payment.description || null,
+          value: payment.value,
+          netValue: payment.netValue || null,
+          originalValue: payment.originalValue || null,
+          interestValue: payment.interestValue || null,
+          billingType: payment.billingType || 'UNDEFINED',
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: payment.invoiceUrl || null,
+          bankSlipUrl: payment.bankSlipUrl || null,
+          rawPayload: payload,
+        },
+        update: {
+          value: payment.value,
+          netValue: payment.netValue || null,
+          status,
+          dueDate,
+          paymentDate,
+          clientPaymentDate,
+          invoiceUrl: payment.invoiceUrl || null,
+          bankSlipUrl: payment.bankSlipUrl || null,
+          rawPayload: payload,
+        },
+      });
+    }
+
+    // 4. Registra evento com dedupeKey e eventId opcional (sem segredos)
+    await this.prismaClient.asaasWebhookEvent.create({
+      data: {
+        dedupeKey,
+        eventId: payload.id ? String(payload.id).trim() : null,
+        event,
+        paymentExternalId: payment.id,
+        payload: payload,
+      },
+    });
+
+    return { processed: true, duplicate: false };
+  }
+
+
+  /**
+   * Consulta agregada para a página global Finanças (/financas).
+   * Utiliza estritamente os dados de AsaasPayment e Client no banco local.
+   * Não realiza nenhuma chamada à API externa do Asaas.
+   */
+  async getFinancialOverview(
+    organizationId: string,
+    filters: FinancialOverviewFilters = {}
+  ): Promise<FinancialOverviewResponse> {
+    if (!organizationId) {
+      throw new AsaasIntegrationError('Organização é obrigatória', 400, 'ORG_REQUIRED');
+    }
+
+    const {
+      period = 'current-month',
+      startDate,
+      endDate,
+      clientId,
+      clientIds,
+      status,
+      search,
+      page = 1,
+      limit = 20,
+    } = filters;
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const { start: periodStart, end: periodEnd } = getPeriodDateRange(period, startDate, endDate, now);
+
+    // 1. Busca pagamentos da organização (com cliente válido) para calcular KPIs e Séries Temporais
+    let resolvedClientIdFilter: any = { not: null };
+
+    if (clientId && clientIds !== undefined) {
+      // Interseção segura: se o clientId específico estiver dentro da lista permitida
+      if (clientIds.includes(clientId)) {
+        resolvedClientIdFilter = clientId;
+      } else {
+        // Fora do escopo permitido: interseção vazia (fail-closed)
+        resolvedClientIdFilter = { in: [] };
+      }
+    } else if (clientId) {
+      resolvedClientIdFilter = clientId;
+    } else if (clientIds !== undefined) {
+      resolvedClientIdFilter = { in: clientIds };
+    }
+
+    const baseWhere: any = {
+      organizationId,
+      clientId: resolvedClientIdFilter,
+    };
+
+    const allPayments = await this.prismaClient.asaasPayment.findMany({
+      where: baseWhere,
+      select: {
+        id: true,
+        externalId: true,
+        value: true,
+        netValue: true,
+        status: true,
+        dueDate: true,
+        paymentDate: true,
+        clientPaymentDate: true,
+        updatedAt: true,
+        clientId: true,
+        rawPayload: true,
+        billingType: true,
+        invoiceUrl: true,
+        bankSlipUrl: true,
+        description: true,
+        client: {
+          select: { id: true, name: true },
+        },
+      },
+      orderBy: { dueDate: 'asc' },
+    });
+
+    let receivedMonth = 0;
+    let receivedMonthCount = 0;
+    let pending = 0;
+    let pendingCount = 0;
+    let overdue = 0;
+    let overdueCount = 0;
+    let incompletePaymentsCount = 0;
+
+    let nextDueDateItem: { date: string | null; value: number | null; clientName: string | null } | null = null;
+    let minFutureDueDate: Date | null = null;
+
+    const statusCounts = {
+      pending: 0,
+      received: 0,
+      overdue: 0,
+      refunded: 0,
+      cancelled: 0,
+    };
+
+    for (const p of allPayments) {
+      if (!p.clientId || !p.client) continue;
+
+      const numVal = Number(p.value);
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const rawStatus = raw?.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
+
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
+
+      const isCancelled = isDeleted ||
+                          effectiveStatus === AsaasPaymentStatus.REFUNDED ||
+                          effectiveStatus === AsaasPaymentStatus.CANCELLED ||
+                          effectiveStatus === AsaasPaymentStatus.DELETED;
+
+      const isOverdue = !isPaid && !isCancelled && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+      const isPending = !isPaid && !isCancelled && !isOverdue && effectiveStatus === AsaasPaymentStatus.PENDING;
+
+      if (isPaid) {
+        if (actualPaymentDate) {
+          const inPeriod = (!periodStart || actualPaymentDate >= periodStart) &&
+                           (!periodEnd || actualPaymentDate <= periodEnd);
+
+          if (inPeriod) {
+            receivedMonth += numVal;
+            receivedMonthCount += 1;
+            statusCounts.received += 1;
+          }
+        } else {
+          // Dado incompleto para auditoria: possui status de recebido mas sem data de liquidação
+          incompletePaymentsCount += 1;
+          console.warn(`[Asaas Audit] Cobrança ${p.externalId || p.id} possui status ${effectiveStatus}, mas não possui paymentDate nem clientPaymentDate.`);
+        }
+      } else if (isOverdue) {
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          overdue += numVal;
+          overdueCount += 1;
+          statusCounts.overdue += 1;
+        }
+      } else if (isPending) {
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          pending += numVal;
+          pendingCount += 1;
+          statusCounts.pending += 1;
+        }
+
+        if (p.dueDate >= now) {
+          if (!minFutureDueDate || p.dueDate < minFutureDueDate) {
+            minFutureDueDate = p.dueDate;
+            nextDueDateItem = {
+              date: p.dueDate ? p.dueDate.toISOString().split('T')[0] : null,
+              value: numVal,
+              clientName: p.client?.name || null,
+            };
+          }
+        }
+      } else if (isCancelled) {
+        const inPeriod = (!periodStart || p.dueDate >= periodStart) &&
+                         (!periodEnd || p.dueDate <= periodEnd);
+
+        if (inPeriod) {
+          if (effectiveStatus === AsaasPaymentStatus.REFUNDED) {
+            statusCounts.refunded += 1;
+          } else {
+            statusCounts.cancelled += 1;
+          }
+        }
+      }
+    }
+
+    // 2. Séries Temporais (Gráficos Móveis de 6 Meses)
+    // A) Recebidos reais nos últimos 6 meses (baseado estritamente na data de pagamento liquidada: paymentDate ?? clientPaymentDate)
+    const monthsNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const recebidosMap = new Map<string, { label: string; value: number; count: number }>();
+
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(currentYear, currentMonth - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthsNames[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}`;
+      recebidosMap.set(key, { label, value: 0, count: 0 });
+    }
+
+    for (const p of allPayments) {
+      if (!p.clientId || !p.client) continue;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const rawStatus = raw?.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
+
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
+
+      if (isPaid && actualPaymentDate) {
+        const key = `${actualPaymentDate.getFullYear()}-${String(actualPaymentDate.getMonth() + 1).padStart(2, '0')}`;
+        if (recebidosMap.has(key)) {
+          const entry = recebidosMap.get(key)!;
+          entry.value += Number(p.value);
+          entry.count += 1;
+        }
+      }
+    }
+
+    const recebidosTimeSeries: TimeSeriesPoint[] = Array.from(recebidosMap.entries()).map(([month, data]) => ({
+      month,
+      label: data.label,
+      value: data.value,
+      count: data.count,
+    }));
+
+    // B) Previstos por vencimento para os próximos 6 meses (baseado estritamente em cobranças pendentes)
+    const previstosMap = new Map<string, { label: string; value: number; count: number }>();
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(currentYear, currentMonth + i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthsNames[d.getMonth()]}/${String(d.getFullYear()).slice(-2)}`;
+      previstosMap.set(key, { label, value: 0, count: 0 });
+    }
+
+    for (const p of allPayments) {
+      if (!p.clientId || !p.client) continue;
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const rawStatus = raw?.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
+
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
+
+      if (!isPaid && !isDeleted && effectiveStatus === AsaasPaymentStatus.PENDING && p.dueDate >= now) {
+        const key = `${p.dueDate.getFullYear()}-${String(p.dueDate.getMonth() + 1).padStart(2, '0')}`;
+        if (previstosMap.has(key)) {
+          const entry = previstosMap.get(key)!;
+          entry.value += Number(p.value);
+          entry.count += 1;
+        }
+      }
+    }
+
+    const previstosTimeSeries: TimeSeriesPoint[] = Array.from(previstosMap.entries()).map(([month, data]) => ({
+      month,
+      label: data.label,
+      value: data.value,
+      count: data.count,
+    }));
+
+    // 3. Montagem do filtro para a lista paginada de cobranças
+    const listWhere: any = {
+      organizationId,
+      clientId: resolvedClientIdFilter,
+    };
+
+    const upperStatus = status && status !== 'ALL' ? status.toUpperCase() : 'ALL';
+
+    if (upperStatus === 'RECEIVED' || upperStatus === 'CONFIRMED') {
+      listWhere.status = { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] };
+      if (periodStart || periodEnd) {
+        listWhere.OR = [
+          { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+          { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+        ];
+      }
+    } else if (upperStatus === 'OVERDUE') {
+      listWhere.OR = [
+        { status: AsaasPaymentStatus.OVERDUE },
+        { status: AsaasPaymentStatus.PENDING, dueDate: { lt: now } },
+      ];
+      if (periodStart || periodEnd) {
+        listWhere.dueDate = {
+          ...(periodStart ? { gte: periodStart } : {}),
+          ...(periodEnd ? { lte: periodEnd } : {}),
+        };
+      }
+    } else if (upperStatus === 'PENDING') {
+      listWhere.status = AsaasPaymentStatus.PENDING;
+      listWhere.dueDate = {
+        gte: periodStart && periodStart >= now ? periodStart : now,
+        ...(periodEnd ? { lte: periodEnd } : {}),
+      };
+    } else if (upperStatus !== 'ALL') {
+      listWhere.status = mapAsaasPaymentStatus(upperStatus);
+      if (periodStart || periodEnd) {
+        listWhere.dueDate = {
+          ...(periodStart ? { gte: periodStart } : {}),
+          ...(periodEnd ? { lte: periodEnd } : {}),
+        };
+      }
+    } else {
+      // upperStatus === 'ALL': aplica período para recebidos (liquidação estrita) e pendentes/vencidos (vencimento)
+      if (periodStart || periodEnd) {
+        listWhere.OR = [
+          {
+            status: { in: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED] },
+            OR: [
+              { paymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+              { clientPaymentDate: { ...(periodStart ? { gte: periodStart } : {}), ...(periodEnd ? { lte: periodEnd } : {}) } },
+            ],
+          },
+          {
+            status: { notIn: [AsaasPaymentStatus.RECEIVED, AsaasPaymentStatus.CONFIRMED, AsaasPaymentStatus.DELETED, AsaasPaymentStatus.CANCELLED] },
+            dueDate: {
+              ...(periodStart ? { gte: periodStart } : {}),
+              ...(periodEnd ? { lte: periodEnd } : {}),
+            },
+          },
+        ];
+      }
+    }
+
+    // Busca textual por descrição ou nome do cliente
+    if (search && search.trim()) {
+      const searchTerms = search.trim();
+      const searchCondition = [
+        { description: { contains: searchTerms, mode: 'insensitive' } },
+        { client: { name: { contains: searchTerms, mode: 'insensitive' } } },
+      ];
+      if (listWhere.OR) {
+        listWhere.AND = [{ OR: listWhere.OR }, { OR: searchCondition }];
+        delete listWhere.OR;
+      } else {
+        listWhere.OR = searchCondition;
+      }
+    }
+
+    const pageNum = Math.max(1, Number(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, Number(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [totalCount, pagedPayments] = await Promise.all([
+      this.prismaClient.asaasPayment.count({ where: listWhere }),
+      this.prismaClient.asaasPayment.findMany({
+        where: listWhere,
+        include: {
+          client: {
+            select: { id: true, name: true },
+          },
+        },
+        orderBy: { dueDate: 'desc' },
+        skip,
+        take: limitNum,
+      }),
+    ]);
+
+    const formattedPayments: FinancialOverviewPaymentItem[] = pagedPayments.map((p) => {
+      const numValue = Number(p.value);
+      const raw = (p.rawPayload || {}) as any;
+      const isDeleted = p.status === AsaasPaymentStatus.DELETED || p.status === AsaasPaymentStatus.CANCELLED || raw?.deleted === true;
+      const rawStatus = raw?.status;
+      const effectiveStatus = isDeleted
+        ? AsaasPaymentStatus.DELETED
+        : (rawStatus ? mapAsaasPaymentStatus(rawStatus, raw?.deleted) : p.status);
+      const actualPaymentDate = p.paymentDate ?? p.clientPaymentDate;
+
+      const isPaid = !isDeleted &&
+                     (effectiveStatus === AsaasPaymentStatus.RECEIVED ||
+                      effectiveStatus === AsaasPaymentStatus.CONFIRMED ||
+                      (actualPaymentDate !== null &&
+                       effectiveStatus !== AsaasPaymentStatus.REFUNDED &&
+                       effectiveStatus !== AsaasPaymentStatus.CANCELLED &&
+                       effectiveStatus !== AsaasPaymentStatus.DELETED));
+
+      const isOverdue = !isPaid && !isDeleted && (effectiveStatus === AsaasPaymentStatus.OVERDUE || p.dueDate < now);
+
+      return {
+        id: p.id,
+        externalId: p.externalId,
+        description: p.description || 'Cobrança Asaas',
+        value: numValue,
+        netValue: p.netValue ? Number(p.netValue) : null,
+        billingType: p.billingType,
+        status: effectiveStatus,
+        statusLabel: getAsaasStatusLabel(effectiveStatus),
+        dueDate: p.dueDate ? p.dueDate.toISOString().split('T')[0] : p.dueDate,
+        paymentDate: actualPaymentDate ? actualPaymentDate.toISOString().split('T')[0] : null,
+        invoiceUrl: p.invoiceUrl,
+        bankSlipUrl: p.bankSlipUrl,
+        isOverdue,
+        client: p.client ? { id: p.client.id, name: p.client.name } : null,
+      };
+    });
+
+    let clientCountWhere: any = { organizationId };
+    if (clientId && clientIds !== undefined) {
+      if (clientIds.includes(clientId)) {
+        clientCountWhere.id = clientId;
+      } else {
+        clientCountWhere.id = { in: [] };
+      }
+    } else if (clientId) {
+      clientCountWhere.id = clientId;
+    } else if (clientIds !== undefined) {
+      clientCountWhere.id = { in: clientIds };
+    }
+
+    const totalClientsCount = await this.prismaClient.client.count({
+      where: clientCountWhere,
+    });
+    const clientsWithPaymentsCount = new Set(allPayments.map((p) => p.clientId).filter(Boolean)).size;
+    const hasUnsyncedData = totalClientsCount > clientsWithPaymentsCount;
+
+    return {
+      kpis: {
+        receivedMonth,
+        receivedMonthCount,
+        pending,
+        pendingCount,
+        overdue,
+        overdueCount,
+        nextDueDate: nextDueDateItem,
+        statusCounts,
+        incompletePaymentsCount,
+      },
+      recebidosTimeSeries,
+      previstosTimeSeries,
+      payments: formattedPayments,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total: totalCount,
+        totalPages: Math.ceil(totalCount / limitNum),
+      },
+      hasUnsyncedData,
+      disclaimer: 'Os dados são atualizados pela sincronização por cliente e pelos eventos do Asaas.',
+    };
+  }
+}
+

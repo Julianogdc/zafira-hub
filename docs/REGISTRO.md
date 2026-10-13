@@ -1,0 +1,918 @@
+# Zafira Hub 2.1 — Registro Oficial de Execução e Decisões
+
+Cronologia de execuções e decisões do projeto. **Entradas mais recentes no topo.** Nunca apagar nem reescrever uma entrada: se algo for superado, registrar uma nova entrada que diga o que mudou.
+
+- Estado atual (o que fazer agora): `docs/ESTADO_ATUAL.md`
+- Escopo e regras: `docs/MAPA_MESTRE.md`
+- Cronologia anterior a 10/10/2026: mantida no repositório interno.
+
+## Formatos
+
+**Execução (handoff obrigatório ao fim de cada sessão de trabalho):**
+
+```
+### AAAA-MM-DD — <MARCO> — <agente>
+- BASELINE (commit):
+- CI/EVIDÊNCIA:
+- STATUS: concluído | pendente de aceite | bloqueado | não iniciado
+- O QUE MUDOU:
+- LIMITES/LACUNAS:
+- PRÓXIMA MICROETAPA AUTORIZADA:
+- PROIBIÇÕES ATUAIS:
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE
+```
+
+**Decisão (só o proprietário decide; agentes podem propor):**
+
+```
+### DEC-<ÁREA>-<nº> — <título>
+- Data / responsável:
+- Problema:
+- Decisão:
+- Alternativas consideradas:
+- Impacto (módulos, dados, segurança, prazo, infraestrutura):
+- Revisão (quando reabrir):
+```
+
+---
+
+### 2026-10-12 — F8-1 — Domínio, arquivos, upload e telas mínimas de conteúdo — Claude
+- AUTORIZAÇÃO: DEC-F8-003 — exclusivamente a F8-1 (registrada antes do código, `93922fe`). Não iniciadas: F8-2 a F8-5; F8-0b não executada. Sem BrightBean/Asana reais, VPS, produção ou cobrança.
+- BASELINE (commit): `61bd2fd`.
+- CI OFICIAL: run **38340449956 — 5/5 verdes** (um único run para a fatia): domínio 83/83, API 822/822, web 81/81, PostgreSQL 130/130 (10 novos em `content-postgres.test.ts`; suíte completa também validada localmente em banco limpo); Browser Gates F4–F7-4 passando. Não foi criado Browser Gate novo para o conteúdo (economia de CI; ver limitações).
+- STATUS: **pendente de aceite** (a F8-1 não é aceita automaticamente).
+- O QUE MUDOU: (1) **Domínio puro** (`content-model`): formatos canônicos `FEED_IMAGE`, `CAROUSEL` (2–10), `REEL` (1 vídeo), `STORY` (1 imagem ou vídeo), sem formato separado de vídeo de feed; **tipo real por assinatura** (JPG, PNG, WebP, MP4, MOV; extensão e Content-Type declarados são ignorados); teto de 100 MB; regras de conjunto de arquivos e de mudança de formato; chave de storage por hash e organização. (2) **Banco** (migration `20261013010000_f8_content`): `content_items`, `content_versions`, `content_media`, `content_events`; **FK do cliente em RESTRICT** (cliente com conteúdo não é excluído); gatilhos que **bloqueiam DELETE** (só aceito na remoção do tenant inteiro), tornam eventos **append-only**, congelam a versão depois de `sentForApprovalAt` (legenda, hash e arquivos) e protegem identidade; índices únicos (uma peça por tarefa do Asana e cliente; posição ativa por versão). (3) **`FileStorage`** com driver local (dev/testes; **recusado em produção**; chave inválida/traversal recusada; escrita idempotente por hash) e driver S3 privado **previsto, não implementado**: sem driver o upload responde 503. (4) **API** (`/content/items…`, prefixos `` e `/api`): listar por cliente, criar, detalhar, editar (controle otimista), enviar/substituir/remover arquivo (remoção lógica; histórico preservado), nova versão (só com a atual congelada), servir arquivo autorizado (`no-store`, `nosniff`); **sem rota de exclusão**; permissões `content.view` (novo) e `content.create`; carteira e organização em tudo (404 sem revelar existência); vínculo opcional com tarefa do Asana **conferido no espelho local** e com peça de Entregas do mesmo cliente **sem alterar contadores**; eventos e auditoria. (5) **Interface** no Design System atual: `/conteudo` (lista por cliente, novo conteúdo) e `/conteudo/:id` (dados, arquivos com prévia autorizada, enviar/substituir/remover, versões, histórico, avisos de formato e de compatibilidade de publicação **a verificar**); item de menu por `content.view`; 390 px sem rolagem horizontal. (6) Capacidades `content.view`/`content.create` em `/auth/capabilities`.
+- DECISÕES TÉCNICAS: arquivo no storage nunca é apagado (histórico e P28); nova versão copia **referências** dos arquivos (sem duplicar bytes); vínculo com tarefa exige existência no espelho local do Asana (sem chamada ao Asana); aceito pelo Hub ≠ homologado para publicação (aviso fixo na tela); reuso de permissões existentes `content.*` — `content.review`/`approve_internal` **não usados** (aprovação interna é do Asana).
+- LIMITES/LACUNAS: sem aprovação do cliente (F8-2), sem contadores de Entregas (F8-3) e sem BrightBean (F8-4/5); **driver S3 não implementado e provedor não decidido** (necessário antes da homologação); prévia de vídeo sem suporte a *range*; transcodificação/validação de codec de vídeo e conversão de PNG/WebP/MOV ficam para a F8-0b/F8-4; **Browser Gate próprio do conteúdo não criado** (a validação de interface foi feita no navegador local e por testes de API/PostgreSQL; pode ser incluído na F8-2 junto com o gate do link); `content.view` exige `rbac:bootstrap` (P22); P22 e P28 seguem bloqueadoras.
+- FRANQUIA DE ACTIONS: **um** run completo (38340449956) para toda a fatia; commits de documentação com `[skip ci]`; verificação local prévia (domínio, API, PostgreSQL em banco limpo, web, build, navegador).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguardam: aceite da F8-1, D3 (antes da F8-2) e F8-0b antes da F8-4.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-2 a F8-5, BrightBean real, deploy/produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-GOV-005 — Arquitetura H3: repositório público de desenvolvimento e repositório privado interno (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: a franquia do GitHub Actions esgotou (P30) e o repositório privado impede o uso de runners padrão gratuitos; o histórico contém informação operacional que não pode ser publicada.
+- Decisão: (1) **Adotar a arquitetura H3** do plano plano de migração (mantido no repositório interno): `Julianogdc/zafira-hub-internal` **privado** (histórico original, documentos completos e governança, **sem workflows**) e `Julianogdc/zafira-hub` **novo repositório público**, criado com **um único commit inicial** contendo apenas a árvore saneada. (2) **Substituição condicionada da DEC-GOV-003:** a DEC-GOV-003 (repositório privado) **só é substituída quando a Direção aceitar expressamente a execução**; até lá permanece vigente e nada é publicado nem renomeado. (3) **Autorizada exclusivamente a PREPARAÇÃO (passos 1 a 3 do plano):** branch de saneamento isolada, separação de documentos, saneamento de exemplos/hosts/workflow/testes, remoção do valor descritivo do P29 do conteúdo público, ampliação do `secret-scan` e lista de negação, versões públicas de ESTADO/REGISTRO/MAPA, instruções para dois repositórios, testes locais sem disparar Actions. (4) **Não autorizado:** renomear, criar, publicar, alterar visibilidade ou cobrança, reescrever histórico, apagar artefatos/commits/documentos oficiais, alterar VPS/produção/credenciais, iniciar a F8-3. (5) **P29 retificado:** o valor encontrado era um **placeholder descritivo**, não uma credencial comprovada; **nenhuma revogação é exigida por esse achado** (só seria reavaliada com nova evidência). O Postiz não deve ser acessado sem autorização.
+- Alternativas consideradas: H1 (abrir o atual), H2 (reescrever o atual), H3b (histórico saneado commit a commit) — ver o plano.
+- Impacto: governança (fonte canônica passa a ter versão pública saneada e versão interna completa), CI (runners gratuitos), agentes (dois diretórios).
+- Revisão: no aceite da execução pela Direção.
+
+### 2026-10-13 — Plano de separação em repositório público e privado
+- Entrada **interna** (INT-002): detalhes de segurança e infraestrutura mantidos no repositório interno e omitidos desta versão pública.
+### 2026-10-13 — Auditoria de exposição e alternativas para o GitHub Actions
+- Entrada **interna** (INT-001): detalhes de segurança e infraestrutura mantidos no repositório interno e omitidos desta versão pública.
+### 2026-10-13 — F8-2 — Aprovação do cliente por link seguro — Claude
+- AUTORIZAÇÃO: DEC-F8-004 — exclusivamente a F8-2 (registrada antes do código, `7386c15`). Não iniciadas: F8-3 a F8-5; F8-0b não executada. Sem BrightBean/Asana/clientes reais, S3, VPS, produção ou cobrança.
+- BASELINE (commits): `788dad3` (F8-2) e `2482ba1` (correção do segredo efêmero fora de produção).
+- CI/EVIDÊNCIA — **CI OFICIAL NÃO CONCLUÍDO (limite de minutos/gasto do GitHub Actions):**
+  - run 38397329866 (`788dad3`): Code Quality and Tests ✔; Docker Build Gate ✔; **PostgreSQL Integration Gate ✖** — o teste novo `approval-postgres` falhou porque o ambiente do job não define `JWT_SECRET`/`COOKIE_SECRET` e o serviço exigia segredo (os demais 130 testes passaram); Publish Images e Homologation Rehearsal **não executaram** (dependem do job que falhou).
+  - correção `2482ba1` (segredo efêmero por processo fora de produção; produção continua exigindo segredo): run 38398102477 **não iniciou** — os 3 jobs foram recusados com "recent account payments have failed or your spending limit needs to be increased". **Nenhuma configuração de cobrança foi alterada.**
+  - Consequência: **o Browser Gate F8 nunca foi executado em CI** e o CI oficial completo não existe para a F8-2. **Aceite técnico pendente** até haver minutos disponíveis.
+- EVIDÊNCIA LOCAL (antes do push, em banco descartável): domínio 87/87; API unitária 822/822; web 84/84 (lint do escopo F6/F7/F8 com 0 erros; typecheck limpo); **PostgreSQL 140/140 em banco limpo** (10 novos em `approval-postgres`, rodados também sem `JWT_SECRET` após a correção); build completo; `secret-scan` limpo; verificação no navegador: geração do link pela interface, página pública sem login, pedido de alteração com comentário e confirmação, resposta persistente, 390 px sem rolagem horizontal.
+- STATUS: **pendente de aceite técnico** (CI oficial bloqueado por limite de cobrança; a F8-2 não é aceita automaticamente).
+- O QUE MUDOU: (1) **Domínio:** validade 7 dias (máx. 30), N1 (nome, contato e declaração de autoridade; aviso fixo de que **não** é identidade autenticada/verificada), estado do link, status interno de aprovação. (2) **Banco** (migration `20261013020000_f8_approval`): `approval_links` (só o **hash** do token; um link ativo por versão por índice parcial; validade só pode ser encurtada; revogação definitiva) e `approval_decisions` (**uma por versão** por índice único; gatilho valida no banco link ativo/da versão/versão enviada/**integridade do hash**; CHECKs de autoridade e comentário; imutável; sem DELETE). (3) **API interna:** `POST /content/items/:id/approval-links` (gera ou **reemite revogando o anterior**; exige conteúdo completo; congela a versão; token exibido **uma vez**), `GET …/approval`, `POST …/approval-links/:linkId/revoke`; permissão `content.send_to_client`; eventos e auditoria. (4) **API pública (sem sessão):** `POST /public/approval/view` e `/decision` com o **token no corpo** (nunca na URL da API), `GET /public/approval/media?t=…` com **URL curta assinada de 10 min** que vale só com o link ativo e não expõe `storageKey`; respostas **idênticas** para link inválido/expirado/revogado; limite de taxa; `no-store`, `noindex`, `Referrer-Policy: no-referrer`; evidências técnicas minimizadas (HMAC do IP e do agente); na decisão o servidor recalcula o hash da versão, confere o hash enviado/visto e a existência dos arquivos. (5) **Interface:** componente `ContentPreview` reutilizável (inspirado no Instagram por formato; para a F16); página pública `/aprovacao` com o **token no fragmento (#)** (não vai a servidores nem ao Referer), sem cookies e sem recursos de terceiros; painel interno de aprovação (status, gerar/reemitir/revogar, cópia do link, decisões com identificação declarada), nova versão e novo envio, selo na lista. (6) **Browser Gate F8** (`scripts/homologation/content-approval-browser-gate.py`, ligado ao workflow): cadastro/upload da F8-1, permissões, link, página pública, decisão, nova versão, reemissão/revogação/expiração, Org B e 390 px — **escrito mas não executado em CI**.
+- LIMITES/LACUNAS: (a) **CI oficial e Browser Gate F8 pendentes por bloqueio de cobrança**; o gate é um script Python que **não pôde ser executado localmente** (sem Python/Docker nesta máquina) e pode precisar de ajustes na primeira execução; (b) N2 **não implementado**; (c) o link **não é enviado** por WhatsApp/e-mail (o usuário copia e envia; notificações são F14); (d) o token em um encaminhamento do link dá acesso a quem o possuir (por isso N1 é só declarado, validade curta e revogação); (e) sem S3; (f) sem contadores de Entregas (F8-3) e sem BrightBean (F8-4/5); (g) P22 (`content.send_to_client` e demais exigem `rbac:bootstrap`) e P28 seguem bloqueadoras.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguardam: **saldo de minutos/limite de gasto do Actions (decisão do proprietário)** para executar o CI oficial; aceite da F8-2; autorização da F8-3; F8-0b antes da F8-4.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-3 a F8-5, BrightBean real, S3, deploy/produção e qualquer alteração de cobrança sem autorização.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F8-004 — Aceite técnico da F8-1, D3 aprovada e autorização exclusiva da F8-2 (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: revisão da F8-1 (baseline 61bd2fd, CI 38340449956, 5/5).
+- Decisão: (1) **Aceite técnico da F8-1.** (2) **Autorizada exclusivamente a F8-2** — aprovação do cliente por link seguro, página pública, preview e Browser Gate. (3) **D3 aprovada:** validade padrão 7 dias, máxima 30; **N1** (nome, contato e declaração explícita de autoridade para aprovar) como identificação inicial, **sem apresentá-lo como identidade autenticada ou verificada**; **N2 reservado**, sem implementação; reemissão revoga o link anterior; **decisão única por versão**; pedido de alteração exige comentário; nova versão exige nova aprovação. (4) **Escopo:** geração, consulta, revogação e reemissão com permissões e auditoria; token de 256 bits persistindo só o hash; página pública sem login restrita à versão autorizada; preview inspirado no Instagram por formato; ações Aprovar e Solicitar alteração; registro imutável de decisão, identificação declarada, comentário e histórico; acompanhamento interno; nova versão e reenvio após alteração; **componente de preview reutilizável pela F16**; **Browser Gate da F8** (cadastro/upload da F8-1, dois tenants, permissões, 390 px). (5) **Segurança obrigatória:** respostas genéricas para link inválido/expirado/revogado; rate limiting; `no-store`, `noindex`, `Referrer-Policy: no-referrer`; token fora de logs, analytics e recursos de terceiros; URLs de mídia curtas e autorizadas, sem `storageKey`; o token não consulta outros clientes, versões ou dados internos; **uma decisão final por versão com proteção no banco**; revogação e expiração impedem novas decisões; o servidor valida a versão e sua integridade na decisão. (6) **Ressalvas:** corrigir descrições conflitantes da fase no ESTADO_ATUAL; preservar a P28 (inclusive a análise futura da exclusão integral de tenants); driver local só em dev/testes; **sem S3 nesta fatia** (interface `FileStorage` preservada); sem Asana, BrightBean ou clientes reais; sem contador de Entregas (F8-3) nem portal da F16; refinamento estético adiado. (7) **Validação:** testes locais antes do push e **um único CI oficial completo**; sem enfraquecer testes; sem alterar cobrança, VPS, produção ou credenciais; F8-0b segue obrigatória antes da F8-4; P22 e P28 seguem bloqueadoras; F8-2 não é aceita automaticamente.
+- Alternativas consideradas: —
+- Impacto: apps/api (aprovação, endpoints públicos, migration), packages, apps/web (página pública, preview, painel interno), scripts/homologation e CI (Browser Gate F8).
+- Revisão: no aceite da F8-2.
+
+### DEC-F8-003 — Aceite da F8-0 como levantamento histórico e autorização exclusiva da F8-1 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da matriz F8-0 (commit 652031a).
+- Decisão: (1) **F8-0 aceita como levantamento documental e histórico, não como homologação atual do BrightBean.** (2) **Autorizada exclusivamente a F8-1** — domínio, arquivos, upload e telas mínimas: cadastrar conteúdo vinculado a cliente autorizado; formato (**FEED_IMAGE, CAROUSEL, REEL, STORY**; sem formato separado de vídeo de feed); upload dos arquivos finais (JPG, PNG, WebP, MP4, MOV; 100 MB; **tipo real**; aceito pelo Hub ≠ homologado para publicação); legenda e dados; vínculo opcional com tarefa do Asana (local, sem escrita); visualizar por cliente; substituir arquivos/atualizar dados enquanto a versão for editável; preservar versões e histórico. (3) **F8-0b adiada, mas obrigatória antes da implementação da F8-4**; não autorizar publicação com base em capacidades não verificadas. (4) **Regras:** nada de pauta, revisão ou aprovação internas; `FileStorage` com driver local para dev/testes e arquitetura compatível com S3 privado (sem disco local da VPS como solução definitiva); isolamento por organização, carteira e permissões; sem cascata destrutiva (P28); vínculo com Entregas sem antecipar contadores (F8-3); nada enviado ao BrightBean; sem dados fictícios permanentes, serviços ou credenciais reais. (5) **Validação:** testes de domínio, upload, imutabilidade, isolamento multiempresa, PostgreSQL, API (autorização e carteira), interface responsiva no Design System atual, testes locais direcionados antes de publicar. (6) **GitHub Actions:** franquia quase esgotada — sem pushes intermediários, `[skip ci]` em documentação, sem enfraquecer o CI; se o CI oficial não puder rodar por limite de minutos, informar e deixar o aceite técnico pendente; sem criar cobranças. (7) **Limites:** sem F8-2 a F8-5, sem F8-0b, sem VPS/produção/cobrança; P22 e P28 seguem bloqueadoras; a F8-1 não é aceita automaticamente.
+- Alternativas consideradas: —
+- Impacto: apps/api (módulo de conteúdo, migration), packages (domínio/contratos), apps/web (telas mínimas).
+- Revisão: no aceite da F8-1.
+
+### DEC-F8-002 — Aprovação da revisão 2 da F8; decisões D1, D2, D4, D5; autorização da F8-0 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da especificação F8 revisão 2 (commit ee55d24).
+- Decisão: (1) **Revisão 2 aprovada** como direção funcional e arquitetural da F8, mantido o fluxo ASANA → HUB (upload e vínculo) → APROVAÇÃO DO CLIENTE → BRIGHTBEAN → PUBLICAÇÃO → ANÁLISE. (2) **D1 — aprovada:** interface `FileStorage` com driver local **exclusivo** para desenvolvimento/testes e armazenamento privado S3-compatível para ambientes reais; provedor concreto decidido **antes da homologação**; preservar versões, isolamento e integridade dos arquivos. (3) **D2 — aprovada:** **sem cascata destrutiva** de conteúdos, versões, mídias, decisões de aprovação e histórico; compatível com a **P28, que continua aberta**. (4) **D4 — aprovada:** tipos iniciais JPG, PNG, WebP, MP4 e MOV, teto de 100 MB por arquivo, sujeito à validação por **tipo real** (não pela extensão declarada) e aos limites futuros do BrightBean. (5) **D5 — aprovada:** vínculo **opcional** com tarefa do Asana, exclusivamente local e somente leitura, respeitando organização e carteira. (6) **D3** (validade do link e nível de identificação) fica para deliberação **antes da F8-2**. (7) **Autorizada exclusivamente a F8-0:** matriz de capacidades do BrightBean (formatos/redes, uploads e limites, rascunhos e agendamento, idempotência, consulta e reconciliação, cancelamento e reagendamento, status/falhas/permalink/métricas, lacunas F8-1 a F8-5), classificando cada capacidade como **confirmada, parcialmente confirmada ou não verificada**, sem presumir suporte do servidor pelo que o adaptador envia. (8) **Governança:** sem F8-1; sem serviços reais, infraestrutura ou credenciais; sem CI completo para alterações só documentais; P22 e P28 seguem bloqueadoras de homologação com dados reais.
+- Alternativas consideradas: —
+- Impacto: `docs/propostas/F8-0_MATRIZ_CAPACIDADES_BRIGHTBEAN.md`; especificação F8; ESTADO_ATUAL.
+- Revisão: na autorização da F8-1 e após a F8-0b.
+
+### 2026-10-12 — F8-0 — Matriz de capacidades do BrightBean — Claude
+- AUTORIZAÇÃO: DEC-F8-002 — somente a F8-0 (levantamento documental e de código). Sem F8-1, serviços reais, credenciais, infraestrutura ou CI completo.
+- BASELINE (commit): código inalterado desde `2cf9633`; só `docs/`.
+- CI/EVIDÊNCIA: nenhum run (commit `[skip ci]`). Fontes: adaptador e testes do Hub (provam o que é enviado, não o servidor) e registros históricos de execuções reais de 24–25/09/2026 (não reverificados).
+- STATUS: **concluído para revisão da Direção.**
+- ENTREGA: `docs/propostas/F8-0_MATRIZ_CAPACIDADES_BRIGHTBEAN.md` — 38 capacidades: **12 confirmadas, 13 parcialmente confirmadas, 13 não verificadas**; lacunas por fatia; implicações de desenho já seguras; roteiro da **F8-0b** (verificação ativa em instância de teste, **não executada**, exige autorização e credencial de escopo mínimo).
+- ACHADOS PRINCIPAIS: (a) confirmados em execução real histórica: Story (imagem/vídeo), Reel (IG/FB) e Feed imagem, rascunho, agendamento, upload com chave, consulta de post, permalink e métricas de post; (b) **não existe vídeo de feed no Instagram** (vira Reel) e Story não existe no Facebook; (c) **tipos e limites do servidor não verificados** — PNG, WebP e MOV (D4) podem exigir conversão; (d) **idempotência: parcial** (existe em upload/criação; semântica não documentada; schedule/reagendar/cancelar sem chave); (e) **listagem de posts: evidências conflitantes**, tratar como indisponível; (f) **remover post publicado via API não funciona** (HTTP 400 no Instagram); (g) o servidor tem **retentativa automática** (`retry_count`) que o adaptador não expõe; (h) o BrightBean possui workflow próprio de aprovação que a F8 não deve usar.
+- RECOMENDAÇÃO: **liberar a F8-1** (e depois F8-2/F8-3, que não dependem do BrightBean) com as condições do §6 da matriz; **não liberar a F8-4** antes da F8-0b.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma além desta entrega. Aguardam: decisão sobre a F8-1, D3 (antes da F8-2) e autorização da F8-0b.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial código da F8, acesso ao BrightBean real, deploy/produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE.
+
+### DEC-F8-001 — Simplificação da F8: aprovação do cliente por link seguro e fluxo editorial permanece no Asana (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a revisão 1 da especificação (commit 33c306f) duplicava no Hub o fluxo editorial (rascunho, revisão interna, comentários, aprovação interna) que já é executado no Asana.
+- Decisão: (1) **Fluxo:** Asana = pauta, criação, comentários, alterações e **aprovação interna**; Hub = upload dos arquivos finais, vínculo ao cliente e acompanhamento nas Entregas; Hub = **aprovação do cliente por link seguro**, com preview inspirado no Instagram e ações aprovar/solicitar alterações; BrightBean = agendamento e publicação **exclusivamente da versão aprovada**; Hub = status, permalink e métricas orgânicas. (2) **Aprovação do cliente na F8:** link com token seguro, validade e revogação, **sem login**, compartilhável por WhatsApp ou e-mail; acesso somente à versão autorizada; identificação do aprovador, canal e evidências proporcionais ao risco; aprovar ou solicitar alteração com comentário; versões anteriores preservadas; **nova versão exige nova aprovação**; **posse do link não é prova definitiva de identidade**; impedir publicação de versão não aprovada; **não antecipar o portal completo**. A **F16** implementará o portal autenticado reutilizando o mesmo domínio de conteúdo, versões e aprovações. (3) **Regras de operação:** não recriar pautas, revisão, comentários nem aprovação internos no Hub; Asana somente leitura (DEC-ASANA-001/002); o Hub gerencia a etapa posterior à aprovação interna e registra as versões efetivamente encaminhadas ao cliente; o contador de Entregas distingue **arquivo recebido, enviado para aprovação, aprovado e publicado**, não conta versões duplicadas como novas peças e não altera a meta contratual automaticamente. (4) **Pendências mantidas:** estratégia de armazenamento de mídia preservando versões e sem dependência exclusiva do BrightBean; integridade histórica conforme P28; verificar as capacidades reais da API BrightBean antes de implementar agendamento. (5) **Tarefa autorizada:** revisar a especificação e propor novo fatiamento; **sem implementação**; sem alterar produção, credenciais ou infraestrutura; Design System atual, sem refinamento estético.
+- Alternativas consideradas: manter o fluxo editorial completo no Hub (rejeitada: duplica processo existente e aumenta escopo); antecipar o portal autenticado na F8 (rejeitada: F16).
+- Impacto: `docs/propostas/F8_ESPECIFICACAO_CONTEUDOS.md` (revisão 2), Mapa Mestre (F8 e F16), ESTADO_ATUAL; revisão da DEC-F6-002 (as etapas "aprovada" e "postada" passam a vir do link do cliente e do BrightBean).
+- Revisão: na autorização da F8-1.
+
+### 2026-10-12 — F8 — Revisão 2 da especificação (fluxo simplificado) — Claude
+- AUTORIZAÇÃO: DEC-F8-001 — somente revisar a especificação e propor novo fatiamento. Sem código, migrations, deploy ou credenciais.
+- ENTREGA: `docs/propostas/F8_ESPECIFICACAO_CONTEUDOS.md` revisão 2: fluxo Asana→Hub→cliente→BrightBean; domínio mínimo (`ContentItem/Version/Media`, `ApprovalLink/Decision`, `ContentSchedule`, eventos); estados; **armazenamento** (`FileStorage` com driver local + S3-compatível, chaves por hash, URLs assinadas); **segurança do link** (token de 256 bits só em hash, validade 7 dias/máx. 30, revogação, escopo único, respostas genéricas, limite de taxa, evidências minimizadas, níveis N1/N2); preview; contador de Entregas por estágio; **capacidades do BrightBean** já evidentes no adaptador e lista a confirmar (F8-0); RBAC sem `content.review/approve_internal`; P28 sem cascata destrutiva; **fatias F8-0 a F8-5**.
+- DECISÕES AINDA NECESSÁRIAS ANTES DA F8-1: D1 arquitetura de storage; D2 integridade histórica (P28); D4 tipos e limites de arquivo; D5 vínculo manual com a tarefa do Asana. Antes da F8-2: D3 validade do link e nível de identificação. Demais (redes do piloto, fuso, provedor de storage, métricas) não bloqueiam a primeira fatia.
+- STATUS: proposta em revisão da Direção; commit só de documentação (`[skip ci]`, sem run no Actions).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma além desta revisão.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial código da F8, F8-0 com credenciais reais, deploy/produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE.
+
+### DEC-F7-018 — Aceite técnico da F7-4b, encerramento funcional da F7 e preparação da F8 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-4b (commits 82d0134 a 2cf9633; CI 38331008571, 5/5; handoff 4c0a24a).
+- Decisão: (1) **Aceite técnico da F7-4b.** (2) **Encerramento funcional da F7 — Onboarding e Agenda**, sem apagar decisões ou ressalvas anteriores. (3) **Ressalvas obrigatórias:** P22 segue bloqueando o primeiro deploy de homologação; P28 segue bloqueando o uso de dados reais; Google Calendar e n8n **não foram homologados com contas reais**; agendadores (espelho do Asana, Google Calendar, despachante n8n) seguem desligados até medição de capacidade e autorização; sem deploy nem alteração de produção; refinamento estético aprofundado adiado (DEC-F7-015). (4) **Autorizada exclusivamente a PREPARAÇÃO da F8 — Conteúdos** (especificação funcional e técnica, dependências, decisões de produto e fatias); **sem código da F8**. (5) **Governança de CI:** verificar o saldo de minutos antes de novos workflows completos; análise objetiva de economia sem enfraquecer testes, com recomendações para aprovação; não configurar cobrança, tornar o repositório público, instalar runners nem alterar infraestrutura sem autorização; documentação com `[skip ci]`.
+- Alternativas consideradas: manter a F7 aberta até homologação com contas reais (rejeitado: a homologação real depende de P22/P28 e de autorização de ambiente, e é tratada nas ressalvas).
+- Impacto: ESTADO_ATUAL, MAPA_MESTRE (status da F7), `docs/propostas/F8_ESPECIFICACAO_CONTEUDOS.md`.
+- Revisão: na revisão da especificação da F8.
+
+### Encerramento da F7 — Onboarding e Agenda (2026-10-12)
+- **Entregue e aceito tecnicamente:** F7-1 construtor de modelos versionados (a/b); F7-2 execução do onboarding (a/b) com carteira, prazos, bloqueios e histórico; F7-3 agenda Google somente leitura (a/b) e etapas por evento vinculado (c); F7-4 automações n8n: infraestrutura (a) e interfaces (b). Decisões DEC-F7-001 a 018.
+- **Critérios do Mapa × entrega:** onboarding com etapas, dependências, prazos e responsáveis ✔; automações n8n idempotentes ✔ (garantia do Hub = um pedido por geração e chave estável; exatamente uma vez no n8n depende do fluxo); Google Calendar com recorrência, participantes e fusos ✔ (leitura); **criar/editar evento pelo Hub não existe** — por DEC-F7-001 é evolução futura com decisão própria; **piloto com dados reais não executado** (depende de P22/P28 e homologação).
+- **Não declarado como pronto:** operação real com Google/n8n, capacidade dos agendadores, dados de produção, migração de modelos/clientes existentes.
+- **Evidências:** CI 38331008571 (domínio 77, API 819, web 77, PostgreSQL 120; Browser Gates F4–F7-4).
+
+### 2026-10-12 — Encerramento da F7, especificação da F8 e diagnóstico do Actions — Claude
+- AUTORIZAÇÃO: DEC-F7-018 — encerramento funcional da F7 (registro), preparação da especificação da F8 e análise de economia do CI. Sem código, deploy, produção ou credenciais.
+- BASELINE (commit): código inalterado desde `2cf9633`; esta microetapa só altera `docs/`.
+- CI/EVIDÊNCIA: sem novo run (commit só de documentação com `[skip ci]`). Última evidência: run 38331008571, 5/5.
+- STATUS: **concluído para revisão da Direção** (especificação em proposta; nenhuma decisão da F8 tomada).
+- O QUE MUDOU: DEC-F7-018 e registro de encerramento da F7; `MAPA_MESTRE` (status da F7 e decisão de Calendar como fonte); `docs/propostas/F8_ESPECIFICACAO_CONTEUDOS.md` (escopo oficial, reaproveitamento, regras, modelo de dados, estados, RBAC, idempotência, ligação com Entregas, interface, testes, 5 fatias F8-1 a F8-5, 10 decisões pendentes, riscos); este diagnóstico.
+- DIAGNÓSTICO DO CONSUMO DO GITHUB ACTIONS (dados reais do repositório, 9 a 13/10/2026):
+  - **Saldo:** a API de cobrança não pôde ser consultada (o token do `gh` não tem o escopo `user`; ampliar escopo é decisão do proprietário) e `timing.billable` retorna 0. **Estimativa pela duração dos jobs (arredondada por job): 2.276 min nos últimos 100 runs**, média **22,8 min/run** (máx. 30); **12/10 sozinho: 1.465 min**. O alerta anterior era 1.807/2.000; o consumo desta microetapa (≈ 6 runs completos + 2 reexecuções) leva o saldo **ao limite ou além** — conferir no painel de cobrança antes de qualquer run.
+  - **Por job (100 runs):** Publish Images 640 min; Docker Build Gate 531; Homologation Rehearsal 456; Code Quality 357; PostgreSQL Integration 292.
+  - **Desperdício identificável:** **59 dos 100 runs foram de commits só de documentação** (≈ 59% do consumo, estimado em ~1.300 min); **29 runs falharam** (29%), parte por intermitência de registro público (429) e por gates ajustados só em CI; o **Docker Build Gate e o Publish Images constroem as mesmas imagens** (≈ 5,3 + 6,4 min por run); não há `concurrency`, nem `paths-ignore`, nem cache de camadas das imagens.
+- RECOMENDAÇÕES (nenhuma aplicada; todas mantêm 100% dos testes e portões — aguardam aprovação):
+  1. **R1 — `paths-ignore` para `docs/**`, `*.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` no gatilho de push** (e `workflow_dispatch` mantido para rodada manual). Economia estimada: ~55–60% dos runs.
+  2. **R2 — `concurrency` por branch com `cancel-in-progress`**: um push novo cancela o run anterior ainda em andamento. Evita runs duplicados em rajadas.
+  3. **R3 — Eliminar a construção duplicada de imagens:** o Docker Build Gate vira etapa dentro do Publish Images (ou só roda em pull request); mesmas verificações, uma construção por run. Economia: ~5 min/run (~23%).
+  4. **R4 — Cache de camadas (`cache-from/cache-to type=gha`) nos builds das imagens API e web.** Economia estimada de 30–50% do tempo de Docker/Publish; sem alterar o conteúdo das imagens.
+  5. **R5 — Homologation Rehearsal condicional:** rodar só quando mudarem `apps/**`, `packages/**`, `scripts/homologation/**`, `deploy/**` ou o próprio workflow (filtro de caminhos em um job inicial); o restante dos jobs segue incondicional. Combina com R1.
+  6. **R6 — Pré-voo local obrigatório** (`typecheck`, testes direcionados, `lint:f6`, build, suíte PostgreSQL em banco descartável) e **um push por fatia**; ajustes de gate verificados localmente quando possível (hoje o gate Python não roda localmente: sem Python/Docker nesta máquina — **recomendação:** instalar Python + Playwright no ambiente local para executar os gates antes do CI, com autorização do proprietário).
+  7. **R7 — Retentativa automática dos builds** contra o 429 do registro público (ou espelhar a imagem base no GHCR), evitando reexecuções manuais.
+  8. **Opções que exigem autorização (não executadas):** ajuste de plano/cobrança, runner próprio, repositório público (conflita com DEC-GOV-003). Redução de retenção de artefatos (14 → 7 dias) afeta armazenamento, não minutos.
+  - **Efeito combinado estimado (perfil de 9–13/10):** R1+R3+R4 reduzem o consumo mensal em ~70–80% sem remover nenhum teste.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma além desta preparação. Aguardam decisão: aprovar/ajustar R1–R7; responder D1–D10 da F8; autorizar a F8-1.
+- PROIBIÇÕES ATUAIS: F8 (código), P27 passos 2–4, deploy/VPS/produção, serviços reais (Google, n8n, Asana, BrightBean), ligar agendadores, alterar cobrança/repositório/runners.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE.
+
+### 2026-10-12 — F7-4b — Interfaces e Browser Gate das automações n8n — Claude
+- AUTORIZAÇÃO: DEC-F7-017 — exclusivamente a F7-4b (aceite técnico da F7-4a registrado antes do código, `0cfacb1`). Não iniciadas: F8, P27 passos 2–4. Sem deploy, produção, n8n/Asana/Google reais.
+- BASELINE (commit): `2cf9633` (código e gates). Commits da microetapa: `82d0134` (interfaces, capacidades, simulador estendido, gate F7-4), `eb090c9` (gate F7-1 e espera no gate do Calendar), `3b2685a` (aviso de conflito 409 persistente), `bf2bc65` e `2cf9633` (ajustes de gate).
+- CI OFICIAL: run **38331008571 — 5/5 verdes**: domínio 77/77, API 819/819, web 77/77, PostgreSQL 120/120, Browser Gates F4, F5, F6, F7-1, F7-2, F7-3 passando e **F7-4 com 74 asserções, 0 falhas**. Capturas no artefato `f7-automation-browser-<sha>` (conexão, fluxos, construtor, aguardando, enviada, falha, concluída, esgotada, 390 px). Verificação local prévia: API real + simulador + front no navegador (conexão, fluxo, construtor, envio, falha, reenvio, sucesso, 390 px) e suíte PostgreSQL 120/120 em banco novo.
+- STATUS: **pendente de aceite** (a F7-4b e a F7 não são aceitas automaticamente).
+- O QUE MUDOU: (1) **Capacidades** `automation.manage`/`automation.view` em `/auth/capabilities` (contrato e API). (2) **Página Automações** (`/onboarding/automacoes`, aba condicionada a `automation.view`): conexão com segredo informado uma vez e nunca devolvido (impressão digital, prazo, tentativas, remoção com confirmação), fluxos (cadastro, edição, habilitar/desabilitar; destino só host permitido e https; caminho do webhook nunca exibido), aviso fixo da política do Asana (D1) e estados de ausência de conexão, despachante desligado e falta de permissão (gerente só consulta; membro recusado). (3) **Construtor:** tipo "Automação (n8n)" com seleção do fluxo habilitado (condição derivada `AUTOMATION_SUCCEEDED`, sem evidência; fluxo removido/desabilitado sinalizado; versões publicadas imutáveis). (4) **Execução:** estado da automação por etapa (aguardando envio, enviada/em processamento — nunca confundida com concluída —, nova tentativa, concluída, falhou, tempo esgotado, tentativas esgotadas), resultado, mensagem segura, referências externas (link só https), histórico por geração, "concluída automaticamente"; **Reenviar** (mesma chave) e **Refazer** (nova geração, com confirmação) com justificativa e `onboarding.override`; **Dispensar** com justificativa; sem botão de concluir; eventos de automação rotulados e com autor "Sistema". (5) Etapas automáticas não contam como "sem responsável" (detalhe, lista e painel). (6) **Simulador n8n** com controle (`/__control`) e registro de pedidos; **Browser Gate F7-4** (`scripts/homologation/automation-browser-gate.py`) com cenários de capacidades, conexão, fluxos, construtor, execução, envio assinado (despacho por processo auxiliar no container da API, servidor com despachante desligado), resultados (assinatura falsa, tempo vencido, falha, reenvio, sucesso, repetição, tardio), esgotada e dispensa, Org B, 390 px e simulador; ligado ao CI com contêiner do simulador e variáveis `N8N_*` só do ensaio.
+- AJUSTES EM GATES EXISTENTES (sem enfraquecer): F7-1 passou a exigir que a automação **esteja** disponível (antes exigia indisponível, por definição da F7-3c); F7-3: espera a lista recarregar antes de conferir o vínculo (corrida intermitente já vista no run 38322351783, em commit só de documentação); F7-2: o aviso de conflito 409 agora **permanece até "Recarregar"** (a corrida deixava o aviso visível por milissegundos).
+- LIMITES/LACUNAS: despachante segue desligado por padrão e sem capacidade medida; n8n real apenas após homologação autorizada; `TIMED_OUT` e `DEAD` não são produzíveis pela interface (cobertos por testes de domínio/PostgreSQL e, no gate, `DEAD` forçado no banco de ensaio); painéis e listas do onboarding não filtram por estado de automação; **P22** e **P28** seguem bloqueadoras; refinamento estético postergado (DEC-F7-015).
+- FRANQUIA DE ACTIONS: runs completos desta microetapa — 38322351783 (commit só de docs da F7-4a; falhou por intermitência do gate do Calendar), 38324568647 (gate F7-1 desatualizado), 38325927022 (corrida do aviso de conflito), 38327406647 (erro 429 do registro público; 2 reexecuções só do job de build), 38329416360 (asserção do gate F7-4), 38331008571 (verde). Cada falha levou a correção local/ajuste de gate; testes locais direcionados e verificação no navegador foram feitos antes de cada push. Conferir o saldo da franquia.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda aceite da F7-4b).
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8, P27 passos 2–4, deploy/VPS/produção, n8n/Asana/Google reais, ligar o despachante em ambiente real sem medição e autorização.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F7-017 — Aceite técnico da F7-4a e autorização exclusiva da F7-4b (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-4a (commits 7fd398d e 532a373; CI 38320597301, 5/5).
+- Decisão: (1) **Aceite técnico da F7-4a.** (2) **Autorizada exclusivamente a F7-4b** (interfaces e Browser Gate das automações n8n): conexão por organização; cadastro e gestão de fluxos; fluxo associado à etapa AUTOMATION no construtor respeitando versões imutáveis; estados de automação na execução (aguardando, enviada, em processamento, concluída, falha, timeout, esgotada); reenvio, refazer e dispensa com confirmação, justificativa e permissão; resultado, referências externas, histórico e erros seguros; estados de ausência de conexão, fluxo desativado, despachante desligado e falta de permissão; capacidades automation.* e menu por RBAC/carteira; Browser Gate F7-4 com simulador (positivos, negativos, multi-organização, 390 px). (3) **Requisitos:** preservar Design System e identidade, sem redesign; nunca expor segredos, assinaturas, tokens ou payloads sensíveis; sem conclusão manual de etapa AUTOMATION; distinguir pedido enviado de resultado SUCCEEDED; sem ação de gestão sem permissão; preservar idempotência e auditoria; nenhuma escrita no Asana; sem n8n real nem credenciais reais. (4) **Economia de GitHub Actions** (1.807/2.000 min): testes locais direcionados, sem pushes intermediários, nenhum teste desativado ou enfraquecido, CI oficial completo só na entrega; se a franquia acabar, reportar sem criar custo nem alterar cobrança. (5) **Limites:** P22 e P28 seguem bloqueadoras; sem F8, P27, produção, deploy ou VPS; F7-4b e F7 não são aceitas automaticamente.
+- Impacto: apps/web; scripts/homologation; CI (novo Browser Gate).
+- Revisão: no aceite da F7-4b.
+
+### 2026-10-12 — F7-4a — Automações n8n do onboarding: backend, caixa de saída, callback e simulador — Claude
+- AUTORIZAÇÃO: DEC-F7-016 — exclusivamente a F7-4a. Não iniciadas: F7-4b, F8, P27 passos 2–4. Sem deploy, produção, n8n/Asana/Google reais.
+- BASELINE (commit): `7fd398d`.
+- CI/EVIDÊNCIA: CI oficial run 38320597301 — **5/5 verdes**: domínio 77/77, API 819/819, web 71/71, PostgreSQL 120/120 (15 novos em `automation-postgres.test.ts`); Browser Gates F4–F7-3 seguem passando; `secret-scan` sem achados.
+- STATUS: **pendente de aceite** (não aceita automaticamente).
+- O QUE MUDOU: (1) **Domínio/contratos:** condição `AUTOMATION_SUCCEEDED`; `automationKey` na etapa; `ONBOARDING_AUTOMATION_AVAILABLE` ligado; regras tipo×condição×fluxo habilitado (validadas na publicação); `automation-model` (estados, backoff, janela, decisão do callback, reenvio); permissões `automation.manage`/`automation.view`. (2) **Banco:** migration `20261012070000` (provider `N8N`, `automation_flows`, `automation_outbox`, `automationKey`, `completedBySystem`); índice único de pedido, CHECKs e gatilho `automation_outbox_guard` (identidade imutável, SUCCEEDED definitivo, histórico protegido). (3) **Serviço:** conexão por organização com segredo cifrado (nunca devolvido nem auditado; só impressão digital); fluxos com validação de URL (https, host permitido, sem credenciais/fragmento, sem redirecionamento); pedido gravado na transação da liberação da etapa; despachante com reserva otimista, retentativas e timeout (`TIMED_OUT`/`DEAD`), desligado por padrão; envio assinado (`X-Zafira-Timestamp`, `X-Zafira-Signature`, `X-Zafira-Idempotency-Key`, `X-Zafira-Event`) com payload mínimo e sem a chave global; callback autenticado com deduplicação; etapa concluída pelo sistema (`completedBySystem`, evento sem autor); reenvio RETRY/REDO; sem conclusão manual (409); notificações de ciclo de vida opcionais. (4) **API:** `/automation/connection`, `/automation/flows`, `/automation/dispatch`, `/onboarding/executions/:id/automation`, `.../steps/:stepKey/automation/resend`, callback público assinado (prefixos `` e `/api`; corpo bruto em escopo próprio; limite de taxa). (5) **Simulador:** `scripts/homologation/n8n-mock.mjs` (importável e servidor; verifica assinatura; respostas roteirizadas). (6) **Testes:** criação do pedido antes do envio e idempotência; despachante desligado nunca conclui; rede/5xx reagenda sem concluir e com chave estável; assinatura forjada, timestamp vencido, segredo de outra organização e organização inexistente recusados; resultado aplicado uma vez, repetido e tardio ignorados; etapa bloqueada aplica ao desbloquear; falha sem conclusão manual, RETRY/REDO, geração antiga ignorada; prazo; isolamento A×B e carteira; objetos protegidos no banco (inclui o índice GIN do calendário).
+- LIMITES/LACUNAS: **sem interface** (F7-4b); a **garantia do Hub é um pedido por geração e chave estável — a execução exatamente uma vez no n8n depende de o fluxo respeitar a chave**; `DEAD` e `FAILED` exigem reenvio ou dispensa justificada por pessoa; despacho manual `/automation/dispatch` só atua com o despachante ligado; capacidade do despachante não medida; `rbac:bootstrap` precisa rodar no ambiente para conceder as novas permissões (P22); `DATABASE` com fuso diferente de UTC não afeta a reserva (sem SQL cru de data), mas `DEFAULT now()` do banco deve seguir o padrão dos demais objetos; a política D1 (fluxos operados em nome do Hub não escrevem no Asana) é documental — o Hub não controla fluxos independentes do n8n.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda aceite da F7-4a e autorização da F7-4b).
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F7-4b, F8, P27 passos 2–4, deploy/VPS/produção, n8n/Asana/Google reais, ligar o despachante em ambiente real sem medição e autorização.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F7-016 — Aprovação da especificação da F7-4 (D1–D7) e autorização exclusiva da F7-4a (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da especificação da F7-4 (commit 80a4dce).
+- Decisão: (1) **Especificação aprovada com ajustes.** (2) **D1 — sem escrita no Asana:** automações vinculadas ao Hub não criam nem alteram projetos, tarefas ou outros dados no Asana; a criação segue manual, com leitura e vínculo local (DEC-ASANA-001/002). O Hub **não** controla fluxos independentes do n8n: a política vale para os fluxos operados em nome do Hub e será documentada para a configuração futura. (3) **D2 — `AUTOMATION_SUCCEEDED`** entra no catálogo fechado; **somente** resultado `SUCCEEDED` válido, autenticado e correspondente a pedido autorizado conclui automaticamente a etapa `AUTOMATION`; preservar imutabilidade das versões, dependências, eventos append-only e auditoria. (4) **D3–D7:** padrões da especificação (fluxos registrados por organização; falha definitiva sem conclusão manual — só reenvio ou dispensa justificada; 6 tentativas e 24 h configuráveis; notificações de ciclo de vida opcionais; host real do n8n só após autorização de homologação). (5) **Salvaguardas:** (a) chave de idempotência estável em reenvios, **sem prometer execução exatamente uma vez** sem suporte do fluxo/sistemas externos; (b) validar assinatura, timestamp, correspondência do pedido, geração, organização e transição de estado, contra repetição, falsificação e resultado tardio; (c) pedido persistido **antes** do envio e falha de rede nunca conclui; (d) despachante desligado = automação não concluída, sem serviço adicional; (e) isolamento, carteira e RBAC preservados e segredos nunca em log ou resposta; (f) sem funcionalidades de contratos, financeiro, CRM ou notificações futuras; (g) só simulador do n8n e dados descartáveis; (h) sem serviços reais de n8n, Asana ou Google. (6) **Autorizada exclusivamente a F7-4a** (migration, contratos, condição, conexões e fluxos, caixa de saída, envio/reenvio, callback, permissões e endpoints, simulador, testes); telas e Browser Gate F7-4 são da F7-4b. (7) **Governança:** a referência à revisão estética no fechamento da F7 foi removida da especificação — o refinamento visual aprofundado fica para etapa posterior, mantendo Design System, responsividade, acessibilidade e usabilidade. P22 e P28 seguem bloqueadoras; sem F7-4b, F8, P27, deploy, VPS ou credenciais reais; F7-4a não é aceita automaticamente.
+- Impacto: especificação F7-4 (§13); implementação F7-4a.
+- Revisão: no aceite da F7-4a.
+
+### DEC-F7-015 — Aceite técnico da F7-3c, prioridades e preparação da especificação da F7-4 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-3c (CI 38315855679, 5/5; handoff 6be7711).
+- Decisão: (1) **Aceite técnico da F7-3c.** (2) **Sem refinamentos estéticos agora:** a prioridade é funcionalidade, segurança, estabilidade e conclusão do escopo, mantendo o Design System e a identidade atuais; problemas de uso, responsividade ou acessibilidade continuam sendo corrigidos; a revisão estética aprofundada do Hub fica para etapa posterior de refinamento visual (**substitui** a revisão estética "no encerramento da F7" da DEC-F7-014). (3) **Autorizada exclusivamente a preparação da especificação da F7-4** (automações n8n): eventos que disparam, ações do n8n, fonte de verdade, duplicidade, falhas/reenvios/autenticação/auditoria, isolamento entre organizações e clientes, testes sem contas ou serviços reais; reutilizar a infraestrutura existente; **sem novos serviços ou workers sem autorização**; sem implementação antes da revisão. (4) **Governança:** corrigir o mapa de progresso e o resumo da F7-3 no ESTADO_ATUAL. (5) **Limites:** P22 e P28 seguem bloqueadoras; sem F8, novos passos da P27, VPS, produção ou credenciais reais.
+- Impacto: documentação; `docs/propostas/F7-4_ESPECIFICACAO_AUTOMACOES_N8N.md`.
+- Revisão: na revisão da especificação da F7-4.
+
+### 2026-10-12 — F7-4: especificação das automações n8n — Claude
+- AUTORIZAÇÃO: DEC-F7-015 — somente preparar a especificação; sem código, serviço, deploy, produção ou credencial.
+- ENTREGA: `docs/propostas/F7-4_ESPECIFICACAO_AUTOMACOES_N8N.md`: gatilho único que conclui etapa (etapa AUTOMATION liberada) e notificações informativas de início/conclusão/cancelamento; n8n como executor com canal de retorno estreito e assinado (resultado + até 5 referências), sem acesso geral ao Hub nem à chave global; fonte de verdade por informação; idempotência por chave determinística, índice único e resultado deduplicado; falhas com *backoff*, tempo limite, estado DEAD e reenvio por `override`; autenticação HMAC por organização com janela de ±5 min e host permitido (SSRF); auditoria append-only; isolamento por organização/carteira e payload mínimo; simulador do n8n; despacho por *outbox* em tarefa periódica da própria API (desligada por padrão, sem novo serviço); fatias F7-4a (backend) e F7-4b (telas e gate).
+- DECISÕES BLOQUEANTES: **D1** (fluxos n8n podem escrever no Asana? padrão proposto: não, DEC-ASANA-001) e **D2** (nova condição `AUTOMATION_SUCCEEDED` no catálogo fechado, exige DEC). D3–D7 têm padrão proposto e não bloqueiam.
+- STATUS: **especificação aguardando revisão da Direção.** Próxima microetapa: nenhuma autorizada.
+
+### 2026-10-12 — F7-3c — Etapas de onboarding por evento do Google Calendar vinculado — Claude
+- AUTORIZAÇÃO: DEC-F7-014 — somente F7-3c (aceite técnico da F7-3b e observações visuais registrados antes do código, `27fe2ee`). Não iniciadas: F7-4, F8, P27 passos 2–4. Sem deploy, produção ou conta Google real; sem redesign da agenda.
+- BASELINE (commit): `22b96d1` (domínio, migration `20261012060000`, execução, interface, testes, gate) e correção do gate em seguida.
+- CI OFICIAL: run 38315855679 — **5/5 verdes**: domínio 72/72, API 819/819, web 71/71, PostgreSQL 105/105 (11 novos do onboarding por evento); Browser Gates F4–F7-3 passando (F7-3 ampliado; a rodada anterior 38313962062 falhou só por erro de navegação do próprio gate, corrigido).
+- DEFINIÇÃO (regras): chave `ONBOARDING_CALENDAR_AVAILABLE` **ligada**; etapa `CALENDAR_EVENT` exige a condição `CALENDAR_EVENT_LINKED` (e só ela); sem evidência obrigatória; automação segue indisponível. **A condição só usa eventos e vínculos LOCAIS** (evento ou série vinculados ao **cliente da execução**, na organização); nenhuma chamada ao Google. Estados: **atendida** (há evento ativo vinculado), **pendente** (conectado, sem evento ativo), **indisponível** (conexão revogada/desconectada ou nenhum calendário monitorado). **Atendida não conclui nada:** a etapa só conclui por ação da pessoa responsável (ou `override`), que escolhe o evento; dependências, responsável, carteira e demais regras do onboarding continuam valendo, e a execução só conclui ao encerrar todas as etapas.
+- ELEGIBILIDADE DO EVENTO: cancelado, ausente da origem (removido ou fora da janela) e calendário desmarcado **não servem**; evento privado/confidencial aparece e é guardado **mascarado** para quem não é participante; evento de outra organização ou de outro cliente nunca vale. Com conexão revogada a conclusão é recusada (409) com orientação: reconectar ou **dispensar a etapa com justificativa**.
+- HISTÓRICO: ao concluir, a etapa guarda **instantâneo** do evento (id, título, início) sem FK; depois, cancelar/remover o evento **não altera** a etapa concluída; o evento do histórico registra o id do evento usado; CHECK no banco só permite instantâneo em etapa `DONE`.
+- ENTREGUE: domínio (`eventEligibility`, `evaluateCalendarCondition`, coerência tipo×condição), migration de 3 colunas e 1 CHECK (sem linhas), conclusão no servidor, visão da execução com `calendarCondition`/`calendarEvent`, construtor com "Reunião no Calendar" disponível, detalhe da execução com estado da condição, seleção do evento e instantâneo, link para a Agenda.
+- EVIDÊNCIAS: testes de domínio (elegibilidade e estados); PostgreSQL (coerência de modelo, indisponível sem conexão, pendente sem vínculo e com vínculo a outro cliente, **vínculo não conclui etapa nem execução**, cancelado/removido/desmarcado, conexão revogada, privado mascarado, só o responsável conclui, organização B nunca, instantâneo e auditoria, série herdada, CHECK e objetos protegidos); Browser Gate F7-3 ampliado (pendente → vínculo → atendida → conclusão pela interface → onboarding concluído; cancelamentos aplicados pela leitura → pendente com motivo; revogação → indisponível e conclusão 409) e Browser Gate F7-1 (etapa de Calendar disponível no construtor).
+- LIMITES/PENDÊNCIAS: F7-4 e F8 não iniciadas; **P22** (permissões só em bancos após `rbac:bootstrap`) e **P28** seguem bloqueadoras; credencial OAuth do Google só na homologação; agendador desligado e capacidade não medida; revisão estética da F7 consolidada para o encerramento (observações já registradas); sem exigência de categoria do vínculo na etapa (possível evolução).
+- STATUS: **F7-3c concluída para revisão da Direção, não aceita automaticamente.** Próxima microetapa: nenhuma autorizada.
+
+### DEC-F7-014 — Aceite técnico da F7-3b e autorização exclusiva da F7-3c (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-3b (CI 38305358612, 5/5; handoff 26eb5ae).
+- Decisão: (1) **Aceite técnico da F7-3b.** (2) **Revisão estética** detalhada da F7-1b, F7-2b e F7-3b consolidada para o **encerramento da F7**; não elimina testes de responsividade, acessibilidade e funcionalidade durante o desenvolvimento; **sem redesign agora** — observações visuais são registradas para revisão conjunta. (3) **Autorizada exclusivamente a F7-3c:** condições `CALENDAR_EVENT` e `CALENDAR_EVENT_LINKED` das etapas de onboarding; usar **somente** eventos e vínculos locais já sincronizados; respeitar organização, cliente, carteira, RBAC e privacidade; definir e testar eventos cancelados, desmarcados, removidos da janela e conexão revogada; **vínculo não conclui etapa ou execução** sem cumprir as demais regras; estados "atendida/pendente/indisponível" na interface; preservar histórico e auditoria; testes de domínio, PostgreSQL, API e navegador. (4) **Limites:** sem F7-4, F8, passos da P27, contas Google reais ou deploy; P22 e P28 seguem bloqueadoras; F7-3c não é aceita automaticamente.
+- Impacto: domínio (chave de Calendar), execução de onboarding, interface; migration pequena (snapshot do evento na etapa concluída).
+- Revisão: no aceite da F7-3c.
+
+### Observações visuais registradas para o fechamento da F7 (sem ação agora)
+- Agenda: a célula do dia selecionado tem contraste fraco entre o número e o fundo claro; o aviso de toast sobrepõe a grade em capturas de página inteira; no mobile a grade usa só marcadores e depende do painel do dia.
+- Construtor e execução do onboarding: colunas de configuração longas em telas estreitas; rótulos dos selos podem competir com o título em cartões densos.
+
+### 2026-10-12 — F7-3b — Interface da agenda Google Calendar e Browser Gate F7-3 — Claude
+- AUTORIZAÇÃO: DEC-F7-013 — somente F7-3b (aceite técnico da F7-3a registrado). Não iniciadas: F7-3c, F7-4, F8, P27 passos 2–4. Sem deploy, produção ou conta Google real. Resumo do ESTADO_ATUAL corrigido (sem `syncToken`).
+- BASELINE (commit): `df2ba54` (telas, capacidades, simulador, gate) e correção do gate (host e checkboxes); decisões em `43f36e9`.
+- CI OFICIAL: run 38305358612 — **5/5 verdes**: domínio 70/70, API 819/819, web 70/70, PostgreSQL 93/93; Browser Gates F4–F7-2 passando; **Browser Gate F7-3: 63 verificações, 0 falhas, 0 bloqueios** (21 mensagens de console esperadas: 403/404 dos testes negativos). Uma rodada anterior caiu por indisponibilidade do registro público de imagens (infraestrutura) e foi reexecutada sem mudar código.
+- ENTREGUE: `/agenda` (mensal e semanal, filtros por calendário/categoria/cliente, painel do dia, detalhe do evento, vínculo local a cliente, projeto do Asana — só vínculo local — categoria e nota, série), `/agenda/configuracao` (conexão OAuth, descoberta e monitoramento de calendários, categoria padrão, janela de leitura, identidades de participantes, sincronizar agora, desconectar); `GET /calendar/status` (frescor para quem só visualiza); capacidades `calendar.*` em `/capabilities`; item "Agenda" no menu só com `calendar.view`; simulador do Google com consentimento OAuth simulado em container próprio no CI.
+- EVIDÊNCIAS (Browser Gate F7-3, imagens publicadas e simulador): estado "não conectado"; conexão pelo fluxo OAuth simulado com conta só mascarada; 3 calendários descobertos, nenhum monitorado automaticamente, livre/ocupado sinalizado; categoria padrão salva; última leitura exibida e nunca como tempo real; mensal (42 dias) e semanal (7); filtros; vínculo a cliente e série; **descrição e link de videoconferência ausentes** do navegador; privado mascarado (inclusive para o administrador) sem local/link/participantes; evento sem cliente invisível ao gestor; e-mail/participante enviados pelo navegador não concedem acesso; identidade associada só por administrador e exibida mascarada, e então o participante vê o evento sem cliente e o privado completo; gestor não vincula cliente fora da carteira (404); membro sem controles, API 403; usuário sem `calendar.view`: menu oculto, rota "sem permissão", backend 403; agenda desatualizada com aviso claro; conexão revogada com aviso e última leitura preservada, reconexão restabelece; desconectar; Org B isolada; 390 px sem rolagem horizontal; a API de agenda do simulador só recebeu GET.
+- DIVERGÊNCIAS/ACHADOS: (a) o navegador do ensaio nunca fala com o Google real (guarda por host no gate); (b) o gate depende de 1 a 2 esperas de 65 s quando o limite de login (10/min) é atingido; (c) a seleção de dia usa o fuso fixo de São Paulo no gate; (d) no mobile a grade mostra marcadores e o painel do dia traz os detalhes.
+- LIMITES/PENDÊNCIAS: F7-3c (etapas de onboarding por evento vinculado) não iniciada; **P22**, **P28** seguem bloqueadoras; credencial OAuth do Google Cloud só na homologação (fornecida pelo proprietário fora de conversa e repositório); capacidade do agendamento não medida (agendador desligado); revisão visual da F7-1b/F7-2b/F7-3b pendente — **não há aprovação estética**.
+- STATUS: **F7-3b concluída para revisão da Direção, não encerrada.** Próxima microetapa: nenhuma autorizada.
+
+### DEC-F7-013 — Aceite técnico da F7-3a e autorização exclusiva da F7-3b (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-3a (commits 40eba3b, aa5f21d, 2123fda; CI 38299077768, 5/5).
+- Decisão: (1) **Aceite técnico da F7-3a.** (2) **Autorizada exclusivamente a F7-3b:** tela de conexão e estado; seleção e gestão dos calendários monitorados; agenda mensal e semanal; visualização por dia, categoria, calendário e cliente; vínculo local a clientes e projetos (carteira e permissões); categoria padrão por calendário; estados vazio, carregando, erro, sem permissão, conexão revogada e sincronização desatualizada; capacidades `calendar.*` no endpoint existente e seu uso na interface; Browser Gate F7-3 com Google simulado e 390 px. (3) **Requisitos:** Design System da F3; nunca criar/editar/excluir eventos ou calendários no Google; RBAC e carteira também no backend; mascaramento preservado e nenhum dado oculto ao frontend; estado e última sincronização claros, sem apresentar dado desatualizado como tempo real; sem contas reais; sem dados fictícios permanentes; acessibilidade e responsividade; funcionalidades anteriores preservadas. (4) **Governança:** corrigir o resumo do ESTADO_ATUAL que ainda citava `syncToken` (a F7-3a usa janela móvel com `updatedMin` e reconciliação). (5) **Limites:** sem F7-3c, F7-4, F8, passos da P27, deploy, produção ou contas reais; P22 e P28 seguem bloqueadoras; revisão estética da F7-1b/F7-2b pendente; F7-3b não é declarada encerrada sem aceite.
+- Impacto: telas e serviços web, `/capabilities`, Browser Gate F7-3; sem mudança de banco.
+- Revisão: no aceite da F7-3b.
+
+### 2026-10-12 — F7-3a — Agenda Google Calendar (somente leitura): dados, conector, sincronizador, RBAC, API, simulador e testes — Claude
+- AUTORIZAÇÃO: DEC-F7-012 — somente F7-3a. Não iniciadas: F7-3b, F7-3c, F7-4, F8, P27 passos 2–4. Sem deploy, produção ou conta Google real.
+- BASELINE (commit): `aa5f21d` (migration `20261012050000`, domínio, conector, sincronizador, RBAC, API, simulador, testes); decisões registradas antes do código em `40eba3b`.
+- ENTREGUE: 4 tabelas (`calendar_sources`, `calendar_events`, `calendar_event_links`, `calendar_member_identities`) e valor `GOOGLE_CALENDAR` no enum de provedores, **sem nenhuma linha**; permissões `calendar.view|link|manage_connections|view_all` (ADMIN todas; MANAGER view+link; MEMBER view); OAuth da organização reutilizando `IntegrationConnection` + `encryptIntegrationCredential` (PKCE, escopo `calendar.readonly`, state assinado de uso único); descoberta e seleção livre de calendários; sincronizador por janela móvel (padrão −30/+180 dias, configurável) com `updatedMin`, paginação, cursor só após todas as páginas, reconciliação a cada 24 h, execução única por calendário (`scheduler_leases`); vínculos locais por evento ou série; identidades por HMAC; agendador **desligado por padrão** (`GOOGLE_CALENDAR_SYNC_SCHEDULE_ENABLED`); simulador `scripts/homologation/google-calendar-mock.mjs`.
+- CI OFICIAL: run 38299077768 — **5/5 verdes**: domínio 70/70, API 819/819, web 64/64, PostgreSQL **93/93** (17 verificações novas da agenda); Browser Gates F4–F7-2 passando.
+- EVIDÊNCIAS (teste `google-calendar-postgres.test.ts`, banco descartável e simulador):
+  - **Somente leitura:** a API de agenda só recebeu GET; o código tem um único POST (endpoint de token do OAuth) e nenhuma operação de escrita da API.
+  - **Dados mínimos:** nenhuma coluna contém e-mail, descrição ou link de videoconferência; participantes só como HMAC (64 hex). A chave é `CALENDAR_IDENTITY_HMAC_KEY` (ambiente); sem ela, o recurso fica desativado.
+  - **Associação de identidade:** só `calendar.manage_connections` associa membro ↔ e-mail (o servidor calcula o HMAC e descarta o texto); e-mail/participante enviados pelo navegador não concedem nada; membro não associa; e-mail não é devolvido.
+  - **Acesso:** evento sem cliente invisível à agência (só participante ou `view_all`); carteira; privado/confidencial mascarado inclusive para `view_all`; participante associado vê completo; organização B nunca vê nem altera.
+  - **Sincronização:** paginação (≥3 páginas), janela −30/+180 conferida na requisição, idempotência (sem duplicar, vínculo preservado), concorrência (um executa, outro pula), incremental com `updatedMin`, cancelado preserva dados e vínculo e sai da agenda, evento ausente/movido para fora da janela vira `missingFromSourceAt` (some como compromisso ativo, vínculo preservado) e volta ao reaparecer, falha parcial (cursor mantido, sem duplicar), 429/403 de cota com retentativa e falha controlada.
+  - **Revogação OAuth:** pausa, conexão em `ERROR`/"requer reconexão", dados e leitura locais preservados, `IntegrationError` registrado, reconexão retoma com reconciliação.
+  - **Conexão:** credencial cifrada e nunca devolvida; desconectar apaga o segredo e pausa os calendários sem apagar eventos; configuração de janela validada.
+  - **Retenção:** nenhuma exclusão automática (evento de 2 anos preservado).
+  - **Objetos SQL protegidos** (F7-1a, F7-2a, F7-3a) conferidos pelo nome; remoção da organização em cascata funciona.
+- DIVERGÊNCIAS/ACHADOS: (a) `syncToken` não foi usado (decisão T1); (b) a divergência de nome da FK `organization_invitations_…_fk` segue fora do escopo; (c) evento movido para fora da janela só é detectado na reconciliação diária (até 24 h) ou na leitura completa manual; (d) `calendar.*` não está exposto em `/capabilities` (F7-3b); (e) o filtro de acesso é aplicado após a leitura (até 1000 eventos por consulta), com o filtro de carteira calculado no servidor.
+- LIMITES/PENDÊNCIAS: F7-3b (telas e Browser Gate) e F7-3c (etapas de onboarding por evento vinculado) não iniciadas; **P22** (novas permissões só existem após `rbac:bootstrap`) e **P28** seguem bloqueadoras; credencial OAuth do Google Cloud só na homologação, fornecida pelo proprietário fora de conversa e repositório; capacidade do agendamento ainda não medida.
+- STATUS: **F7-3a concluída para revisão da Direção.** Próxima microetapa: nenhuma autorizada.
+
+### DEC-F7-012 — Aprovação da especificação F7-3 v2 (T1–T5, T2 com ajuste) e autorização exclusiva da F7-3a (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Decisão: **T1 aprovada** (janela móvel, `updatedMin`, reconciliação diária; `syncToken` adiado). **T2 aprovada com ajuste:** não persistir e-mails de participantes, descrições, links de videoconferência nem payload bruto; identificação de participantes por **HMAC com chave protegida**, com correspondência **explícita** às identidades autorizadas no Hub. **T3 aprovada:** `calendar.view_all` explícita, padrão ADMIN, **sem** revelar automaticamente detalhes privados/confidenciais mascarados. **T4 aprovada:** janela configurável, 30 dias anteriores e 180 futuros. **T5 aprovada:** categoria padrão opcional por calendário. **Salvaguardas:** (1) documentar e testar a associação usuário interno ↔ identidade Google sem conceder acesso por dado vindo do navegador; (2) eventos movidos para fora da janela, cancelados ou removidos tratados pela reconciliação, preservando vínculos e histórico e sem exibir dado desatualizado como compromisso ativo; (3) testes de paginação, falhas parciais, concorrência, cursor, idempotência e recuperação após revogação OAuth; (4) isolamento multiempresa, carteira e mascaramento, incluindo privados e confidenciais; (5) reutilizar `IntegrationConnection`, criptografia e infraestrutura, sem serviço adicional; (6) sincronização automática **desligada por padrão**, nenhuma conta Google real; (7) **sem exclusão automática** pela retenção de 365 dias. **Autorizada exclusivamente a F7-3a** (migration, contratos, domínio, OAuth/conector de leitura, sincronizador, RBAC, API, simulador e testes). F7-3b, F7-3c, F7-4, F8, P27 e deploy não iniciados; P22 e P28 seguem bloqueadoras.
+- Impacto: especificação F7-3 v2 (§13); implementação F7-3a.
+- Revisão: no aceite da F7-3a.
+
+### DEC-F7-011 — Calendários flexíveis e ajustes obrigatórios da especificação da F7-3 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a Zafira ainda não tem organização definida de calendários no Google Calendar; a especificação v1 (2601c56) pressupunha agendas temáticas e tinha inconsistências técnicas.
+- Decisão: (1) **Conexão** por organização com conta Google corporativa via OAuth, sem OAuth individual na primeira versão. (2) **Administrador lista e seleciona** os calendários acessíveis (primário, individuais e compartilhados), vários, alterável depois. (3) **Categorização** de eventos e **vínculo local** a clientes e projetos. (4) **Somente leitura**; nada criado automaticamente (calendários, eventos ou estruturas). (5) **Ajustes técnicos obrigatórios:** compatibilizar carga inicial, `syncToken`, paginação e HTTP 410; IDs reais da API em eventos recorrentes (`recurringEventId`, `originalStartTime`); polling de 15 min configurável e sujeito à avaliação de capacidade; evento sem cliente **não** visível a toda a agência; RBAC, organização, carteira e permissões explícitas; mascaramento no backend; minimização de participantes, e-mails, descrições e links; permissões do Google não equivalem às do Hub; reutilizar `IntegrationConnection` e a criptografia existente; sem novos workers/serviços na VPS; sem contas reais; retenção de 365 dias como proposta, **sem exclusão automática** antes da política aprovada. (6) **Implementação da F7-3a não autorizada.** P22 e P28 seguem bloqueadoras; P27 passos 2–4 e F7-4/F8 não iniciados.
+- Alternativas consideradas: manter calendários temáticos fixos (descartada: a estrutura não existe); `syncToken` com janela de tempo (descartada: a API não permite combinar `timeMin`/`timeMax`/`updatedMin` com `syncToken`).
+- Impacto: especificação F7-3 v2 (`docs/propostas/F7-3_ESPECIFICACAO_GOOGLE_CALENDAR.md`); sem código.
+- Revisão: na revisão da especificação v2 e antes de autorizar a F7-3a.
+
+### 2026-10-12 — F7-3: especificação revisada (v2) — Claude
+- AUTORIZAÇÃO: DEC-F7-011 — somente revisar a especificação; sem código, deploy, produção ou credenciais.
+- ENTREGA: `docs/propostas/F7-3_ESPECIFICACAO_GOOGLE_CALENDAR.md` v2: calendários flexíveis escolhidos pelo administrador; conexão OAuth reutilizando `IntegrationConnection`, `credentialCiphertext`, `SyncRun` e `IntegrationError`; tabelas `calendar_sources`, `calendar_events` (mínimo de dados, hash de participantes) e `calendar_event_links` (evento ou série); sincronização por janela móvel com `updatedMin`, paginação, reconciliação diária e tratamento de 429/5xx/invalid_grant, `syncToken` documentado e adiado; recorrência sem presumir IDs; matriz de visibilidade (sem cliente ≠ visível à agência; privado mascarado no backend); permissão explícita `calendar.view_all`; retenção só medida; simulador para testes; fatias F7-3a/b/c (F7-3c liga as etapas de Calendar do onboarding).
+- DECISÕES BLOQUEANTES: **nenhuma** para a F7-3a. Cinco padrões técnicos (T1–T5) para confirmação; credencial OAuth do Google Cloud só será necessária na homologação, fornecida pelo proprietário fora de conversa e repositório.
+- STATUS: **especificação v2 aguardando revisão da Direção.** Próxima microetapa autorizada: nenhuma.
+
+### DEC-F7-010 — Aceite técnico da F7-2b e autorização da preparação da F7-3 (Google Calendar) (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da entrega da F7-2b (commits bfcb751, 4ededd6, 0c89a44; CI 38291768369, 5/5 jobs; Browser Gate F7-2 com 71/71 asserções e 0 falhas).
+- Decisão:
+  1. **Aceite técnico da F7-2b:** aprovado com base nos testes de domínio, API, PostgreSQL e validação do Browser Gate F7-2 (71/71 asserções, 0 falhas, 0 bloqueios).
+  2. **Revisão estética e de usabilidade:** a avaliação visual da F7-1b e da F7-2b continua pendente da Direção; nenhuma aprovação visual foi concedida ainda.
+  3. **P22 segue bloqueador** do primeiro deploy de homologação.
+  4. **P28 permanece aberta:** bloqueia o uso de dados reais até aprovação de solução; não implementar ainda a proposta de exclusão e retenção nem assumir seus prazos como requisitos legais.
+  5. **Autorizada exclusivamente a PREPARAÇÃO da F7-3 (Google Calendar):** elaboração da especificação funcional e técnica da integração, preservando as decisões (Calendar como fonte principal, Hub somente leitura sem escrita no Google, vínculos locais por cliente/projeto/categoria, controle de acesso e carteira, tratamento de eventos recorrentes/cancelados/privados, controle de cota e fuso horário, retenção proposta de 1 ano sujeita a confirmação, testes sem contas reais). **Não implementar a F7-3 antes da revisão da especificação.**
+  6. **Restrições:** não iniciar F7-4, F8 ou passos da P27; sem acesso a produção ou VPS; sem credenciais reais; sem dados fictícios permanentes.
+- Alternativas consideradas: iniciar implementação imediata da F7-3 (descartada: exige especificação prévia e decisões de produto).
+- Impacto: proposta `docs/propostas/F7-3_ESPECIFICACAO_GOOGLE_CALENDAR.md`; sem mudanças no código de produção nesta microetapa.
+- Revisão: na revisão da especificação da F7-3 pela Direção.
+
+### 2026-10-12 — F7-2b — Interfaces de execução do onboarding e validação do Browser Gate F7-2 — Antigravity
+- AUTORIZAÇÃO: DEC-F7-009 — somente F7-2b (telas, painel, minhas etapas, menu respeitando `onboarding.view`, Browser Gate F7-2). Não autorizadas: F7-3, F7-4, passos da P27, deploy ou produção. P22 segue bloqueador.
+- BASELINE (commit): `0c89a44` (fix(gate): F7-2b reativa pessoa fora da carteira no seed e isola container api no gate (DEC-F7-009)) após os commits `bfcb751` e `4ededd6` de implementação e ajuste inicial da F7-2b.
+- CI OFICIAL: run 38291768369 (https://github.com/Julianogdc/zafira-hub/actions/runs/38291768369) — **5/5 verdes**:
+  - PostgreSQL Integration Gate: 2m33s
+  - Code Quality and Tests: 3m48s (domínio 62/62, API 819/819, web 64/64)
+  - Docker Build Gate: 5m22s
+  - Publish Images: 6m48s (imagens imutáveis publicadas no GHCR)
+  - Homologation Rehearsal: 5m25s (Browser Gates F4/F5, F5, F6, F7-1 e F7-2 todos verdes)
+  - Browser Gate F7-2: 71 asserções passadas, 0 falhas, 0 bloqueios.
+- DEFEITO INVESTIGADO E CORREÇÃO APLICADA:
+  - Causa da falha anterior (run 38288458010): no cenário E (reatribuição), o Playwright buscava 'Gate Pessoa Saida' no select de novos responsáveis, mas a opção não existia. A causa raiz foi que o portão anterior F7-1 executou o ensaio H suspendendo temporariamente essa pessoa na base compartilhada, e a UI filtra apenas membros ativos (`GET /onboarding/members`). Como a intenção do teste era validar a regra de negócio rejeitando uma pessoa ativa fora da carteira do cliente, o seed `seed-f7-exec-gate.mjs` foi ajustado para assegurar que 'Gate Pessoa Saida' seja mantida com status ACTIVE (e fora da carteira do CLIENT_1), restaurando o isolamento da fixture.
+  - Limite de autenticação: o Claude havia inserido `time.sleep(65)` com retry no login. Em conformidade com a diretriz da Direção de não mascarar erros nem usar esperas arbitrárias, o isolamento adequado do ambiente de testes foi implementado reiniciando o container `api-f45-browser` (e conferindo healthcheck) antes do início do F7-2 no workflow do GitHub Actions, resetando os contadores de rate limit voláteis em memória. A função de login no gate python foi revertida para execução direta, sem esperas arbitrárias nem retries.
+- ENTREGUE NA F7-2b:
+  - Painel de acompanhamento de onboardings (`/onboarding/execucoes`) com resumo de indicadores, lista filtrável por cliente, modelo, status e responsável, e acionador de novo onboarding (restrito a permissões e carteira).
+  - Detalhe da execução (`/onboarding/execucoes/:id`) com progresso, lista ordenada de etapas, dependências, prazos em dias úteis, evidências, responsáveis (com selo 'Sem responsável' e mensagem compreensível), histórico de eventos e ações seguras (iniciar, concluir, bloquear com motivo, desbloquear, dispensar com justificativa, reatribuir com validação de carteira, concluir antecipadamente e cancelar).
+  - Tela Minhas Etapas (`/onboarding/minhas-etapas`) com lista exclusiva de etapas atribuídas ao usuário logado na sua carteira.
+  - Menu lateral atualizado para respeitar rigorosamente a permissão `onboarding.view`.
+  - Tratamento de concorrência com banner de conflito 409 sem sobrescrever dados.
+  - Responsividade em 390 px para desktop e mobile sem rolagem horizontal indesejada.
+  - Browser Gate F7-2 com 12 cenários automatizados cobrindo fluxos positivos, negativos, RBAC, carteira, concorrência e Asana simulado (0 escritas).
+- EVIDÊNCIAS E CAPTURAS DE TELA (artefato f7-onboarding-execution-browser-0c89a44f9be898ef183fc1e58f49c2a6629f47d9):
+  - `f7b-painel-desktop.png`: Painel desktop de acompanhamento
+  - `f7b-b-detalhe.png`: Detalhe da execução de onboarding
+  - `f7b-d-colaborador.png`: Minhas etapas do colaborador
+  - `f7b-e-gestor.png`: Ações do gestor e reatribuição de etapa
+  - `f7b-f-conflito.png`: Detecção de conflito concorrente (409)
+  - `f7b-g-antecipada.png`: Conclusão antecipada com dispensa de etapas
+  - `f7b-i-sem-permissao.png`: Bloqueio de rota e menu para usuário sem `onboarding.view`
+  - `f7b-k-390-dialogo.png`: Diálogo responsivo em 390 px
+  - `f7b-k-390-painel.png`: Painel mobile em 390 px
+- LIMITES/PENDÊNCIAS:
+  - F7-2b ENTREGUE PARA REVISÃO (não encerrada; aguarda aceite expresso da Direção).
+  - P28 (exclusão de cliente, retenção e privacidade): proposta formulada em `docs/propostas/F7-2_RETENCAO_EXCLUSAO_CLIENTE_PROPOSTA.md`, aguardando decisão antes de dados reais.
+  - P22 segue bloqueador do primeiro deploy de homologação.
+  - Avaliação estética/usabilidade da F7-1b segue pendente da Direção.
+  - F7-3, F7-4 e passos 2 a 4 da P27 permanecem não autorizados.
+- STATUS: **F7-2b ENTREGUE PARA REVISÃO DA DIREÇÃO.** Nenhum dado fictício permanente; nenhuma escrita no Asana ou Calendar; produção intocada.
+- PRÓXIMA MICROETAPA: nenhuma autorizada. Aguarda aceite formal da F7-2b e orientações estratégicas da Direção.
+
+### DEC-F7-009 — Aceite técnico da F7-2a, autorização da F7-2b e pendência P28 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da F7-2a (commits c73e034, 5523ff4, e6c60f4; CI 38282931118, 5/5).
+- Decisão: (1) **Aceite técnico da F7-2a.** (2) **Autorizada exclusivamente a F7-2b:** painel de acompanhamento; lista com filtros (cliente, modelo, status, responsável); detalhe (etapas, prazos, dependências, evidências, histórico); ações (iniciar onboarding, iniciar/concluir etapa, bloquear, desbloquear, dispensar, reatribuir, concluir antecipadamente, cancelar); "Minhas etapas" conforme permissões e carteira; **menu lateral respeitando `onboarding.view`**. Requisitos: Design System da F3; etapas bloqueadas, atrasadas, sem responsável e concluídas claras; mensagem compreensível sem responsável elegível; confirmação e justificativa nas ações excepcionais; conflito 409 sem sobrescrever; 390 px e teclado; sem dados fictícios permanentes; sem escrita no Asana ou Calendar. (3) **Nova pendência P28 — exclusão de cliente, retenção e privacidade:** o `ON DELETE CASCADE` entre cliente e execuções pode apagar histórico na exclusão definitiva. Registrar e propor solução que diferencie arquivamento/desativação (preserva histórico), exclusão definitiva controlada (retenção, privacidade, direitos do titular) e exclusão administrativa de organização. **Não alterar o comportamento automaticamente**; resolver **antes** de dados reais em homologação ou produção. (4) Browser Gate F7-2 (positivos, negativos, permissões, carteira, isolamento, concorrência, 390 px, regressão) e CI verde; evidências visuais. (5) Sem F7-3, F7-4, novos passos da P27, deploy ou produção; **P22 segue bloqueador**; revisão visual da F7-1b segue pendente (aprovação estética não concedida).
+- Alternativas consideradas: corrigir o CASCADE já na F7-2b (descartada: exige decisão de retenção e privacidade).
+- Impacto: telas e serviços web; proposta `docs/propostas/F7-2_RETENCAO_EXCLUSAO_CLIENTE_PROPOSTA.md`; sem mudança de banco.
+- Revisão: no aceite da F7-2b e na revisão da proposta P28.
+
+### 2026-10-12 — F7-2a — Execução do onboarding: dados, regras, API, RBAC e testes — Claude
+- AUTORIZAÇÃO: DEC-F7-008 — somente F7-2a. Não iniciadas: F7-2b (telas), F7-3, F7-4, passos 2 a 4 da P27. Sem deploy e sem produção. P1–P5 e o ajuste da P3 registrados antes do código (`c73e034`).
+- BASELINE (commit): `5523ff4` (migration `20261012040000`, contratos, domínio, API, RBAC, testes).
+- CI OFICIAL: run 38282931118 — **5/5 verdes**: domínio 62/62, API 819/819, web 58/58, PostgreSQL **76/76** (18 verificações novas da execução + 1 da F7-1b); Browser Gates F4, F5, F6 e F7-1 seguem passando.
+- ENTREGUE: 3 tabelas (`onboarding_executions`, `onboarding_step_runs`, `onboarding_execution_events`) e migration **sem nenhuma linha**; contratos; regras puras de execução (prazos em dias úteis no fuso da organização, liberação por dependência, resolução de responsáveis, conclusão da etapa por catálogo fechado, conclusão antecipada, ações permitidas); API `/onboarding/executions` (iniciar, listar, detalhar, concluir antecipadamente, cancelar), `/onboarding/executions/:id/steps/:stepKey/{start|complete|block|unblock|skip|reassign}`, `/onboarding/my-steps`, `/onboarding/overview`; `requireAnyPermission` no middleware (negação por padrão). Gatilho de contrato assinado: só o valor `MANUAL` existe; sem endpoint nem simulação.
+- EVIDÊNCIAS (teste `onboarding-execution-postgres.test.ts`, banco descartável real):
+  - **Objetos SQL protegidos:** índice parcial B2, índices e gatilhos da F7-1a e da F7-2a conferidos pelo nome.
+  - **B2:** segundo início ativo → 409 com o id existente; dois inícios simultâneos → 201 e 409; inserção direta no banco também é barrada; modelo diferente no mesmo cliente roda em paralelo; concluir ou cancelar libera novo início; `requestId` idempotente.
+  - **Imutabilidade:** cliente, modelo e versão não mudam (gatilho); execução só aponta para versão publicada do próprio modelo; eventos sem UPDATE/DELETE; histórico não pode ser apagado; etapa encerrada não reabre (P5); encerrar com etapa aberta é barrado.
+  - **Permissões e carteira:** MEMBER não inicia (403); cliente fora da carteira e de outra organização → 404 em todas as operações; lista, "minhas etapas" e painel restritos à carteira.
+  - **P1:** responsável de função só entre ativos com o cliente na carteira; pessoa fora da carteira recusada na reatribuição e a carteira não é ampliada.
+  - **P2:** etapa sem responsável elegível só por `override`.
+  - **P3:** conclusão automática; antecipada barrada com bloqueante aberta; sem justificativa 400; com justificativa as demais são dispensadas na mesma transação, um evento por etapa, nenhuma aberta em `COMPLETED`.
+  - **P4:** dispensa de bloqueante só por override, com justificativa e `highlight` no evento. **P5:** reabertura recusada.
+  - **Cancelamento:** permissão e motivo; etapas `CANCELLED`; ações posteriores 409.
+  - **Pessoas:** suspensa/inativa vira alerta e não age; remover a pessoa da organização preserva etapas e eventos; override conclui.
+  - **Modelo:** versão nova e arquivamento não alteram execução em andamento; arquivado bloqueia novos inícios.
+  - **Cascata:** remover organização com execuções e histórico funciona.
+  - **Asana/Calendar:** conclusão `ASANA_PROJECT_LINKED` só valida vínculo local já existente; nenhum cliente HTTP de Asana ou Calendar no código da execução.
+- ACHADOS: (a) o `prisma migrate diff` sugere renomear a FK `organization_invitations_…_fk` (divergência de nome pré-existente, fora do escopo; documentada na migration e não incluída); (b) fuso vem de `OrganizationConfig.timezone` (padrão São Paulo); (c) remover um **cliente** apaga em cascata suas execuções (comportamento herdado do módulo de clientes; a proteção do histórico vale contra remoções diretas).
+- LIMITES/PENDÊNCIAS: F7-2b (telas, "minhas etapas", painel, **correção do menu por `onboarding.view`**, Browser Gate F7-2) não iniciada; **P22 segue bloqueador**; feriados ainda lista vazia; índices parciais e gatilhos não aparecem no `schema.prisma` e **não devem ser removidos**; revisão visual da F7-1b segue pendente da Direção.
+- STATUS: **F7-2a concluída para revisão da Direção.** Nenhum dado fictício permanente; sem escrita no Asana ou Calendar; produção intocada.
+- PRÓXIMA MICROETAPA: nenhuma autorizada. Aguarda aceite da F7-2a e decisão sobre a F7-2b.
+
+### DEC-F7-008 — P1 a P5 da F7-2 e autorização exclusiva da F7-2a (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: revisão da especificação da F7-2 (commit 016a83b).
+- Decisão: **P1 aprovada** — pessoas e funções sem acesso ao cliente não são atribuídas; nenhuma execução amplia a carteira. **P2 aprovada** — etapa sem responsável resolvido só é concluída por quem tem `onboarding.override`, até haver responsável elegível. **P3 aprovada com ajuste** — conclusão automática com todas as etapas `DONE`/`SKIPPED`; conclusão antecipada (por quem tenha a permissão) exige todas as `blocksCompletion` encerradas e as demais abertas **explicitamente dispensadas, com justificativa e eventos auditáveis, na mesma transação**; nenhuma etapa aberta em execução `COMPLETED`. **P4 aprovada** — etapa bloqueante só dispensada por quem tem `onboarding.override`, justificativa obrigatória e destaque no histórico. **P5 aprovada** — reabertura de etapa concluída fora da F7-2. **Salvaguardas:** início permitido com etapas sem responsável (a interface informará quais atribuições resolver); B2 no banco inclusive sob inícios simultâneos; cliente, modelo e versão imutáveis; integridade e histórico preservados quando usuários forem desativados; índices parciais e gatilhos SQL existentes preservados; nenhuma escrita no Asana ou Google Calendar; isolamento multiempresa, RBAC, carteira e eventos append-only; sem dados fictícios permanentes. **Autorizada exclusivamente a F7-2a.**
+- Alternativas consideradas: conclusão antecipada deixando etapas abertas (descartada).
+- Impacto: especificação F7-2 atualizada (§3.4, §10, §12); migration com 3 tabelas; testes de domínio e PostgreSQL.
+- Revisão: no aceite da F7-2a.
+
+### 2026-10-12 — F7-2: especificação da execução de onboarding (DEC-F7-007) — Claude
+- AUTORIZAÇÃO: DEC-F7-007 — somente **preparar a especificação**. Nada implementado; sem F7-3, F7-4, passos da P27, deploy ou produção.
+- ENTREGA: `docs/propostas/F7-2_ESPECIFICACAO_EXECUCAO_ONBOARDING.md` (proposta aguardando revisão da Direção): início manual com versão e cliente imutáveis; B2 por índice único parcial no banco e sob concorrência; resolução de responsáveis (função, pessoa, inativo, carteira nunca ampliada); prazos em dias úteis e dependências; avançar, bloquear, dispensar, reatribuir, concluir e cancelar com eventos append-only; painel do gestor e "minhas etapas"; permissões e carteira; critérios de aceite; gatilho de contrato assinado apenas reservado (F9).
+- DECISÕES BLOQUEANTES: **nenhuma** para a F7-2a. Cinco padrões (P1–P5, §10) para confirmação.
+- FATIAMENTO PROPOSTO: **F7-2a** (dados, regras, API, RBAC, testes) e **F7-2b** (telas, correção do menu, Browser Gate F7-2), cada uma com autorização própria.
+- STATUS: especificação **pendente de revisão da Direção**. Próxima microetapa autorizada: nenhuma.
+
+### DEC-F7-007 — Aceite técnico da F7-1b e preparação da especificação da F7-2 (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a Direção revisou a F7-1b e confirmou o CI oficial 38278741564 (5/5; Browser Gate F7-1 verde).
+- Decisão: (1) **Aceite técnico da F7-1b** pelos critérios funcionais, de segurança e de regressão. (2) **Distinção registrada:** a **revisão estética e de usabilidade segue pendente** da avaliação das capturas pela Direção; **não há aprovação visual ainda**. A pendência não impede o planejamento da próxima etapa. (3) O item **Onboarding do menu lateral deve respeitar `onboarding.view`**, sem prejuízo da proteção das rotas e do backend; correção programada para o próximo incremento de interface, com teste. (4) **Gatilhos e índices parciais SQL da F7-1a são preservados**; futuras migrations não podem removê-los por serem diferenças em relação ao `schema.prisma`. (5) **Autorizada a preparação da especificação da F7-2** (execução por cliente), sem implementar; gatilho de contrato assinado só reservado para a F9; P22 segue bloqueando homologação; F7-3, F7-4 e passos da P27 não iniciados; produção intocada.
+- Alternativas consideradas: declarar a F7-1b aprovada por inteiro (descartada: a avaliação visual não ocorreu).
+- Impacto: documentação; item 3 entra na F7-2b; item 4 vira teste de objetos SQL protegidos na F7-2a.
+- Revisão: na avaliação das capturas e na revisão da especificação da F7-2.
+
+### 2026-10-12 — F7-1b — Interface do construtor de onboarding — Claude
+- AUTORIZAÇÃO: DEC-F7-006 — somente F7-1b (aceite da F7-1a registrado). Não iniciadas: F7-2, F7-3, F7-4, passos 2 a 4 da P27. Sem deploy e sem produção.
+- BASELINE (commit): `505455e` (interface, capacidades, testes, Browser Gate F7-1) e `7f3c6a7` (ajuste do gate); DEC-F7-006 no mesmo `7f3c6a7`.
+- CI OFICIAL: run 38278741564 — **5/5 verdes**: domínio 51/51, API 819/819, web 58/58, PostgreSQL **58/58**; Browser Gates F4, F5 e F6 passando; **Browser Gate F7-1: 70 verificações, 0 falhas, 0 bloqueios** (20 mensagens de console esperadas: respostas 403/404/409 provocadas de propósito nos testes negativos).
+- ENTREGUE: telas `/onboarding/modelos` (lista: criar, duplicar, arquivar, reativar), `/onboarding/modelos/:id` (construtor: etapas, reordenar por botões e teclado, remover, configurar tipo/responsável/prazo/dependências/evidência/bloqueio, salvar, validar, publicar com nota, criar rascunho da próxima versão, descartar rascunho, histórico) e `/onboarding/funcoes` (criar, renomear, desativar, pessoas); item "Onboarding" no menu; `GET /onboarding/members` (id, nome e papel das pessoas ativas, sem e-mail); capacidades `onboarding.*` em `/api/v1/auth/capabilities` (resolvidas pelo mesmo resolvedor; só para a interface — cada rota continua validando no backend).
+- DECISÕES TÉCNICAS DENTRO DO ESCOPO: reordenação só por botões ▲▼ (acessível; sem arrastar); a interface **deriva** a condição de conclusão da evidência escolhida, impedindo combinações inválidas; Calendar aparece desabilitado "(em breve)" e automação não é oferecida (constante `CALENDAR_STEP_AVAILABLE=false`); quem tem só `onboarding.view` vê tudo em leitura; mensagem de ciclo passou a citar "Etapa N" quando a etapa não tem título (correção no domínio).
+- EVIDÊNCIAS (Browser Gate F7-1, imagens publicadas, banco de ensaio): estado vazio sem modelos automáticos; função criada pela interface, nome repetido recusado, só pessoas da Org A na lista; modelo criado, 4 etapas, reordenação por teclado, remoção, persistência após recarregar; etapa sem título e dependência circular listadas por etapa e campo, **Publicar desabilitado** e API recusa (400 NOT_PUBLISHABLE); publicação v1 em leitura, API devolve 409 ao escrever na publicada, v2 criada e publicada, histórico v1/v2 com notas; **conflito 409** entre duas sessões sem sobrescrever; duplicar, arquivar (sem edição) e reativar; **função desativada** mostrada como "(desativada)", validação bloqueia nova publicação e a v2 publicada permanece intacta; **pessoa desativada** mostrada como "Pessoa removida ou inativa" sem quebrar a tela; gestor e membro: sem ações de gestão e API 403; sem sessão 401; Org B não vê nem abre modelos da Org A (404) e não os lê pela API; 390 px sem rolagem horizontal (lista, funções, construtor); nenhuma escrita no Asana simulado. Capturas no artefato `f7-onboarding-browser-<sha>` do CI.
+- LIMITES/PENDÊNCIAS: (a) a F7-1b **não está encerrada** — aguarda aceite da Direção; (b) B2 (um onboarding ativo por cliente e modelo) segue para a F7-2; (c) **P22 segue bloqueador** (as permissões `onboarding.*` só existem em bancos já configurados após `rbac:bootstrap`); (d) índices parciais e gatilhos SQL não aparecem no `schema.prisma` — um `migrate diff` futuro vai listá-los; **não remover**; (e) o menu "Onboarding" aparece para todos os papéis (a tela trata a falta de permissão); (f) `lint:f6` agora também cobre o código da F7-1b.
+- STATUS: **F7-1b concluída para revisão da Direção.** Nenhum dado fictício permanente; nenhuma escrita no Asana ou no Calendar; produção intocada.
+- PRÓXIMA MICROETAPA: nenhuma autorizada. Aguarda aceite da F7-1b e decisão sobre a F7-2.
+
+### DEC-F7-006 — Aceite formal da F7-1a e autorização exclusiva da F7-1b (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a Direção revisou a entrega da F7-1a e confirmou o CI oficial 38272170671 (5/5 jobs).
+- Decisão: (1) **F7-1a aceita formalmente.** (2) **Autorizada exclusivamente a F7-1b**: lista de modelos (criar, duplicar, arquivar, reativar); construtor visual (incluir, remover, reordenar e configurar etapas); funções operacionais e seus membros; rascunho, validação, publicação e histórico de versões; estados vazio, carregando, salvando, erro, conflito 409 e sem permissão; capacidades de onboarding no endpoint existente, **sem substituir a autorização do backend**. (3) **UX:** Design System da F3; experiência intuitiva (sem aparência de formulário técnico); desktop e 390 px; reordenação por teclado (arrastar só se não comprometer estabilidade e acessibilidade); erros em português indicando etapa e campo; rascunho, publicada e arquivada visualmente distintos; sem dados fictícios permanentes nem modelos automáticos. (4) **Cuidados:** Calendar indisponível na interface; funções ou pessoas desativadas/removidas sem comprometer o histórico publicado; índices parciais e gatilhos SQL preservados; função operacional nunca concede permissão; isolamento multiempresa, imutabilidade e concorrência preservados. (5) **Validação:** Browser Gate F7-1 completo (criar, editar, publicar, duplicar, arquivar e testes negativos de permissão), gates F4/F5/F6, API e PostgreSQL, CI oficial verde. (6) **Fora do escopo:** F7-2, F7-3, F7-4, passos 2 a 4 da P27, deploy de homologação ou produção; **P22 segue bloqueador**. (7) A F7-1b **não é declarada encerrada antes do aceite** da Direção.
+- Alternativas consideradas: arrastar e soltar como única forma de reordenar (descartada: acessibilidade/estabilidade).
+- Impacto: telas e endpoint de capacidades; sem mudança de modelo de dados.
+- Revisão: no aceite da F7-1b.
+
+### 2026-10-12 — F7-1a — Construtor de onboarding: modelo de dados, regras, RBAC, API e testes — Claude
+- AUTORIZAÇÃO: DEC-F7-005 — somente F7-1a. Não iniciadas: F7-1b (telas), F7-2 a F7-4, passos 2 a 4 da P27. Sem deploy e sem produção.
+- BASELINE (commit): `fc8ddb3` (contratos, domínio, permissões) e `5a604e8` (migration, API, teste de integração); especificação aprovada em `9d6bfce`.
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- ENTREGUE: 7 tabelas (`organization_functions`, `organization_function_members`, `onboarding_templates`, `onboarding_template_versions`, `onboarding_step_definitions`, `onboarding_step_dependencies`, `onboarding_events`) e migration `20261012030000` que **não cria nenhuma linha**; contratos Zod com catálogo **fechado** de condições (B1); regras de domínio (integridade do rascunho, validação de publicação, ciclo, ordem estável, cópia com `stepKey` preservado, dias úteis); 7 permissões `onboarding.*` com padrões por papel; API de modelos, versões e funções (prefixos `/` e `/api`) com trava do modelo, `expectedUpdatedAt`, evento e AuditLog.
+- EVIDÊNCIAS (teste `onboarding-postgres.test.ts`, banco descartável real, passou 2× seguidas no mesmo banco):
+  - **Migration sem dados:** as 7 tabelas estão vazias logo após migrar.
+  - **Permissões:** ADMIN gerencia modelos e funções; MANAGER e MEMBER recebem 403 ao tentar criar (nada é criado); todos leem; sem sessão = 401.
+  - **Isolamento multiempresa:** organização B recebe 404 em 11 operações sobre recursos da A (ler, editar, duplicar, arquivar, rascunho, salvar, validar, publicar, descartar, função, membros); token com organização alheia não passa; função da A referenciada num rascunho da B é recusada; pessoa de outra organização não entra numa função.
+  - **Função independente do RBAC:** pessoa na função "Designer" continua sem gerir modelos ou funções (403) e sem nenhuma exceção de permissão criada.
+  - **Versionamento:** v1 publicada → escrita pela API devolve 409; escrita **direta no banco** (alterar, apagar, inserir etapa ou dependência; alterar ou apagar a versão) é barrada pelo gatilho; v2 nasce com os **mesmos stepKey**, v1 permanece idêntica; só um rascunho por modelo.
+  - **Concorrência:** dois "criar rascunho" simultâneos → 201 e 409; duas publicações simultâneas do mesmo rascunho → 200 e 409, numeração sem buracos (1, 2, 3); salvar rascunho desatualizado → 409 sem sobrescrever.
+  - **Regras no banco, sem a API:** segundo rascunho, número de versão repetido, publicada sem data, nome de função repetido (com outra caixa), função **e** pessoa na mesma etapa, prazo fora da faixa, auto-dependência e dependência para etapa de outra versão — todos rejeitados pelo banco.
+  - **Calendar indisponível:** tipo e condição ligados ao Calendar são rejeitados ao salvar e ao publicar (`CALENDAR_UNAVAILABLE`), por uma única chave de domínio que a F7-3 liga.
+  - **Trilha:** cada ação relevante gera `OnboardingEvent` e `AuditLog` com autor; nada na organização B.
+  - **Cascata:** remover a organização com versões publicadas funciona.
+- ACHADO NA IMPLEMENTAÇÃO (corrigido antes de publicar): chaves estrangeiras `RESTRICT` das etapas para função e pessoa **impediam remover a organização** e impediriam remover uma pessoa citada num histórico publicado (imutável). Decisão técnica dentro do escopo: função com `NO ACTION DEFERRABLE INITIALLY DEFERRED` (função em uso não pode ser apagada; cascata funciona); `memberId` **sem** chave estrangeira — existência verificada ao salvar e pessoa ativa verificada ao publicar (e, na F7-2, na execução).
+- AJUSTES À ESPECIFICAÇÃO (sem mudar decisão aprovada): `evidenceKind` = NONE/LINK/NOTE; nome de **modelo** também único por organização (sem diferenciar caixa); duplicar gera "Nome (cópia)" / "(cópia 2)"; um modelo arquivado não aceita edição nem publicação até ser reativado.
+- LIMITES/PENDÊNCIAS: (a) **F7-1b** (telas do construtor e funções) não iniciada; (b) **B2** (um onboarding ativo por cliente e modelo) é implementada na F7-2 junto com a execução — a F7-1a não cria execuções; (c) índices parciais, expressões e gatilhos não aparecem no `schema.prisma`: um `prisma migrate diff` futuro vai listá-los como diferença — **não** remover; (d) **P22 segue bloqueador**: as 7 novas permissões só passam a existir em bancos já configurados depois de `rbac:bootstrap`, e o bootstrap continua só acrescentando; (e) a capacidade (`/api/v1/auth/capabilities`) ainda não expõe as permissões de onboarding — entra na F7-1b com a tela; (f) feriados para dias úteis e a regra de retenção de eventos do Calendar ficam para a F7-3/F7-2.
+- STATUS: **F7-1a concluída para revisão da Direção.** Nenhum dado fictício permanente (fixtures só no teste, removidas ao final); nenhuma escrita no Asana ou no Calendar; produção intocada.
+- PRÓXIMA MICROETAPA: nenhuma autorizada. Aguarda revisão da F7-1a; F7-1b somente com autorização.
+
+### 2026-10-12 — Especificação F7-1 aprovada; F7-1a autorizada (DEC-F7-005) — Claude
+- ORIGEM: decisões da Direção, via proprietário, sobre o commit `9ec4e75`.
+- AUTORIZADO: **exclusivamente a F7-1a** — modelo de dados, migrations, regras de domínio, RBAC, API e testes. **Não** iniciar a F7-1b (telas), **não** executar os demais passos da P27, **não** fazer deploy de homologação nem de produção.
+- ENTREGA ESPERADA: commits, testes, CI, evidências de isolamento multiempresa, versionamento, concorrência e pendências; sinalizar antes qualquer alteração arquitetural não prevista.
+
+### DEC-F7-005 — Aprovação da F7-1: B1, B2 e ajustes obrigatórios (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: confirmar as decisões bloqueantes B1 e B2 e os ajustes da especificação da F7-1.
+- Decisão: (1) **Especificação da F7-1 aprovada com ajustes.** (2) **B1:** **catálogo fechado** de condições de conclusão; **bloqueios manuais com justificativa auditável**; **não** implementar motor livre de regras. (3) **B2:** **no máximo um onboarding ativo por cliente e modelo**; modelos diferentes podem executar em simultâneo; concluído ou cancelado, o mesmo modelo pode ser iniciado de novo. (4) **Condições ligadas ao Google Calendar permanecem indisponíveis** até a entrega real da F7-3. (5) **Funções operacionais** são configuráveis, independentes do RBAC e **nunca concedem permissão**. (6) **Versões publicadas imutáveis**; mudança futura gera nova versão sem tocar execuções existentes. (7) **Unicidade e concorrência garantidas também no backend/banco**. (8) **`stepKey` estável** entre versões quando for a mesma etapa. (9) **P22 segue bloqueador** do primeiro deploy de homologação. (10) **Asana somente leitura** preservado. (11) **Sem dados fictícios permanentes** e sem alteração de produção.
+- Alternativas consideradas: motor de regras livres (descartada); vários onboardings ativos do mesmo modelo por cliente (descartada).
+- Impacto: especificação oficial ajustada (`docs/propostas/F7-1_ESPECIFICACAO_CONSTRUTOR_ONBOARDING.md`, seção 11); a restrição B2 é implementada na F7-2 (execução).
+- Revisão: se aparecer condição de conclusão que o catálogo fechado não cubra (nova DEC, nunca configuração livre).
+
+### 2026-10-12 — F7: direção ajustada para construtor configurável (DEC-F7-004) — Claude
+- ORIGEM: nova decisão da Direção, trazida pelo proprietário. Entrega: `docs/propostas/F7-1_ESPECIFICACAO_CONSTRUTOR_ONBOARDING.md` (proposta; nada implementado).
+- STATUS: **especificação aguardando revisão da Direção**; decisões bloqueantes para o modelo: **B1** (catálogo fechado de condições de conclusão) e **B2** (um onboarding ativo por cliente e modelo).
+- ALTERA: a parte da DEC-F7-002 que dizia "o fluxo real será fornecido pela Direção antes de qualquer implementação". A estrutura passa a ser genérica; as perguntas Q1–Q12 de `F7_ONBOARDING_PROPOSTA_FUNCIONAL.md` deixam de ser bloqueantes e viram **conteúdo de modelos**, configurado pela interface.
+- NÃO FEITO: nenhuma implementação, etapa fictícia permanente ou alteração em produção.
+
+### DEC-F7-004 — F7 como construtor de onboarding configurável (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a F7 dependia de conhecer o onboarding real da Zafira antes de construir.
+- Decisão: (1) o **administrador** cria, edita, duplica, arquiva e versiona modelos e adiciona, remove, reordena e configura etapas **sem alterar código**; (2) onboarding iniciado **manualmente** ou pela **confirmação de contrato assinado**, respeitando que a F9 ainda não existe (a integração automática fica reservada); (3) **modelos distintos** por serviço, pacote ou tipo de cliente, sem quantidade fixa de modelos ou etapas; (4) cada etapa pode ter **responsável por função**, **responsável específico**, **prazo em dias úteis**, **dependências**, **bloqueios**, **evidências** e **condições de conclusão**; (5) permissões por **RBAC e escopo de cliente**; **funções operacionais não se confundem** com ADMIN/MANAGER/MEMBER; (6) **versões publicadas são imutáveis**; editar cria nova versão e **não altera** onboardings já iniciados; (7) **Google Calendar** segue como fonte principal de eventos, lido pelo Hub; **retenção histórica inicial proposta de 1 ano**, sujeita à avaliação de armazenamento, privacidade e política de retenção; (8) **o Hub não cria projeto no Asana**: confirma e vincula o projeto existente (reafirma a DEC-F7-003).
+- Alternativas consideradas: esperar o processo real para modelar um fluxo fixo (descartada pela Direção).
+- Impacto: novo modelo de dados (modelos, versões, etapas, dependências, funções); novas permissões de onboarding; fatiamento F7-1a/1b; Q1–Q12 viram configuração.
+- Revisão: ao aprovar ou ajustar B1 e B2; se surgirem condições de conclusão que o catálogo fechado não cubra.
+
+### 2026-10-12 — P27 passo 1 e decisões da F7 — Claude
+- AUTORIZAÇÃO: Direção, via proprietário — remover só código morto e dependências sem consumidores (jspdf/exportUtils, axios, TiptapEditor e dependências associadas); reconfirmar referências antes; passos 2, 3 e 4 **não** autorizados; preservar a possibilidade de PDF financeiro na F10; sem produção.
+- RECONFIRMAÇÃO: `git grep` no repositório inteiro (exceto docs e lockfile), incluindo importações dinâmicas, `require`, `import.meta.glob`, configuração do Vite e nomes de componente: **nenhum consumidor** além dos próprios arquivos mortos e do `package.json`.
+- FEITO (`65b390e`): removidos `apps/web/src/lib/exportUtils.ts` e `apps/web/src/components/projects/TiptapEditor.tsx`; removidas as dependências `jspdf`, `axios`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-link`, `@tiptap/extension-placeholder`, `@tiptap/extension-underline` (100 pacotes na árvore; lockfile com 6 inserções e ~1.200 remoções). `html2canvas` foi mantida (sem aviso e sem uso; não estava na lista) — candidata a remoção futura.
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- VALIDAÇÃO LOCAL: `typecheck:web` 0 erros; `test:web` 51/51; `lint:f6` 0 erros; `build:web` ok e **sem** as bibliotecas no bundle; árvore de dependências íntegra. API e domínio não importam nada removido. Resultado do CI oficial: ver entrada abaixo, quando houver.
+- CI OFICIAL: run 38266680937 (https://github.com/Julianogdc/zafira-hub/actions/runs/38266680937) — **5/5 verdes** em `65b390e`: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43, Browser Gates F4 e F5 PASS e **F6 33/33 PASS**; relatório de audit no CI: críticas 0, altas 20 (= linha de base).
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+
+### DEC-F7-001 — Fonte principal dos eventos: Google Calendar (D1, opção C)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: onde nascem e quem é a fonte de verdade dos eventos da agenda.
+- Decisão: o **Google Calendar é a fonte principal** na primeira entrega; o Hub **lê** e faz **vínculos locais** por cliente, projeto e categoria. Criar ou editar eventos pelo Hub é evolução futura e **depende de decisão adicional**. Calendários, contas, visibilidade e frequência de sincronização **ainda serão definidos** — não presumir.
+- Alternativas consideradas: Hub mestre (A); por categoria com bidirecional (B).
+- Impacto: novo conector de leitura com credencial por organização; sem conflito de precedência na 1ª entrega; eventos recorrentes no fuso da organização (DEC-F6-005).
+- Revisão: quando o proprietário quiser criar eventos pelo Hub ou edição bidirecional (exige regra de precedência).
+
+### DEC-F7-002 — Estrutura técnica do template de onboarding (D2, opção B)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: como modelar o template de onboarding.
+- Decisão: **etapas com dependências, responsável por função, prazos relativos e templates versionados** (imutáveis após publicados; execuções referenciam a versão). O **fluxo real do onboarding da Zafira será fornecido pela Direção**; **nenhuma etapa será presumida** nem implementada antes disso.
+- Alternativas consideradas: checklist linear (A); fases › etapas › tarefas (C).
+- Impacto: modelo de dados e regras da F7-1; lista de funções da agência a definir (pergunta Q4).
+- Revisão: se o onboarding real exigir três níveis (opção C).
+
+### DEC-F7-003 — Onboarding e Asana: confirmar e vincular, sem escrever (D3)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: a v1.1 previa "criar projeto no Asana" como etapa de onboarding, contrariando a DEC-ASANA-001.
+- Decisão: a etapa passa a ser **"confirmar projeto existente e vinculá-lo ao cliente"** (vínculo local). **Nenhuma escrita no Asana fica autorizada.**
+- Alternativas consideradas: criação automática por exceção (descartada).
+- Impacto: etapa do tipo "confirmar projeto Asana" usa o vínculo local já existente.
+- Revisão: somente por nova DEC explícita do proprietário.
+
+### 2026-10-12 — Encerramento da F6 e incorporação do Mapa C2 — Claude
+- ORIGEM: decisões da Direção (Chat de Direção), trazidas pelo proprietário na conversa, após revisar o relatório da F6-IMP.9 e a proposta do Mapa C2.
+- FEITO: (1) aceite da F6-IMP.9 e encerramento da F6 registrados (DEC-F6-006); (2) proposta C2 conferida contra as DECs e incorporada ao `docs/MAPA_MESTRE.md` como partes 13–17, sem apagar nenhuma seção C1; (3) triagem técnica da P27 em `docs/operations/TRIAGEM_VULNERABILIDADES_P27_2026-10-12.md`; (4) P22 elevada a bloqueador, P13 e P18 com critério e prazo; (5) preparação da F7 em `docs/propostas/F7_DECISOES_DE_PRODUTO.md`.
+- COMPATIBILIDADE C2 × DECs: sem conflito com DEC-GOV-001 a 004 (fonte no Git, papéis), DEC-ASANA-001/002, DEC-F6-001 a 005. Um ponto previsto: a etapa "aprovada/postada" das peças de Entregas passa a ser preenchida pela F8, como a própria DEC-F6-002 já previa (condição de revisão). Numeração C1 e critérios anteriores preservados.
+- DIVERGÊNCIAS IDENTIFICADAS (não corrigidas por conta própria): (a) v1.1 previa "criação assistida de projeto Asana" no onboarding — contraria DEC-ASANA-001, levada como D3 da F7; (b) Mapa C1 §7 (F6-IMP.7) previa evidências com vínculo a Asana/Conteúdo/arquivos — implementado só link opcional (P23, consistente com DEC-F6-002); (c) cabeçalho do C1 exigia o C2 "antes da F6-IMP.6" — só foi entregue na F6-IMP.9, agora resolvido; (d) código morto com dependência vulnerável: `jspdf`, `axios` e `TiptapEditor` (P27).
+- NÃO FEITO (por regra): nenhuma dependência alterada; nenhuma funcionalidade da F7; nenhum acesso a produção; itens [DECIDIR] não viraram decisões.
+- EVIDÊNCIA/CI: alterações só em `docs/`; nenhum código mudou desde o run 38262704358 (5/5). O CI automático do push não foi aguardado nesta sessão.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma de código. Aguarda decisões D1–D3 da F7 e a autorização do passo 1 da P27.
+
+### DEC-F6-006 — Encerramento da F6, Mapa C2 e regras de fase (Direção, 2026-10-12)
+- Data / responsável: 2026-10-12 / Direção, via proprietário.
+- Problema: fechar a F6 com a carga de trabalho só parcialmente atendida, oficializar o Mapa C2 e decidir o destino de "Dashboards finais" e "Identidade visual", que a v1.1 tinha como fases e o C1 não.
+- Decisão: (1) **F6-IMP.9 aceita; F6 encerrada**, com ressalva: o painel de distribuição e capacidade da equipe vira **requisito da F15**, sem reabrir a F6; Asana permanece somente leitura. (2) **Mapa C2 aprovado como direção e incorporado** ao Mapa (partes 13–17). (3) **Dashboards finais:** sem fase nova; métricas e drill-down nas fases dos domínios, experiência do colaborador completada na F15, revisão global na F18. (4) **Identidade visual:** sem fase nova; Design System da F3 obrigatório em toda interface nova; auditoria visual e de consistência na F18. (5) Itens [DECIDIR] não tratados continuam pendentes. (6) **P27:** triagem técnica, sem upgrade amplo automático. (7) **P22:** bloqueador do primeiro deploy de homologação. (8) **P13 e P18:** mantidas com critérios e prazos explícitos. (9) **F7:** preparar pelas decisões de produto; nada de implementação antes do registro do fechamento da F6 e das decisões necessárias.
+- Alternativas consideradas: criar fases novas para dashboards e identidade visual (descartado pela Direção); manter a F6 aberta até o painel de capacidade (descartado).
+- Impacto: Mapa (versão C2); F15 e F18 ganham requisitos; backlog de segurança com bloqueador explícito; F7 depende das decisões D1–D3.
+- Revisão: se a medição de capacidade do servidor ou a F15 mostrar que o painel de equipe precisa vir antes.
+
+### 2026-10-12 — Aceite da F6-IMP.9 — proprietário (Direção)
+- A F6-IMP.9 (CI oficial 38262704358 com Browser Gates F4, F5 e F6 verdes) foi **aceita**. Ver DEC-F6-006 para o encerramento da F6 e a ressalva.
+
+### 2026-10-12 — F6-IMP.9 — Homologação da F6 concluída para aceite — Claude
+- CONTEXTO: o Antigravity ficou sem uso no meio da sessão; o proprietário pediu a Claude que retomasse de onde ele parou. O último CI do Antigravity (run 38205658587, `ab16e18`) tinha falhado no gate F6 com 32/33.
+- BASELINE (commit): `75f2112`. Commits desta retomada: `5ee7661` (gate), `75f2112` (qualidade), `aef3149` (documentação e proposta do Mapa C2). Commits anteriores da etapa: `43a1398`, `ee87f4d`, `c2ca05f` (Claude); `8072ec9`, `755a9f9` (Antigravity).
+- DIAGNÓSTICO: a única falha (cenário F, "contagem sobe para 3 só ao postar") era do teste: o gate esperava o texto "Postada", que também aparece no botão "Marcar como postada", e lia o indicador antes da resposta da API. Correção: espera pelo selo exato e espera ativa do indicador.
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- MAPA C2 (P3, DEC-F6-005): proposta em `docs/propostas/MAPA_MESTRE_C2_PROPOSTA.md` — critérios de pronto/concluído, Browser Gate por fase, correspondência v1.1 → C1, critérios de aceite e portões F7–F18, segurança, testes, observabilidade, migração, decisões pendentes e duas lacunas (Dashboards finais e Identidade visual sem fase no C1). **Não é oficial** até aprovação.
+- CI/EVIDÊNCIA: run 38262704358 (https://github.com/Julianogdc/zafira-hub/actions/runs/38262704358) — **5/5 verdes**: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43, lint F6 0 erros, audit na linha de base, Browser Gate F4 PASS, F5 PASS e **F6 33/33 PASS**.
+- PORTÃO DA F6: avaliação item a item em `docs/ESTADO_ATUAL.md`; único ponto parcial é "carga de trabalho" (por filtro/agrupamento por responsável, sem painel dedicado).
+- LIMITES/LACUNAS: P18 (teste RBAC antigo não reexecutável) e o lint completo do web continuam abertos, reclassificados para antes da F18; nenhum teste com o Asana real; agendador desligado (P24).
+- STATUS: F6-IMP.9 pendente de aceite; encerramento da F6 aguarda aprovação do proprietário.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma até o aceite e a decisão sobre o portão da F6.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / proposta do Mapa C2.
+
+### 2026-10-12 — F6-IMP.9 — resolução dos gates F4 e F6 no CI — Antigravity
+- BASELINE: `755a9f9` (correção de seletores/semântica em Projetos.tsx e projects-browser-gate.py; `8072ec9` no workflow).
+- DIAGNÓSTICO E CORREÇÕES:
+  1. Gate F4: O run 38202110078 falhou no Browser Runtime Gate da F4 com timeout no EmptyState da Org B. Causa: `seed-f6-gate.mjs` rodava antes da F4, criando um cliente ativo na Org B que impedia o EmptyState ("Nenhum cliente cadastrado"). Solução (`8072ec9`): mover `seed-f6-gate.mjs` para rodar após o gate F5 e imediatamente antes do gate F6. Com isso, no run 38204209630, o gate F4 e o gate F5 passaram 100% com sucesso.
+  2. Gate F6: O run 38204209630 executou o novo gate F6 pela primeira vez e falhou com strict mode violation do Playwright em `locator("main")`, que resolveu para 2 elementos (o `<main>` do layout e o `<main className={styles.contentArea}>` de `Projetos.tsx`). Solução (`755a9f9`): substituir a tag `<main>` aninhada em `Projetos.tsx` por `<div>` (corrigindo a semântica HTML5 onde apenas um `<main>` deve existir por documento) e usar `.first.inner_text()` nas leituras de texto em `projects-browser-gate.py`.
+- EVIDÊNCIA LOCAL: `typecheck:contracts`, `typecheck:api`, `typecheck:web` 0 erros; `test:domain` 41/41; `npm test` 818/818; `test:web` 51/51; `build:api` e `build:web` ok; `secret-scan` limpo.
+- STATUS: em andamento — acompanhando nova execução do CI oficial para validar F4, F5 e F6 simultaneamente.
+
+### 2026-10-12 — F6-IMP.9 — trabalho parcial (interrompido por limite de uso) — Claude
+- COMMITS: `43a1398` (fuso por organização, DEC-F6-005/P15), `ee87f4d` (botões de visualização quebram linha em 390 px — "Entregas" ficava fora da tela no celular), `c2ca05f` (Browser Gate F6 no CI: Asana simulado somente leitura, seed F6, cenários A–J).
+- EVIDÊNCIA LOCAL: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43 em banco novo; ensaio local das verificações de API do gate 17/17 (Asana simulado + banco no formato do CI) e fluxo de tela conferido no navegador. O gate em Python só roda no CI (não há Python local).
+- CI: run 38202110078 disparado para `c2ca05f` — **resultado ainda não conferido**. Se o gate F6 falhar, ajustar seletores em `scripts/homologation/projects-browser-gate.py` pelos artefatos `f6-projects-browser-*`.
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+
+### DEC-F6-005 — Fuso horário por organização e rascunho do Mapa C2 (F6-IMP.9)
+- Data / responsável: 2026-10-12 / proprietário (respostas diretas na conversa com Claude, ao autorizar a F6-IMP.9).
+- Problema: P15 — prazos/"atrasado"/"hoje" usavam o relógio do navegador e a foto diária do Asana usava São Paulo fixo, enquanto o Mapa prevê o fuso da organização. P3 — o Mapa C2 completo estava pendente antes da homologação da F6, sem responsável definido.
+- Decisão: (1) **fuso configurável por organização, padrão America/Sao_Paulo**, usado em prazos, atraso, "hoje" e na foto diária do espelho do Asana; (2) **Claude elabora um rascunho do Mapa C2**, marcado como PROPOSTA, que só vira oficial após aprovação do proprietário (ou do Chat de Direção por delegação dele).
+- Alternativas consideradas: São Paulo fixo para tudo; manter o relógio do navegador; Mapa C2 pelo Chat de Direção; adiar o Mapa C2 para depois da F6.
+- Impacto: migration com novo campo de fuso na organização (padrão São Paulo); sessão informa o fuso da organização ativa; espelho do Asana passa a datar fotos pelo fuso da organização; novo documento `docs/propostas/` (não substitui `docs/MAPA_MESTRE.md` até aprovação).
+- Revisão: se alguma organização precisar de regras de fuso por cliente/equipe.
+
+### 2026-10-12 — Aceite da F6-IMP.8 — proprietário
+- A F6-IMP.8 (espelho e histórico do Asana: `509241a`, `f360ac2`, `96f082f`; DEC-F6-003 revisada pela DEC-F6-004; CI oficial 5/5 verde no run 38198738925) foi **aceita** pelo proprietário ("aceito").
+- Próxima microetapa: F6-IMP.9 — Homologação da F6, quando o proprietário pedir o início. O agendador do espelho continua desligado até P24.
+
+### 2026-10-12 — F6-IMP.8 (tempo real) — CI oficial — Claude
+- BASELINE: `96f082f` (código); publicado até `ba5b6b7`.
+- CI/EVIDÊNCIA: run 38198738925 (https://github.com/Julianogdc/zafira-hub/actions/runs/38198738925) — **5/5 verdes**: domínio 38/38, API 817/817, web 50/50, PostgreSQL 42/42.
+- EFEITOS EXTERNOS: nenhum deploy, VPS, banco real, Asana ou conta real; só a publicação automática de imagens no GHCR feita pelo CI. Agendador continua desligado por padrão.
+- STATUS: F6-IMP.8 pendente de aceite.
+
+### 2026-10-12 — F6-IMP.8 — ajuste para tempo real (DEC-F6-004) — Claude
+- BASELINE (commit): `96f082f`.
+- CI/EVIDÊNCIA (local): typecheck api/web 0 erros; `npm test` **817/817** (+3: horário da conferência noturna em São Paulo, nova tentativa única quando outra conferência está rodando, recusa de endereço de avisos sem https/sem configuração); `test:web` 50/50; `build:api` e `build:web` ok; `secret-scan` limpo. O motor do espelho (serviço) não mudou; o teste de integração em PostgreSQL roda no CI. Resultado do CI oficial: entrada de confirmação abaixo, quando houver.
+- O QUE MUDOU: agendador passa de "a cada 6 horas" para **tempo real pelos avisos (10 s de agrupamento) + conferência noturna às 03:00 (São Paulo) + conferência 2 min após iniciar**; `getWebhookBaseUrl` deixa de cair no endereço do Hub 2.0 e recusa sem `WEBHOOK_BASE_URL`/`API_BASE_URL` https; texto do painel atualizado.
+- LIMITES/LACUNAS: o tempo real só funciona em ambiente com endereço público e inscrições de aviso (P25); agendador continua desligado até medição de capacidade e autorização (P24). O padrão do redirecionamento OAuth ainda aponta para o Hub 2.0 (P5, inalterada).
+- STATUS: F6-IMP.8 pendente de aceite.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F6-004 — Histórico do Asana em tempo real + conferência noturna (revisa o item 2 da DEC-F6-003)
+- Data / responsável: 2026-10-12 / proprietário ("não gosto da ideia do Hub atualizar a cada 6 horas, teria como as atualizações serem em tempo real?" e escolha "Tempo real + conferência 1x por noite").
+- Problema: a DEC-F6-003 previa conferência a cada 6 horas; o proprietário quer o histórico atualizado em tempo real.
+- Decisão: (1) atualização **em tempo real pelos avisos do Asana** (webhooks, DEC-ASANA-002), agrupando avisos por **10 segundos**; (2) **conferência de segurança uma vez por noite** (03:00, horário de São Paulo), que também tira a foto diária e corrige avisos perdidos; (3) mantém uma conferência 2 minutos após a API iniciar, para cobrir avisos perdidos enquanto ela esteve fora do ar; (4) sem endereço público do Hub 2.1 configurado, o Hub **não** registra avisos no Asana (antes usaria por padrão o endereço do Hub 2.0). Continua: agendamento dentro da API, desligado por padrão, somente leitura, retenção de 13 meses.
+- Alternativas consideradas: tempo real + conferência de hora em hora (mais uso de servidor e cota); só tempo real (avisos perdidos nunca entrariam no histórico).
+- Impacto: agendador e configuração por variáveis (`ASANA_MIRROR_NIGHTLY_HOUR`, `ASANA_MIRROR_WEBHOOK_DEBOUNCE_SECONDS`); para funcionar em tempo real o ambiente precisa de endereço público (`WEBHOOK_BASE_URL`) e das inscrições de aviso por projeto (P25).
+- Revisão: se a medição em homologação mostrar avisos perdidos com frequência, considerar conferências mais frequentes.
+
+### 2026-10-12 — F6-IMP.8 — CI oficial — Claude
+- BASELINE: `f360ac2` (código); publicado até `31e40b7`.
+- CI/EVIDÊNCIA: run 38197057877 (https://github.com/Julianogdc/zafira-hub/actions/runs/38197057877) — **5/5 verdes**. Testes no CI: domínio 38/38, **API 814/814** (antes 555 — P21 confirmada como resolvida), web 50/50, PostgreSQL Integration Gate 42/42 com a migration `20261012010000` aplicada no banco descartável do CI.
+- EFEITOS EXTERNOS: nenhum deploy, VPS, banco real, Asana ou conta real; só a publicação automática de imagens no GHCR feita pelo próprio CI. O agendador continua desligado por padrão.
+- STATUS: F6-IMP.8 pendente de aceite.
+
+### 2026-10-12 — F6-IMP.8 — Espelho e snapshots do Asana — Claude
+- BASELINE (commit): `62b4ee2` (testes da API no CI, P21), `509241a` (migration, serviço, agendador, rotas, testes), `f360ac2` (tela).
+- CI/EVIDÊNCIA (local): typecheck contracts/domain/api/web 0 erros; `test:domain` 38/38; `npm test` **814/814** (+8 do espelho); `test:web` **50/50** (+3); `build:api` e `build:web` ok; lint dos arquivos novos 0 erros (os 4 erros em `Projetos.tsx` são os `any` antigos da P13); `secret-scan` limpo. Réplica do job "PostgreSQL Integration Gate" em banco novo (PostgreSQL 16 descartável, UTF-8): migrations + 2× bootstrap + `test:integration:db` **42/42** (10 novos do espelho); o arquivo novo passou 3 vezes seguidas sozinho. Resultado do CI oficial: entrada de confirmação abaixo, quando houver.
+- PROVAS (integração real, Asana simulado somente leitura): 1ª conferência cria espelho e foto sem histórico falso; 2ª no mesmo dia registra concluída/nome/prazo/responsável/criada e atualiza a foto do dia (uma por dia); dia seguinte gera nova foto e tarefa sumida fica marcada como removida (nada apagado); falha do Asana mantém tarefas e fotos idênticas, não grava foto do dia, marca FAILED e preserva a última conferência boa; falha de credencial não vaza o texto da credencial no `SyncRun`; trava ocupada → conferência pulada sem ler o Asana; duas conferências simultâneas → só uma roda; mesmo projeto em outra organização tem espelho próprio; rota de histórico: carteira (404), outra organização (404), `days` inválido (400), sem sessão (401); "Atualizar agora": membro sem `projects.sync` 403, admin sem Asana conectado registra falha sem apagar nada; retenção descarta só o que passou de 13 meses.
+- EVIDÊNCIA VISUAL (1280 px, API real + banco descartável, 14 dias simulados pelo motor real com Asana falso, dados fictícios; capturas fora do repositório): painel "Evolução no Asana" com "Conferido em …", gráfico de 30 dias (12 dias com foto; os 2 dias sem conferência ficam sem ponto) e mudanças (concluída, prazo, responsável, renomeada, criada, saiu, voltou). "Atualizar agora" sem Asana conectado mostra "Falhou em …" com o motivo e mantém os dados da última conferência boa. Log da API confirma "agendador não iniciado" (desligado por padrão).
+- ACHADO E CORREÇÃO (P21): o script `test` da API usava `src/modules/**/__tests__/*.test.ts` sem aspas; no CI (Linux) o shell expandia `**` como um nível só e ignorava 12 de 27 arquivos de teste (555 testes no CI contra 806 local). Com aspas, o Node expande o padrão recursivamente — o CI passa a rodar todos.
+- LIMITES/LACUNAS: agendador desligado até medição de capacidade e autorização (P24); webhooks dependem de inscrições e URL pública (P25); cota da API do Asana a medir (P26); fuso fixo America/Sao_Paulo na foto diária (P15); sem teste de componente (P20). Nenhuma chamada real ao Asana nesta etapa.
+- STATUS: pendente de aceite.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma nova até o aceite. Depois: F6-IMP.9 (homologação da F6).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F6-003 — Histórico do Asana e sincronização (resolve P4)
+- Data / responsável: 2026-10-11 / proprietário (respostas diretas na conversa com Claude).
+- Problema: a F6-IMP.8 (espelho e snapshots) precisava saber quanto histórico do Asana guardar e se haveria sincronização automática por worker/fila (P4). Hoje não existe nenhum processo automático; já existem a rota que recebe webhooks do Asana (DEC-ASANA-002) e as tabelas `SyncRun` e `WebhookEvent`. A capacidade do servidor ainda não foi medida (pendência da Fase 0).
+- Decisão:
+  1. **Histórico:** uma **foto diária por projeto** (total, concluídas, pendentes, atrasadas) e o **registro das mudanças relevantes das tarefas** (conclusão, prazo, responsável, seção, nome). **Retenção de 13 meses**, com descarte controlado do que passar disso.
+  2. **Sincronização:** **webhooks do Asana + conferência agendada dentro da própria API**, sem serviço novo no servidor (ex.: conferência a cada 6 horas e foto diária de madrugada). A execução agendada deve ser única mesmo com mais de uma instância da API, registrada em `SyncRun`, e falhas preservam o último estado válido e aparecem como frescor/erro na tela.
+  3. Continua **somente leitura**: o Hub só lê do Asana (DEC-ASANA-001).
+- Alternativas consideradas: só números diários; guardar tudo sem prazo; nenhum histórico (exigiria mudar o portão da F6); worker separado com fila (exige medir o servidor e autorização de infraestrutura); só ao abrir a tela (histórico com buracos).
+- Impacto: novas tabelas de espelho/fotos/mudanças (migration ensaiada só em base descartável); agendador na API; consumo de cota da API do Asana; crescimento de banco limitado pelos 13 meses.
+- Revisão: separar em worker com fila quando a capacidade do servidor for medida e o volume justificar; rever a retenção se o proprietário precisar de mais tempo.
+
+### 2026-10-11 — Aceite da F6-IMP.7B — proprietário
+- A F6-IMP.7B (operação de Entregas: `489c34b`, `7c3a4a4`, `da68eae`; CI oficial 5/5 verde no run 38193471184) foi **aceita** pelo proprietário ("pode aceitar a F6-IMP.7B").
+- Próximo: decidir a P4 (quanto histórico do Asana guardar e se haverá sincronização automática por worker/fila) antes de iniciar a F6-IMP.8.
+
+### 2026-10-11 — F6-IMP.7B — CI oficial — Claude
+- BASELINE: `da68eae` (código); publicado até `3039b2c`.
+- CI/EVIDÊNCIA: run 38193471184 (https://github.com/Julianogdc/zafira-hub/actions/runs/38193471184) — **5/5 verdes**; PostgreSQL Integration Gate 32/32 (inclui "Operação de Entregas (F6-IMP.7B)"), migration `20261011120000` aplicada no banco descartável do CI.
+- EFEITOS EXTERNOS: nenhum deploy, VPS, banco real, Asana ou conta real; só a publicação automática de imagens no GHCR feita pelo próprio CI.
+- STATUS: F6-IMP.7B pendente de aceite.
+
+### 2026-10-11 — F6-IMP.7B — Operação de Entregas — Claude
+- BASELINE (commit): `489c34b` (contratos/domínio/RBAC), `7c3a4a4` (migration, API, testes), `da68eae` (tela).
+- CI/EVIDÊNCIA (local): typecheck contracts/domain/api/web 0 erros; `test:domain` 38/38 (+8); `npm test` 806/806; `test:web` 47/47 (+3); `build:api` e `build:web` ok; lint dos arquivos alterados 0 erros (2 avisos de fast-refresh); `secret-scan` limpo. Réplica do job "PostgreSQL Integration Gate" em banco novo (PostgreSQL 16 descartável, UTF-8): migrations + 2× bootstrap + `test:integration:db` **32/32** (10 novos de operação). Resultado do CI oficial: entrada de confirmação abaixo, quando houver.
+- ENSAIO DA MIGRATION: banco descartável com as migrations anteriores e dados no formato antigo (plano `PLANNING`, eventos `ITEM_CREATED`, `ITEM_CANCELLED`, `PERIOD_CLOSED`, `PERIOD_REOPENED`); após `20261011120000`: 2 planos, 1 item e 7 eventos preservados e renomeados. `prisma migrate diff` banco × schema: nenhuma diferença em Entregas (só 3 nomes antigos de índice/chave em `integration_connections` e `organization_invitations`, anteriores à F6). O primeiro ensaio falhou porque o banco local estava em WIN1252 e o comentário do SQL tinha "→"; o SQL ficou só ASCII e o banco local passou a ser criado em UTF-8 como o do CI.
+- EVIDÊNCIA VISUAL (1280 px, API real + banco descartável, dados fictícios, painel do navegador; capturas fora do repositório): admin cria o plano (12 conteúdos + 2 criativos = meta 14); peça Reels passa por Produzida → Aprovada → Postada e só então conta (1 de 14); "Voltar etapa" fica bloqueado sem justificativa e, com ela, a contagem volta a 0; "Fechar mês" deixa tudo somente leitura e só "Reabrir mês" aparece (bloqueado sem justificativa); histórico mostra cada passo com autor e justificativa. Como membro: sem "Fechar mês", "Ajustar meta" ou "Adicionar linha"; registra e aprova peça; tentativa direta de fechar o mês pela API → 403.
+- O QUE MUDOU: ver `docs/ESTADO_ATUAL.md` (F6-IMP.7B) e DEC-F6-002. Também: endpoint de capacidades passa a informar `deliverables.register/adjust_target/complete/reopen` (allowlist atualizada no teste); teste de falha da 7A deixou de renomear a tabela (derrubava os testes paralelos) e injeta a falha só no próprio processo; a trava estática do web foi ajustada à nova tela sem plano (estado vazio + "Criar plano", nenhum número).
+- LIMITES/LACUNAS: P20 (sem teste de componente), P21 (CI roda menos testes de API que o local), P22 (bootstrap não remove `deliverables.complete` do MEMBER em bancos antigos), P23 (sem vínculo de evidência por Asana/arquivo nas peças).
+- STATUS: pendente de aceite.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma nova até o aceite. Depois: F6-IMP.8, condicionada à decisão P4.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F6-002 — Taxonomia e regra de entrega da Zafira (F6-IMP.7B)
+- Data / responsável: 2026-10-11 / proprietário (respostas diretas na conversa com Claude).
+- Problema: a operação de Entregas (F6-IMP.7B) precisava saber o que a Zafira vende, como a meta é contada e quando algo conta como entregue (P17).
+- Decisão:
+  1. **Serviços contratados:** conteúdos para redes (post no feed, carrossel, Reels/vídeo curto, Stories), criativos para anúncios, relatório mensal, captação de foto/vídeo, gestão de tráfego pago (Google e Meta Ads) e "outro".
+  2. **Meta de conteúdos = pacote único por mês** (ex.: 8 ou 12 conforme o valor do contrato). Qualquer formato conta; o formato fica registrado em cada peça. O que passar da meta de uma linha é **extra** e não compensa déficit de outra linha nem de outro mês.
+  3. **Entregue = marcado, aprovado e postado.** Cada peça passa por **produzida → aprovada → entregue/postada** e só conta como entregue na última etapa. Os demais serviços seguem o **mesmo fluxo**.
+  4. Enquanto não existem o módulo de aprovação do cliente (F8) e a publicação automática (Postiz), as etapas são **registradas manualmente pela equipe, sem prova obrigatória** (link opcional).
+  5. **Permissões:** admin e gestor montam o plano, ajustam meta (com justificativa) e fecham/reabrem o mês; membros registram e avançam peças dos clientes da sua carteira.
+- Alternativas consideradas: meta fixa por formato; pacote com mínimos por formato; prova obrigatória; esperar a F8 — descartadas pelo proprietário.
+- Impacto: nova entidade de peça com etapas (migration nova, ensaiada só em base descartável); contrato alinhado ao banco; nova permissão `deliverables.register` e retirada de `deliverables.complete` do papel MEMBER; cálculo de metas por linha com excedente como extra; F8/Postiz preencherão as etapas no futuro.
+- Revisão: quando F8 (aprovação) ou Postiz (publicação) entrarem, ou se o proprietário exigir prova.
+
+### 2026-10-11 — Aceite da F6-IMP.7A — proprietário
+- A F6-IMP.7A (leitura de Entregas: `087cdb8`, `1837801`, `6e15430`, `81b010c`; CI oficial 5/5 verde no run 38189197511) foi **aceita** pelo proprietário ("aceito, pode continuar"). Isso também confirma a divisão 7A/7B da DEC-F6-001.
+- Próxima microetapa autorizada: **F6-IMP.7B — Operação de Entregas**, que depende antes da taxonomia de entregas (P17).
+- Correção documental: as referências anteriores a "Mapa 8.5" para a taxonomia estavam erradas (a seção 8 do Mapa trata de UI/UX); a taxonomia não está definida no Mapa.
+
+### 2026-10-11 — F6-IMP.7A — publicação e CI oficial — Claude
+- AUTORIZAÇÃO: proprietário/Direção autorizou publicar somente os commits locais da F6-IMP.7A e acompanhar o CI.
+- PRÉ-CONDIÇÕES CONFERIDAS: `git status` limpo e sem arquivos não rastreados; `git fetch origin --prune`; `origin/hub-2.1` em `346c408` (último baseline remoto esperado); 3 commits locais lineares (0 atrás, 0 merges): `6e15430`, `81b010c`, `bb00856`; arquivos alterados só de F6-IMP.7A e governança (2 testes novos, `Projetos.tsx`, `CanonicalTaskList.tsx`, `docs/ESTADO_ATUAL.md`, `docs/REGISTRO.md`).
+- PUBLICAÇÃO: `git push origin hub-2.1` (`346c408..bb00856`), sem force, rebase, reset ou amend.
+- CI/EVIDÊNCIA: run 38189197511 (https://github.com/Julianogdc/zafira-hub/actions/runs/38189197511) — **5/5 verdes**: Code Quality and Tests, PostgreSQL Integration Gate (21/21, incluindo os 7 novos de Entregas), Docker Build Gate, Publish Images, Homologation Rehearsal. Testes no CI: domínio 30/30, API 555/555, web 44/44.
+- EFEITOS EXTERNOS: nenhum deploy, VPS, EasyPanel, banco real, Asana, OAuth ou conta real. O único efeito fora do repositório é o automático do próprio CI: o job "Publish Images" publica as imagens `zafira-hub-api`/`zafira-hub-web` no GHCR do repositório (como em todo push em `hub-2.1`); o "Homologation Rehearsal" roda só no executor do GitHub.
+- ACHADO: o CI roda 555 testes de API contra 806 localmente, já antes desta etapa (P21).
+- STATUS: F6-IMP.7A **pendente de aceite da Direção/proprietário**. F6-IMP.7B não iniciada.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO. Este registro fica em commit local até nova autorização de push.
+
+### 2026-10-11 — F6-IMP.7A — validação complementar em PostgreSQL descartável e evidência visual — Claude
+- BASELINE (commit): `6e15430` (testes) + `81b010c` (correção: Entregas independentes do Asana). **Commits só locais: push não autorizado nesta etapa**, então o CI oficial do GitHub não rodou para eles.
+- PEDIDO: validação complementar sem produção, VPS, banco real, Asana ou push; provar 6 pontos; não iniciar F6-IMP.7B.
+- AMBIENTE: Windows local; PostgreSQL 16 descartável (`embedded-postgres` instalado só em pasta temporária fora do repositório, banco `zafira_hub_ci` na porta 54329, apagado a cada início); API real do repositório apontando para esse banco, com variáveis de Postiz/Asana/chave interna zeradas; web pelo Vite. Nenhuma conta, banco ou serviço real.
+- CI/EVIDÊNCIA (local):
+  - Réplica do job "PostgreSQL Integration Gate" em banco novo: `prisma migrate deploy` (incluindo `20261010210000_f6_deliverables_foundation`), `migrate status`, preparação de organizações, 2× `rbac:bootstrap`, `test:integration:db` → **21/21** (14 existentes + 7 novos).
+  - `npm test` 806/806, `test:web` 44/44, `test:domain` 30/30, `typecheck:api`/`web`/`domain` 0 erros, `build:api` e `build:web` ok, lint dos arquivos novos limpo, `secret-scan` limpo.
+  - Trava web conferida: com o código de `087cdb8` restaurado temporariamente, 4 testes falham (sessão falsa, modo DEV, dados de demonstração, fallback no serviço).
+- PROVAS (testes reais, sem Prisma simulado — `apps/api/src/integration-tests/deliverables-postgres.test.ts`):
+  1. Org A não lê plano, itens, eventos, templates nem evidências da Org B: pedido pelo ID do cliente de B → 404 sem nenhum dado de B; token de usuário de B forjando organização ativa A → recusado; resposta de A sem dados de B e sem templates; simétrico para B.
+  2. Membro sem o cliente na carteira → 404; com o cliente na carteira → 200; com `deliverables.view` negado → 403; sem sessão → 401.
+  3. Cliente sem plano e mês sem plano → `{ plan: null, period, clientId }`, sem número.
+  4. Falha real do banco (tabela de planos tirada do ar só no banco descartável) → 500 com mensagem explícita, sem plano; volta ao normal ao restaurar.
+  5. POST/PUT/PATCH/DELETE nos dois prefixos → 404; tabelas de Entregas idênticas antes e depois (contagem e última alteração).
+  6. Sem fallback administrativo: trava estática no web + navegador: com a API desligada, `/projetos` leva ao login, sem sessão nem dados.
+- EVIDÊNCIA VISUAL (1280 px, API real + banco descartável com dados fictícios, painel do navegador do app; capturas não ficam no repositório): **com plano** — meta 24, entregues 15, pendentes 9, extra +1 separado, progresso 63%, evidência do Asana abrindo só `https://app.asana.com/...`, link `javascript:` bloqueado, histórico com justificativa e nome de quem agiu; **sem plano** — só o aviso "Nenhum plano de entregas em Setembro de 2026"; **erro** — "Erro ao carregar entregas" com "Tentar novamente", que recupera o plano após restaurar a tabela; **sem permissão** — "Acesso Negado às Entregas (deliverables.view)" para membro com o cliente na carteira e permissão negada.
+- DEFEITO ENCONTRADO E CORRIGIDO (`81b010c`): a opção Entregas só existia dentro da lista de tarefas do Asana, então sumia quando o cliente não tinha projeto Asana vinculado ou quando a consulta de tarefas falhava ou carregava. Entregas são do Hub (não-presunção, DEC-ASANA-001): agora aparecem em seção própria nesses casos, e a barra de visualização continua visível durante carregamento/erro das tarefas. Trava de regressão incluída.
+- INCIDENTE LOCAL (corrigido, sem perda): um `git stash` sem alterações seguido de `git stash pop` aplicou um stash antigo do proprietário ("pre-hub-2.0 CRM local changes") à árvore de trabalho. O stash foi registrado de volta (`stash@{0}`, mesmo commit `eb8bfc9`), o conteúdo foi conferido byte a byte e os 3 arquivos de CRM voltaram ao estado do commit. Agentes não devem usar `git stash` neste repositório.
+- LIMITES/LACUNAS: CI oficial pendente de push; sem teste de componente/Browser Gate automatizado (P20); `rbac-postgres.test.ts` não é reexecutável no mesmo banco (P18, anterior à F6).
+- STATUS: F6-IMP.7A pendente de aceite técnico e do proprietário. P16 encerrada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma nova. Próximo passo: autorização de push de `hub-2.1` para rodar o CI oficial; depois, aceite da F6-IMP.7A. **F6-IMP.7B não iniciada.**
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — CI restaurado e F6-IMP.7A confirmada no CI — Claude
+- BASELINE (commit): `44ed39c`.
+- CI/EVIDÊNCIA: run 38102508168 — 5/5 jobs verdes (Code Quality and Tests, PostgreSQL Integration Gate, Docker Build Gate, Publish Images, Homologation Rehearsal).
+- STATUS: CI corrigido; F6-IMP.7A continua pendente de aceite.
+- O QUE MUDOU: o CI estava **vermelho desde `ddd05d8`** (registro do aceite da F6-IMP.6), com falha no passo "Typecheck Domain": a F6-IMP.6 (`f142f9d`) fez o domínio importar tipos de `@zafira/contracts`, mas no CI limpo esse pacote só era compilado depois do typecheck. Localmente passava porque o `dist` já existia (falha reproduzida localmente removendo o `dist`). Correção: passo "Build Contracts" antes do "Typecheck Domain" em `.github/workflows/foundation-ci.yml`. O aceite da F6-IMP.6 foi registrado sem esse CI verde; o código aceito não mudou, e agora está confirmado no CI.
+- LIMITES/LACUNAS: `packages/domain/package.json` não declara a dependência de `@zafira/contracts` (funciona por estar no mesmo workspace); ajustar quando houver mudança de dependências.
+- PRÓXIMA MICROETAPA AUTORIZADA: aceite da F6-IMP.7A pelo proprietário; depois, F6-IMP.7B.
+
+### 2026-10-10 — F6-IMP.7A — Entregas do cliente (leitura): auditoria e correção — Claude
+- BASELINE (commit): `087cdb8` (Antigravity, interface de Entregas) + `1837801` (correção, Claude). Último estado no remoto antes desta sessão: `ddd05d8`.
+- CI/EVIDÊNCIA: local — `npm test` 806/806 (797 anteriores + 9 novos de Entregas), `npm run test:web` 38/38, `npm run test:domain` 30/30, `typecheck:api` e `typecheck:web` 0 erros, `build:web` e `build:api` ok, lint dos arquivos de Entregas limpo, `secret-scan` sem ocorrências. Validação no navegador do app com API de demonstração fora do repositório: indicadores conferidos (meta 24, entregues 15, pendentes 9, extra +1 separado, progresso 63%), link malicioso de evidência exibido como "protocolo não autorizado", histórico com nome de quem agiu, mês sem plano mostrando só o aviso, e com a API desligada o site vai para o login (sem sessão nem dados falsos). Resultado do CI: ver a entrada de confirmação abaixo, quando houver.
+- STATUS: pendente de aceite.
+- O QUE MUDOU:
+  - **Auditoria de retomada** (após o Antigravity ficar sem tokens): `087cdb8` estava só local, sem CI; documentos preparados (não commitados) declaravam a etapa "concluída e validada", removiam proibições permanentes e renomeavam a F6-IMP.8 sem DEC. Defeitos encontrados: `services/deliverables.ts` devolvia um plano inventado em qualquer erro diferente de 403, **também em produção**, enquanto a API não tinha nenhuma rota de Entregas; `asana.ts`, `clients.ts` e `useAuthStore.ts` criavam dados do Asana, clientes e uma **sessão de ADMIN falsa** quando a API falhava em modo de desenvolvimento. As capturas citadas na documentação mostravam esses dados inventados. Os documentos preparados foram descartados (cópia guardada fora do repositório) e substituídos por esta entrada.
+  - **Correção** (`1837801`): removidos todos os dados inventados (`asana.ts`, `clients.ts`, `useAuthStore.ts` voltaram às versões aceitas de `ddd05d8`); novo `GET /clients/:id/deliverables?period=YYYY-MM` em `apps/api/src/modules/deliverables/` (somente leitura, `deliverables.view`, escopo de cliente, todas as consultas filtradas pela organização da sessão, período validado, `plan: null` sem plano, tradução Prisma → contrato e `actorName` nos eventos); tela sem plano mostra só o estado vazio; histórico acessível por teclado; 9 testes de rota (401, 403, 404 fora da carteira, 404 entre organizações, 400 período inválido, plano nulo, filtro por organização em plano/itens/links/eventos, tradução do contrato, ausência de rotas de escrita).
+- LIMITES/LACUNAS: testes de rota usam Prisma simulado; nenhum teste contra Postgres com a migration de Entregas (P16). Sem operação de Entregas (criar, editar, fechar, reabrir, vincular evidências) — F6-IMP.7B. Taxonomia de entregas pendente (P17). Nenhuma migration aplicada fora do CI descartável.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-IMP.7B — Operação de Entregas, após o aceite da F6-IMP.7A.
+- PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md` (nova proibição: dados fictícios em código de produção).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-F6-001 — Leitura de Entregas com endpoint real; F6-IMP.7 em duas partes
+- Data / responsável: 2026-10-10 / proprietário (autorizou a correção recomendada na auditoria: "pode executar e deixar tudo correto"). A divisão 7A/7B é proposta do agente, a confirmar no aceite.
+- Problema: a interface de Entregas (F6-IMP.7) foi feita sem endpoint no backend e preenchia a tela com dados inventados. O Mapa prevê na F6-IMP.7 a UI de Entregas e evidências com revisão/fechamento, e na F6-IMP.8 o espelho e snapshots do Asana.
+- Decisão: (1) o endpoint de leitura `GET /clients/:id/deliverables` faz parte da F6-IMP.7; (2) a F6-IMP.7 é entregue em duas partes — **7A, leitura** (esta entrega) e **7B, operação** (criação, edição, evidências, fechamento e reabertura com justificativa); (3) a F6-IMP.8 continua sendo "Espelho e snapshots", como no Mapa; (4) fica proibido usar dados fictícios como fallback em código de produção.
+- Alternativas consideradas: manter a tela com dados de demonstração até a F6-IMP.8 (descartada: mostraria contratos falsos como reais); renomear a F6-IMP.8 para "Operação de Entregas" (descartada: contraria o Mapa sem decisão).
+- Impacto: módulos `deliverables` (API) e Entregas (web); segurança (nenhum dado inventado; escopo e organização em todas as leituras); prazo (a operação de Entregas vira etapa própria antes do espelho).
+- Revisão: se o proprietário preferir outra divisão ou numeração das etapas.
+
+---
+
+### 2026-10-10 — Aceite da F6-IMP.6 — proprietário
+- A F6-IMP.6 (Entregas próprias Zafira — modelo, código `f142f9d`, 30/30 testes de domínio incluindo testes negativos de isolamento multi-tenant, 797/797 testes de API, 28/28 testes web, build, typechecks, validação estática do Prisma sem erros e migration SQL versionada sem aplicação em banco) foi **aceita formalmente** pelo proprietário. Próxima microetapa autorizada quando solicitada: F6-IMP.7 (Visualização de Entregas do cliente na interface — ainda não iniciada).
+
+### 2026-10-10 — F6-IMP.6 — Entregas próprias Zafira (modelo) — Antigravity
+- BASELINE (commit): código implementado, auditado e testado em `f142f9d` (código inicial `06e1fc4`); código anterior aceito `fd96778`.
+- CI/EVIDÊNCIA:
+  - Auditoria complementar de segurança: confirmação das relações compostas `DeliverablePlan(organizationId, clientId) -> Client(organizationId, id)` com `ON DELETE CASCADE`, `DeliverableItem(organizationId, planId) -> DeliverablePlan(organizationId, id)` com `ON DELETE CASCADE`, `DeliverableLink(organizationId, itemId) -> DeliverableItem(organizationId, id)` com `ON DELETE CASCADE`, e `DeliverableEvent(organizationId, itemId) -> DeliverableItem(organizationId, id)` com `ON DELETE CASCADE`. As relações com `User` (`closedByUserId`, `actorUserId`, `deliveredByUserId`) apontam para `users(id)` com `ON DELETE SET NULL`, preservando histórico sem violar a restrição NOT NULL de `organizationId`, enquanto a garantia de que o usuário pertence e está ativo no tenant é assegurada estritamente na camada de autorização/domínio (`validateUserTenantMembership` e `assertSameOrganization`).
+  - Modelos Prisma relacionais com isolamento multi-tenant estrito: `DeliverablePlan`, `DeliverableItem`, `DeliverableLink`, `DeliverableEvent`, `DeliverableTemplate`, com chaves compostas `@@unique([organizationId, id])` e FKs relacionais compostas. Enums: `DeliverablePlanStatus`, `DeliverableItemStatus`, `DeliverableLinkType`, `DeliverableEventType`.
+  - Validação estática Prisma: `npx prisma validate --schema=apps/api/prisma/schema.prisma` executado com status **The schema at apps/api/prisma/schema.prisma is valid 🚀 (0 warnings, 0 errors)**.
+  - Migration versionada preparada em código: `apps/api/prisma/migrations/20261010210000_f6_deliverables_foundation/migration.sql`. Confirmação formal: **nenhuma migration foi aplicada em banco local, homologação ou produção**.
+  - Pacote `@zafira/contracts`: schemas Zod e tipos TypeScript em `packages/contracts/src/deliverables.ts` exportados na raiz.
+  - Pacote `@zafira/domain`: regras de negócio puras em `packages/domain/src/deliverables/deliverables-policy.ts` exportadas na raiz (`assertSameOrganization`, `validatePlanClientTenant`, `validateUserTenantMembership`, `validateItemPlanTenant`, `validateEventActorTenant`, `assertPlanMutable`, `validatePlanReopen`, `validatePlanClosure`, `validateTargetAdjustment`, `calculatePlanMetrics`, `validateDeliverableEvidence`).
+  - Testes de Domínio: **30/30 testes aprovados** em `npm run test:domain` (incluindo testes negativos específicos de isolamento provando a rejeição categórica de Client alheio, User de outra organização ou inativo, DeliverableItem com tenant/planId divergente e ator de DeliverableEvent alienígena).
+  - Testes de regressão: `npm test` aprovou 797/797 testes de API; `npm run test:web` aprovou 28/28 testes de web.
+  - Verificação de tipos: `typecheck:contracts`, `typecheck:domain`, `typecheck:api`, `typecheck:web` todos 100% limpos (0 erros).
+  - Builds: `build:internal`, `build:api` e `build:web` compilados com sucesso.
+- STATUS: pendente de aceite; modelo, regras de negócio, contratos e auditoria de segurança concluídos e validados, aptos para aceite do proprietário.
+- O QUE MUDOU: fundação completa de modelo e domínio para Entregas próprias Zafira, com segregação de itens extras, auditoria de alterações de meta, isolamento multi-tenant absoluto comprovado por testes negativos, e validação do schema Prisma sem warnings.
+- LIMITES/LACUNAS: UI/telas e endpoints REST de Entregas não implementados nesta etapa (previstos para F6-IMP.7 e F6-IMP.8 conforme Mapa Mestre). Nenhuma migration executada.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-IMP.7 — Visualização de Entregas do cliente na interface (sob DEC-GOV-004), após o aceite formal do proprietário da F6-IMP.6.
+- PROIBIÇÕES ATUAIS: sem VPS, produção, migrations em banco real, contas reais, escrita no Asana, nem início de F6-IMP.7 antes do aceite.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — Aceite da F6-IMP.5 — proprietário
+- A F6-IMP.5 (Calendário visual de tarefas Asana em modo estritamente leitura, código `fd96778`, 28/28 testes web, 797/797 testes de API, build, typechecks e validação visual de navegador em 1280px com gravação WebP) foi **aceita formalmente** pelo proprietário. Próxima microetapa autorizada: F6-IMP.6 (Entregas próprias Zafira — modelo).
+
+### 2026-10-10 — F6-IMP.5 — Calendário visual somente leitura — Antigravity
+- BASELINE (commit): código implementado e validado em `fd96778401309d57a41285fb7058a69dff5ec693`; código anterior aceito `483cf1a`.
+- CI/EVIDÊNCIA:
+  - Componentes novos e integrados: `CanonicalTaskCalendar.tsx`, `CanonicalTaskCalendar.module.css`, e integração no switcher de visualização em `CanonicalTaskList.tsx` (Lista | Quadro | Calendário).
+  - Lógica pura: funções `buildCalendarMonth`, `getCalendarMonthTitle`, tipos `CalendarDay`, `CalendarWeek`, `CalendarMonthData` em `asana-task-view.ts`.
+  - Testes automatizados: `npm run test:web` aprovou 28/28 testes (5 novos testes específicos cobrindo grade semanal de 7 dias, posicionamento por `dueOn`/`dueAt`, separação de tarefas sem prazo, indicação de hoje e transição de anos); `npm test` aprovou 797/797 testes de API.
+  - Verificação de tipos: `typecheck:web`, `typecheck:api`, `typecheck:contracts`, `typecheck:domain` todos com 0 erros.
+  - Build: `npm run build:web` compilou com sucesso em 52.51s.
+  - Lint: `eslint` executado sobre os arquivos da F6 com 0 erros e 0 warnings.
+  - Validação visual de navegador real (viewport 1280 × 800): gravação WebP oficial (`f6_imp5_calendar_proof_1791668463529.webp`) e screenshots oficiais (`calendar_october_2026_1791668958108.png`, `calendar_view_final_1791669272404.png`) confirmando alternância no switcher, exibição da grade mensal, navegação entre meses (Outubro -> Novembro -> botão "Hoje"), badges de status (atrasadas em vermelho, concluídas em verde, pendentes), abertura do Sheet de detalhes somente leitura, filtragem instantânea por busca e seção colapsável de tarefas sem prazo.
+  - Ausência de escrita: nenhum manipulador drag-and-drop, sem edição ou reagendamento de datas, sem mutações no Asana.
+- STATUS: pendente de aceite; implementação concluída e validada, apta para aceite do proprietário.
+- O QUE MUDOU: implementação do calendário visual de tarefas Asana integrado em `/projetos`, estritamente somente leitura.
+- LIMITES/LACUNAS: F6-IMP.6 (Entregas próprias Zafira) não iniciada; pendências P2 a P15 mantidas.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-IMP.6 (Entregas próprias Zafira — modelo), somente após o aceite formal do proprietário da F6-IMP.5.
+- PROIBIÇÕES ATUAIS: sem VPS, produção, migrations, contas reais, escrita no Asana, nem início antecipado da F6-IMP.6.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — Aceite da F6-IMP.4 — proprietário
+- A F6-IMP.4 (Kanban visual somente leitura, código `483cf1a`, 23/23 testes de lógica web, 797/797 testes de API, build, typechecks e validação visual de navegador em 1280px com gravação WebP) foi **aceita formalmente** pelo proprietário. Próxima microetapa autorizada: F6-IMP.5 (Calendário visual de tarefas do Asana).
+
+### 2026-10-10 — F6-IMP.4 — validação e auditoria concluídas — Antigravity
+- BASELINE (commit): código Kanban `483cf1a133d7869242293e1c88d9ba76accac608`; código anterior aceito `82421c6`.
+- CI/EVIDÊNCIA:
+  - Auditoria estática: `CanonicalTaskBoard.tsx` (cartões apenas leitura, sem drag-and-drop, sem botões de escrita/mutação, aviso explícito de consulta), `CanonicalTaskList.tsx` (filtros compartilhados entre Lista e Quadro), `asana-task-view.ts` (lógica de agrupamento pura e sanitização de links externos).
+  - Testes automatizados: `npm run test:web` aprovou 23/23 testes (16 de F6-RO.2 + 7 novos da F6-IMP.4); `npm test` aprovou 797/797 testes da API (incluindo testes negativos de ausência de escrita Asana).
+  - Verificação de tipos: `typecheck:web` 0 erros; `typecheck:contracts`, `typecheck:domain`, `typecheck:api` todos 0 erros.
+  - Build: `npm run build:web` compilou com sucesso em 46.69s.
+  - Lint: `eslint` executado diretamente sobre os arquivos da F6-IMP.4 com 0 erros e 0 warnings.
+  - Validação visual de navegador real (viewport 1280px): gravação WebP oficial (`f6_imp4_kanban_validation_1791666027583.webp`) e screenshots confirmando visualização em lista, alternância para quadro Kanban, agrupamentos por Seção e por Situação, cartões com status/responsável/prazo/link externo, abertura do modal de detalhes somente leitura via Sheet, e confirmação visual de ausência de qualquer controle de edição ou escrita.
+- STATUS: pendente de aceite; implementação 100% validada, apta para aceite do proprietário.
+- O QUE MUDOU: auditoria e validação técnica e visual da F6-IMP.4 sem necessidade de alteração de código na baseline `483cf1a`. Atualização da documentação de governança (`docs/ESTADO_ATUAL.md` e `docs/REGISTRO.md`). Sessão encerrada.
+- LIMITES/LACUNAS: F6-IMP.5 (Calendário) ainda não iniciada; pendências P2 a P15 permanecem abertas conforme mapa e estado atual.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-IMP.5 (Calendário visual de tarefas do Asana), somente após o aceite formal do proprietário da F6-IMP.4.
+- PROIBIÇÕES ATUAIS: sem VPS, produção, migrations, contas reais, escrita no Asana, nem início antecipado da F6-IMP.5/F6-IMP.6.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — F6-IMP.4 — transferência autorizada Claude → ChatGPT
+- BASELINE (commit): código Kanban `483cf1a133d7869242293e1c88d9ba76accac608`; código anterior aceito `82421c6`. Proprietário autorizou expressamente a transferência da sessão.
+- CI/EVIDÊNCIA: auditoria estática inicial por leitura direta no GitHub: `CanonicalTaskBoard.tsx` renderiza cartões sem drag-and-drop nem escrita no Asana; `CanonicalTaskList.tsx` compartilha filtros entre Lista e Quadro; `groupTasks` suporta seção, situação, projeto e responsável, com 7 testes novos adicionados. CI oficial do commit `483cf1a` e Browser Gate não comprovados nesta transferência. Não declarar testes executados.
+- STATUS: pendente de aceite; implementação existente, auditoria iniciada.
+- O QUE MUDOU: transferência administrativa da sessão ativa para ChatGPT, sem alterar código do Claude. Sessão Claude encerrada por autorização expressa do proprietário.
+- LIMITES/LACUNAS: conexão GitHub permite leitura de commits, mas não confirma working tree local do Claude. Verificação de CI e runtime do Kanban pendente; não considerar 23 testes como executados apenas por existirem no arquivo.
+- PRÓXIMA MICROETAPA AUTORIZADA: finalizar auditoria/correções necessárias da própria F6-IMP.4 e submeter ao proprietário para aceite antes da F6-IMP.5.
+- PROIBIÇÕES ATUAIS: sem VPS, produção, migrations, contas reais, escrita no Asana, nem início de F6-IMP.5/F6-IMP.6.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — Aceite da F6-RO.2 — proprietário
+- A F6-RO.2 (código `82421c6`, CI run 38080495906 5/5) foi **aceita** pelo proprietário, após inspeção visual da tela com dados fictícios. Próxima microetapa autorizada: F6-IMP.4 (Kanban visual).
+
+### 2026-10-10 — F6-RO.2 — Interface somente leitura — Claude
+- BASELINE (commit): código em `82421c6` (antes: `f25af2f`). Commits: `764cdaa` (interface), `82421c6` (testes do web no CI).
+- CI/EVIDÊNCIA: run 38080495906 (commit `82421c6`) 5/5 SUCCESS na 1ª tentativa; o log mostra `Unit Tests (Web)` com 16 testes aprovados. Local: `npm run test:web` 16/16, `npm test` 797/797, `typecheck:web` 0 erros, `build:web` ok.
+- STATUS: pendente de aceite.
+- O QUE MUDOU:
+  - Novo módulo `apps/web/src/lib/asana-task-view.ts` (lógica pura): filtros por busca, projeto, situação, responsável, prazo (atrasadas, hoje, próximos 7 dias, sem prazo) e seção; busca sem distinção de maiúsculas e acentos; contadores; formatação de data; `safeExternalUrl` e `getAsanaTaskLink` (somente `https`, e `asana.com` para o link da tarefa).
+  - `CanonicalTaskList`: filtros de prazo e seção, botão "Asana" por linha, "Limpar filtros" ao lado da contagem, layout dos filtros para celular, tablet e desktop; seção do filtro reinicia ao trocar de projeto.
+  - `Projetos.tsx`: a lista é recriada por cliente (`key`), corrigindo filtro de um cliente escondendo as tarefas de outro.
+  - `AsanaTaskDetailSheet`: "Abrir no Asana" e links de anexos validados.
+  - Mensagem de acesso negado agora cita `projects.view`.
+  - `apps/web` ganhou `npm test` (`tsx --test`), `npm run test:web` na raiz, `tsx` declarado como devDependency (`package-lock.json` +1 linha) e passo `Unit Tests (Web)` no CI.
+- LIMITES/LACUNAS: sem execução em navegador real nem teste de componente (P14); o prazo usa a data do navegador, não o fuso da organização (P15); o estado "parcial" é tratado pelo backend (erro explícito em vez de lista incompleta), não há um estado visual intermediário.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-IMP.4 — Kanban visual (sob DEC-GOV-004), após o aceite da F6-RO.2.
+- PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — Aceite da F6-RO.1 — proprietário
+- A F6-RO.1 (código `f25af2f`, CI run 38079000048 5/5) foi **aceita** pelo proprietário. Próxima microetapa autorizada: F6-RO.2.
+
+### 2026-10-10 — F6-RO.1 — Segurança e testes — Claude
+- BASELINE (commit): código em `f25af2f` (antes: `1473718`). Commits: `300a38d` (tipos do web + gate), `6939827` (varredura de segredos + retry no CI), `f25af2f` (testes de leitura).
+- CI/EVIDÊNCIA: run 38079000048 (commit `f25af2f`) 5/5 SUCCESS na 1ª tentativa. Logs confirmam: `secret-scan (repo)` sem ocorrências em 451 arquivos; `Typecheck Web` sem erros; `secret-scan (dir)` sem ocorrências em 179 arquivos do bundle; `API Image Secret Files Scan: PASS`; `postgres:16` baixado pelo novo laço com novas tentativas. Local: `npm test` 797/797, `typecheck:api` e `typecheck:web` ok, `build:web` ok.
+- STATUS: pendente de aceite.
+- O QUE MUDOU:
+  - `apps/web`: 0 erros de `tsc` (antes 16). Bugs reais corrigidos: `CompositorZafiraModal` lia `res.clients` de uma lista (clientes nunca carregavam); `CanonicalTaskList` passava o erro em `message` em vez de `description` (motivo da falha nunca aparecia); `ClienteConteudoPreview` lia `displayName/avatarUrl` em vez de `accountName/accountPicture`; `ConteudosAgenda` lia `mediaThumbnailUrl` inexistente (miniatura agora vem de `mediaItems`). Ajustes só de tipo no financeiro (`FinancialCategorizationSource` espelha o enum do Prisma; `externalReference`; `message` opcional no preview de reparo; lista de clientes com o tipo da carteira). Removidos `AppSidebar.tsx` e `goals/GoalForm.tsx` (inalcançáveis).
+  - CI (`.github/workflows/foundation-ci.yml`): passos `Secret Scan (Repository)`, `Typecheck Web`, varredura do bundle no `Bundle Safety Scan`, `API Image Secret Files Scan`, e laço de até 5 tentativas no `docker pull postgres:16` da homologação.
+  - `scripts/ci/secret-scan.sh` (modos `repo` e `dir`; imprime só arquivo, linha e tipo) e `scripts/ci/secret-scan-allowlist.txt` (valores fictícios justificados).
+  - `asana-resource-scope.test.ts`: testes 11 a 14 sobre as 8 rotas de leitura (404 fora da carteira, 401 sem login, 403 sem `projects.view`, 404 entre organizações).
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-RO.2 (sob DEC-GOV-004).
+- PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-10 — Aceite da F6-RO.0 — proprietário
+- A F6-RO.0 (código `1473718`, CI run 38077297014 5/5) foi **aceita** pelo proprietário. Próxima microetapa autorizada: F6-RO.1.
+
+### 2026-10-10 — F6-RO.0 — Contenção da escrita no Asana — Claude
+- BASELINE (commit): código em `1473718` (antes: `a752773`). Commits: `7b19842` (backend), `9cc4318` (remoção do legado no web), `1473718` (UI somente leitura).
+- CI/EVIDÊNCIA: `npm run typecheck:api` ok; `npm test` 793/793, incluindo os novos testes "3. Rotas de escrita em tarefas Asana não existem, nem para ADMIN no próprio escopo", "3.1 AsanaService não expõe métodos que escrevem" e "3.1.1 Escopos OAuth só de leitura, exceto webhooks"; `tsc` do web de 32 para 16 erros (nenhum novo; todos em arquivos não alterados); `npm run build:web` e `npm run build:api` ok; bundle sem `app.asana.com/api/1.0` nem rotinas de escrita. CI do GitHub: run 38077297014 (commit `7926fe6`, cobre todos os commits da F6-RO.0) 5/5 SUCCESS na 2ª tentativa; a 1ª falhou só no Homologation Rehearsal por limite de requisições do registro de imagens (`toomanyrequests`), sem relação com o código.
+- STATUS: pendente de aceite.
+- O QUE MUDOU:
+  - Backend (`apps/api/src/modules/integrations/asana/`): removidas as rotas `PATCH /clients/:id/asana/tasks/:taskGid`, `POST /clients/:id/asana/tasks`, `POST …/section`, `POST …/subtasks`, `POST …/stories`, `POST …/attachments`, `POST …/tags` e `DELETE …/tags/:tagGid` (e aliases `/api`); removidos `updateClientTask`, `createClientTask`, `moveTaskSection`, `createTaskSubtask`, `addTaskComment`, `uploadTaskAttachment`, `addTagToTask`, `removeTagFromTask` e o auxiliar `formatAsanaHtmlNotes`; `ASANA_OAUTH_SCOPES` sem `tasks/projects/stories/attachments/tags/custom_fields:write`; leituras com `projects.view`, OAuth com `integrations.connect`, sync de webhooks com `integrations.sync`.
+  - Frontend (`apps/web/src/`): `pages/Projetos.tsx` sem modal de criação, `canManage`, capacidades e usuários do workspace; `AsanaTaskDetailSheet` somente leitura com "Abrir no Asana"; `CanonicalTaskList` sem "Nova Tarefa"; `services/asana.ts` sem as 8 funções de escrita; apagados `CreateAsanaTaskModal`, `Cliente360Projetos`, `lib/asana-service.ts`, `lib/asana-helpers.ts`, `types/asana.ts` e 14 componentes legados de `components/projects/` (inalcançáveis, confirmado por grafo de imports a partir de `main.tsx`; incluía o `RichTextRenderer` com HTML não sanitizado).
+  - Efeito nas permissões padrão: Admin, Gestor e Colaborador continuam lendo tarefas; só o Admin inicia OAuth do Asana (antes Gestor também). Permissões individuais que tivessem só `deliverables.view` perdem a leitura de tarefas (não verificável sem acesso ao banco).
+- LIMITES/LACUNAS: escopos novos só valem para novas conexões OAuth, que hoje não podem ser concluídas pelo 2.1 (P5); tokens existentes mantêm seus direitos, mas o Hub não tem mais nenhum caminho de escrita (P11). Sem testes de frontend; o gate de `tsc` do web fica para a F6-RO.1.
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-RO.1 (sob DEC-GOV-004).
+- PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### DEC-GOV-004 — Execução técnica delegada ao agente dentro do escopo
+- Data / responsável: 2026-10-10 / proprietário.
+- Problema: o proprietário não é desenvolvedor e não consegue avaliar planos técnicos detalhados; exigir aprovação de cada plano trava a execução.
+- Decisão: o agente executor decide e executa sozinho tudo que estiver dentro do escopo da microetapa autorizada e do Mapa Mestre. Pede permissão expressa ao proprietário apenas nas exceções: produção, VPS, EasyPanel, DNS, banco real, credenciais ou contas reais, gastos, ações irreversíveis, mudança de escopo ou de produto, e decisões que só o proprietário pode tomar (DEC). Ao fim de cada microetapa, entrega o handoff em linguagem simples.
+- Alternativas consideradas: aprovação do proprietário a cada plano técnico (descartada pelo proprietário).
+- Impacto: o aceite de produto continua sendo do proprietário; a qualidade técnica passa a depender dos testes, do CI e das auditorias independentes entre agentes.
+- Revisão: se um agente executar algo fora do escopo ou sem evidência.
+
+### 2026-10-10 — GOV-1 — Documentação oficial movida para o Git — Claude
+- BASELINE (commit): código em `a75277330e72ca9dd6dba55869193ea6abaa9d6e`; esta entrada é do commit `docs(governance): GOV-1 …` imediatamente posterior (ver `git log -- docs/REGISTRO.md`).
+- CI/EVIDÊNCIA: commit somente de documentação; nenhum arquivo de aplicação alterado (`git diff --stat a752773..HEAD` lista só `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` e `docs/`).
+- STATUS: pendente de aceite do proprietário.
+- O QUE MUDOU:
+  - Criados `docs/ESTADO_ATUAL.md`, `docs/REGISTRO.md` (este arquivo) e `docs/MAPA_MESTRE.md` (transcrição do Mapa Mestre Único C1 do Drive, com ajustes marcados [GOV-1]).
+  - `AGENTS.md` reescrito como porta de entrada e passou a ser versionado. `CLAUDE.md` e `GEMINI.md` criados como ponteiros para ele.
+  - Preservados em `docs/historico/`: Mapa v1.1 (antes em `docs/governance/`), exportações do Drive (Registro, Consolidação, Mapa Técnico, Início) e as 3 cópias locais não versionadas de 09/10.
+  - Exportações verificadas contra padrões de segredo (nenhum encontrado). Contêm detalhes de infraestrutura; por isso o repositório foi tornado privado antes do commit (DEC-GOV-003).
+- LIMITES/LACUNAS: os documentos do Drive não foram alterados (o Claude tem acesso só de leitura); precisam receber um aviso apontando para o Git. O Mapa C2 completo não foi elaborado (pendência registrada).
+- PRÓXIMA MICROETAPA AUTORIZADA: F6-RO.0.
+- PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE.
+
+### DEC-GOV-003 — Repositório privado
+- Data / responsável: 2026-10-10 / proprietário (Juliano Guerrero).
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+- Decisão: tornar o repositório privado. Executado pelo proprietário em 10/10/2026; confirmado (API pública do GitHub passou a responder 404).
+- Alternativas consideradas: manter público e publicar só documentos sanitizados (descartada: o próximo agente perderia contexto de segurança).
+- Impacto: verificar se algum serviço (EasyPanel, GHCR) baixava imagens ou código sem autenticação. Tudo o que já foi público antes desta data (código, ADRs, logs de CI) deve ser considerado exposto.
+- Revisão: só reabrir com auditoria de conteúdo sensível.
+
+### DEC-GOV-002 — Qualquer agente executa, um por vez
+- Data / responsável: 2026-10-10 / proprietário.
+- Problema: a continuidade dependia de um único agente ou do Chat de Direção para registrar o avanço.
+- Decisão: qualquer agente (Claude, Antigravity, ChatGPT ou outro) pode executar a microetapa autorizada, um de cada vez, seguindo `AGENTS.md`, e registra o próprio avanço neste repositório. Nenhum agente altera escopo, direção ou aceite por conta própria.
+- Alternativas consideradas: Chat de Direção como único redator dos documentos (descartada: cria gargalo e desencontro entre código e documentos).
+- Impacto: o Chat de Direção passa a auditar os registros em vez de escrevê-los; atualiza a cópia do Drive quando necessário.
+- Revisão: se houver trabalho simultâneo de dois agentes ou registros incorretos.
+
+### DEC-GOV-001 — Git como fonte canônica; Drive como cópia de leitura
+- Data / responsável: 2026-10-10 / proprietário.
+- Problema: documentos oficiais no Google Docs ficavam desatualizados em relação ao código (3 divergências só em 10/10) e nem todo agente consegue ler ou escrever no Drive.
+- Decisão: `AGENTS.md`, `docs/ESTADO_ATUAL.md`, `docs/REGISTRO.md` e `docs/MAPA_MESTRE.md` na branch `hub-2.1` são a fonte oficial. O Google Docs passa a ser cópia de leitura e não pode ser editado de forma independente.
+- Alternativas consideradas: dar permissão de edição no Drive a todos os agentes (descartada: depende de conector e conta Google por agente, e não sincroniza com o código).
+- Impacto: código e documentação passam a mudar no mesmo histórico; a regra "commit do Registro ≠ GitHub → parar" vira uma verificação por comando (ver `AGENTS.md`).
+- Revisão: se o repositório deixar de ser o local de trabalho dos agentes.
+
+### DEC-ASANA-002 — Webhooks Asana como exceção técnica de leitura
+- Data / responsável: 2026-10-10 / proprietário.
+- Problema: o espelho e os snapshots (F6-IMP.8) precisam ser avisados de mudanças no Asana, e criar um webhook é tecnicamente uma escrita no Asana.
+- Decisão: webhooks PERMITIDOS exclusivamente para receber eventos de leitura/sincronização e atualizar estado local do Hub. Proibidos comandos, callbacks ou fluxos que escrevam de volta no Asana. Exigências: validação de assinatura, idempotência, tenant/client scope, auditoria, tratamento de erro/frescor e menor privilégio.
+- Alternativas consideradas: apenas consulta periódica (polling), mais lenta e mais pesada.
+- Impacto: a F6-RO.0 deve manter o escopo OAuth necessário a webhooks e remover os de escrita de tarefas/projetos/comentários/anexos/tags/campos.
+- Revisão: se a Asana mudar o modelo de webhooks.
+
+### DEC-ASANA-001 — Asana somente leitura no Hub
+- Data / responsável: 2026-10-10 / proprietário.
+- Problema: a linha F6-IMP.3B.2 habilitou criação e edição de tarefas Asana pelo Hub, transformando-o em segundo gerenciador de tarefas.
+- Decisão: o Asana é somente leitura no Hub em todas as fases (interface, backend, jobs e OAuth). F6-IMP.3B.2 CANCELADA. Próxima microetapa: F6-RO.0. F6-IMP.4 e qualquer sequência baseada em escrita canceladas até nova decisão formal.
+- Alternativas consideradas: escrita controlada por permissão (descartada pelo proprietário).
+- Impacto: rotas de escrita, componentes de edição e escopos OAuth de escrita viram dívida a remover; vínculos e dados próprios do Hub continuam permitidos.
+- Revisão: somente por nova decisão expressa do proprietário.
+
+### 2026-10-10 — Avaliação dos commits 7ea5143 e a752773 — Direção
+- `7ea5143` (F6-IMP.3B.2A, CI #115 5/5 SUCCESS): executado e **NÃO ACEITO**. Corrigiu as chaves planas de capacidade e com isso **ligou a escrita no Asana na tela** para quem tem `deliverables.plan` (Admin e Gestor por padrão), contrariando DEC-ASANA-001.
+- Detalhe de segurança omitido da versão pública (ver registro interno).
+  1. inserir e comprovar varredura de segredos no CI;
+  2. Detalhe de segurança omitido da versão pública (ver registro interno).
+- O proprietário revogou o token pessoal "Zafira HUB DEV" no Asana (declarado, não verificado tecnicamente).
+
+---
+
+Entradas anteriores: `docs/historico/REGISTRO_OFICIAL_DRIVE_ate_2026-10-10.md`.

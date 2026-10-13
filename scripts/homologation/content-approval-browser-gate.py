@@ -1,0 +1,440 @@
+#!/usr/bin/env python3
+"""
+Zafira Hub 2.1 - F8 Conteudo e Aprovacao do cliente por link - Browser Runtime Gate (Homologation Rehearsal)
+Chromium autenticado (Playwright) contra as imagens publicadas e o banco de ensaio. NENHUM BrightBean, Asana ou
+cliente real; arquivos sao bytes de teste com assinatura valida; pessoas e clientes ficticios.
+Cobre a F8-1 (cadastro e upload) e a F8-2 (link seguro, pagina publica, decisao, nova versao, revogacao).
+
+Cenarios:
+  A  Capacidades e menu
+  B  Cadastro e upload pela interface (tipo real, extensao enganosa recusada, previa)
+  C  Permissoes: quem nao tem envio ao cliente nao gera link
+  D  Geracao do link (exibido uma vez) e congelamento da versao
+  E  Pagina publica sem login: sem dados internos, sem terceiros, token fora de URLs, cabecalhos
+  F  Decisao: validacoes, N1 declarado, decisao unica, resultado persistente
+  G  Acompanhamento interno (status, decisao, identificacao declarada)
+  H  Alteracao solicitada: nova versao, novo link, aprovacao
+  I  Reemissao, revogacao e expiracao: respostas identicas
+  J  Isolamento da Org B
+  K  Responsividade 390 px
+"""
+
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
+
+from playwright.sync_api import Browser, Page, sync_playwright
+
+CLIENT_1 = "f7f7f7f7-c1c1-4c1c-8c1c-000000000001"
+PNG_1X1 = bytes.fromhex(
+    "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8cf"
+    "c0f01f0005000201a1a9b52a0000000049454e44ae426082"
+)
+
+
+def env_required(name: str) -> str:
+    val = os.environ.get(name, "").strip()
+    if not val:
+        print(f"[-] ERRO: variavel obrigatoria '{name}' ausente.", file=sys.stderr)
+        sys.exit(1)
+    return val
+
+
+def unique_png(seed: int) -> bytes:
+    """PNG valido e unico por teste (bytes extras apos o IEND nao invalidam a assinatura)."""
+    return PNG_1X1 + (b"zafira-gate-%d" % seed)
+
+
+class ContentGate:
+    def __init__(self) -> None:
+        self.base = os.environ.get("WEB_BASE_URL", "http://127.0.0.1:8083").rstrip("/")
+        self.api_prefix = os.environ.get("API_PREFIX", "/hub-api")
+        self.email_admin = os.environ.get("GATE_EMAIL_A", "gate-a@zafira.invalid")
+        self.email_b = os.environ.get("GATE_EMAIL_B", "gate-b@zafira.invalid")
+        self.email_member = "gate-member-a@zafira.invalid"
+        self.password_a = env_required("GATE_PASSWORD_A")
+        self.password_b = env_required("GATE_PASSWORD_B")
+        self.api_container = os.environ.get("API_CONTAINER_NAME", "api-f45-browser")
+        self.artifacts = pathlib.Path(os.environ.get("ARTIFACT_DIR", "artifacts/content-browser"))
+        self.artifacts.mkdir(parents=True, exist_ok=True)
+        self.passed: List[str] = []
+        self.failed: List[str] = []
+        self.blockers: List[str] = []
+        self.scenarios: List[str] = []
+        self.screenshots: List[str] = []
+        self.console_errors: List[str] = []
+        self.seed = int(time.time())
+
+    # ------------------------------------------------------------------ registro
+    def ok(self, scenario: str, what: str) -> None:
+        self.passed.append(f"[{scenario}] {what}")
+        print(f"[+] PASS [{scenario}] {what}")
+
+    def fail(self, scenario: str, what: str, why: str) -> None:
+        item = f"[{scenario}] {what}: {why}"
+        self.failed.append(item)
+        print(f"[-] FAIL {item}", file=sys.stderr)
+
+    def check(self, scenario: str, what: str, condition: bool, why: str = "condicao falsa") -> None:
+        (self.ok(scenario, what) if condition else self.fail(scenario, what, why))
+
+    def shot(self, page: Page, name: str) -> None:
+        page.screenshot(path=str(self.artifacts / name), full_page=True)
+        self.screenshots.append(name)
+
+    def listen(self, page: Page) -> None:
+        def on_console(msg: Any) -> None:
+            if msg.type == "error":
+                self.console_errors.append(msg.text)
+                if any(k in msg.text.lower() for k in ["uncaught", "minified react error"]):
+                    self.blockers.append(f"Erro critico no console: {msg.text}")
+
+        def on_page_error(err: Any) -> None:
+            self.blockers.append(f"Excecao nao tratada na pagina: {err}")
+
+        page.on("console", on_console)
+        page.on("pageerror", on_page_error)
+
+    def login(self, browser: Browser, email: str, password: str, scenario: str, width: int = 1280, height: int = 900) -> Page:
+        last: Optional[Exception] = None
+        for attempt in range(3):
+            context = browser.new_context(viewport={"width": width, "height": height}, ignore_https_errors=True)
+            page = context.new_page()
+            self.listen(page)
+            try:
+                page.goto(f"{self.base}/login", wait_until="networkidle", timeout=30000)
+                page.fill("#email", email)
+                page.fill("#password", password)
+                with page.expect_response(lambda r: "/api/v1/auth/login" in r.url and r.status == 200, timeout=15000):
+                    page.click('button[type="submit"]')
+                page.wait_for_url(lambda u: "/login" not in u, timeout=15000)
+                self.ok(scenario, f"login {email}")
+                return page
+            except Exception as exc:  # noqa: BLE001
+                last = exc
+                context.close()
+                print(f"[*] login {email}: tentativa {attempt + 1} falhou ({type(exc).__name__})", file=sys.stderr)
+                time.sleep(65)
+        raise RuntimeError(f"login falhou apos 3 tentativas: {last}")
+
+    def api(self, page: Page, path: str, method: str = "GET", body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        return page.evaluate(
+            """async ([prefix, path, method, body]) => {
+                const res = await fetch(prefix + path, { method, credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                  body: method === 'GET' ? undefined : JSON.stringify(body || {}) });
+                let data = null; try { data = await res.json(); } catch (e) {}
+                return { status: res.status, body: data, text: JSON.stringify(data) };
+            }""",
+            [self.api_prefix, path, method, body],
+        )
+
+    def goto(self, page: Page, path: str) -> None:
+        page.goto(f"{self.base}{path}", wait_until="networkidle", timeout=30000)
+
+    def public_post(self, path: str, body: Dict[str, Any]) -> Dict[str, Any]:
+        req = urllib.request.Request(
+            f"{self.base}{self.api_prefix}{path}", data=json.dumps(body).encode(), method="POST", headers={"Content-Type": "application/json"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return {"status": r.status, "headers": {k.lower(): v for k, v in r.headers.items()}, "text": r.read().decode()}
+        except urllib.error.HTTPError as e:
+            return {"status": e.code, "headers": {k.lower(): v for k, v in e.headers.items()}, "text": e.read().decode()}
+
+    def db_exec(self, js: str) -> str:
+        proc = subprocess.run(
+            ["docker", "exec", "-w", "/app/apps/api", self.api_container, "node", "-e",
+             "const {PrismaClient}=require('@prisma/client');const p=new PrismaClient();(async()=>{" + js
+             + "})().then((r)=>{console.log(JSON.stringify(r));return p.$disconnect();}).catch((e)=>{console.error(String(e));process.exit(1);})"],
+            capture_output=True, text=True,
+        )
+        return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
+
+    # ------------------------------------------------------------------ helpers de tela
+    def new_content(self, page: Page, title: str, caption: str) -> str:
+        self.goto(page, "/conteudo")
+        page.get_by_test_id("new-content").click()
+        page.locator("#new-client").select_option(label="F7 Gate Cliente 1")
+        page.locator("#new-title").fill(title)
+        page.locator('input[name="new-format"][value="FEED_IMAGE"]').check()
+        page.locator("#new-caption").fill(caption)
+        page.get_by_test_id("save-content").click()
+        page.wait_for_url(re.compile(r".*/conteudo/[0-9a-f-]{36}$"), timeout=20000)
+        return page.url.rsplit("/", 1)[-1]
+
+    def upload_png(self, page: Page, seed: int, name: str = "arte-final.png") -> None:
+        page.get_by_test_id("media-list").count()
+        page.set_input_files('[data-testid="file-input"]', files=[{"name": name, "mimeType": "image/png", "buffer": unique_png(seed)}])
+
+    def generate_link(self, page: Page) -> str:
+        page.get_by_test_id("create-approval-link").click()
+        field = page.get_by_test_id("approval-link-url")
+        field.wait_for(timeout=15000)
+        return field.input_value()
+
+    def open_public(self, browser: Browser, url: str, width: int = 1280) -> Page:
+        context = browser.new_context(viewport={"width": width, "height": 900}, ignore_https_errors=True)
+        page = context.new_page()
+        self.listen(page)
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        return page
+
+    # ------------------------------------------------------------------ execucao
+    def run(self) -> int:
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+                try:
+                    self.suite(browser)
+                finally:
+                    browser.close()
+        except Exception as exc:  # noqa: BLE001
+            self.blockers.append(f"Excecao fatal: {type(exc).__name__}: {exc}")
+
+        success = not self.failed and not self.blockers
+        report = {
+            "gitSha": os.environ.get("GITHUB_SHA", "local"),
+            "decision": "F8 CONTENT APPROVAL GATE PASS" if success else "F8 CONTENT APPROVAL GATE FAIL",
+            "scenariosExecuted": self.scenarios,
+            "assertionsPassedCount": len(self.passed),
+            "assertionsPassed": self.passed,
+            "assertionsFailedCount": len(self.failed),
+            "assertionsFailed": self.failed,
+            "blockers": self.blockers,
+            "screenshots": self.screenshots,
+            "consoleErrorsCount": len(self.console_errors),
+        }
+        (self.artifacts / "content-browser-report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+        print(json.dumps({k: report[k] for k in ("decision", "assertionsPassedCount", "assertionsFailedCount")}, ensure_ascii=False))
+        for b in self.blockers:
+            print(f"[-] BLOCKER: {b}", file=sys.stderr)
+        for f in self.failed:
+            print(f"[-] FAILED: {f}", file=sys.stderr)
+        return 0 if success else 1
+
+    # ------------------------------------------------------------------ suite
+    def suite(self, browser: Browser) -> None:
+        title1 = f"Gate F8 Peca interna {self.seed}"
+        caption1 = "Legenda publica de teste do gate F8"
+
+        # A ---------------------------------------------------------------
+        self.scenarios.append("A - Capacidades e menu")
+        admin = self.login(browser, self.email_admin, self.password_a, "A")
+        caps = (self.api(admin, "/api/v1/auth/capabilities").get("body") or {}).get("permissions", {})
+        self.check("A", "administrador: view, create e send_to_client", caps.get("content.view") is True and caps.get("content.create") is True and caps.get("content.send_to_client") is True, str(caps))
+        member = self.login(browser, self.email_member, self.password_a, "A")
+        mcaps = (self.api(member, "/api/v1/auth/capabilities").get("body") or {}).get("permissions", {})
+        self.check("A", "membro: ve e cria, mas nao envia ao cliente", mcaps.get("content.view") is True and mcaps.get("content.create") is True and mcaps.get("content.send_to_client") is False, str(mcaps))
+        self.goto(admin, "/conteudo")
+        admin.get_by_test_id("content-page").wait_for(timeout=15000)
+        self.check("A", "menu lateral exibe Arquivos de conteudo", admin.locator("nav[aria-label='Navegação do sistema'] a").filter(has_text="Arquivos de conteúdo").count() > 0)
+
+        # B ---------------------------------------------------------------
+        self.scenarios.append("B - Cadastro e upload")
+        item_id = self.new_content(admin, title1, caption1)
+        self.ok("B", "conteudo cadastrado pela interface (F8-1)")
+        # extensao enganosa: HTML com nome .jpg
+        admin.set_input_files('[data-testid="file-input"]', files=[{"name": "foto.jpg", "mimeType": "image/jpeg", "buffer": b"<html><script>alert(1)</script></html>"}])
+        notice = admin.get_by_test_id("content-notice")
+        notice.wait_for(timeout=15000)
+        self.check("B", "arquivo com extensao enganosa e recusado pelo tipo real", "Tipo de arquivo não aceito" in notice.inner_text(), notice.inner_text())
+        self.upload_png(admin, self.seed)
+        admin.get_by_test_id("media-item").first.wait_for(timeout=20000)
+        self.ok("B", "arquivo final enviado")
+        admin.get_by_test_id("preview-image").first.wait_for(timeout=15000)
+        self.check("B", "previa exibida no painel interno", admin.get_by_test_id("preview-panel").count() == 1)
+        self.shot(admin, "f8-b-detalhe.png")
+
+        # C ---------------------------------------------------------------
+        self.scenarios.append("C - Permissoes")
+        self.goto(member, f"/conteudo/{item_id}")
+        member.get_by_test_id("approval-noperm").wait_for(timeout=15000)
+        self.check("C", "membro nao ve o botao de gerar link e e orientado", member.get_by_test_id("create-approval-link").count() == 0)
+        r = self.api(member, f"/content/items/{item_id}/approval-links", "POST", {})
+        self.check("C", "API recusa envio ao cliente pelo membro (403)", r["status"] == 403, str(r["status"]))
+
+        # D ---------------------------------------------------------------
+        self.scenarios.append("D - Geracao do link")
+        self.goto(admin, f"/conteudo/{item_id}")
+        url1 = self.generate_link(admin)
+        self.check("D", "link usa fragmento (#) e token longo", re.search(r"/aprovacao#[A-Za-z0-9_-]{40,}$", url1) is not None, url1[:80])
+        token1 = url1.split("#", 1)[1]
+        admin.get_by_test_id("frozen-banner").wait_for(timeout=15000)
+        self.ok("D", "versao enviada fica congelada (nao editavel)")
+        admin.reload(wait_until="networkidle")
+        admin.get_by_test_id("approval-links").wait_for(timeout=15000)
+        self.check("D", "token nao e exibido de novo depois de recarregar", admin.get_by_test_id("approval-link-url").count() == 0 and token1 not in admin.content())
+        self.check("D", "status interno: aguardando o cliente", "Aguardando o cliente" in admin.get_by_test_id("approval-panel").inner_text())
+        self.shot(admin, "f8-d-link.png")
+
+        # E ---------------------------------------------------------------
+        self.scenarios.append("E - Pagina publica")
+        requests: List[str] = []
+        ctx = browser.new_context(viewport={"width": 1280, "height": 900}, ignore_https_errors=True)
+        pub = ctx.new_page()
+        self.listen(pub)
+        pub.on("request", lambda rq: requests.append(rq.url))
+        pub.goto(url1, wait_until="networkidle", timeout=30000)
+        pub.get_by_test_id("approval-page").wait_for(timeout=20000)
+        self.check("E", "abre sem login (sem redirecionar para /login)", "/login" not in pub.url and "/aprovacao" in pub.url)
+        text = pub.inner_text("body")
+        self.check("E", "mostra a marca e a legenda do conteudo", "F7 Gate Cliente 1" in text and caption1 in text)
+        self.check("E", "nao mostra o titulo interno nem dados internos", title1 not in text and item_id not in pub.content())
+        pub.get_by_test_id("preview-image").wait_for(timeout=15000)
+        self.ok("E", "previa inspirada no Instagram renderizada (imagem)")
+        origin = urlparse(self.base).netloc
+        foreign = [u for u in requests if urlparse(u).netloc not in ("", origin) and not u.startswith("data:") and not u.startswith("blob:")]
+        self.check("E", "nenhum recurso de terceiros", not foreign, str(foreign[:3]))
+        self.check("E", "o token nunca aparece em URL de requisicao", all(token1 not in u for u in requests))
+        view = self.public_post("/public/approval/view", {"token": token1})
+        self.check("E", "cabecalhos no-store, noindex e no-referrer na API publica",
+                   view["headers"].get("cache-control") == "no-store" and "noindex" in view["headers"].get("x-robots-tag", "") and view["headers"].get("referrer-policy") == "no-referrer", str(view["headers"])[:200])
+        self.check("E", "resposta publica sem chave de storage, hash de arquivo ou ids internos", all(k not in view["text"] for k in ["storageKey", "sha256", item_id, "org/"]))
+        self.shot(pub, "f8-e-publica.png")
+
+        # F ---------------------------------------------------------------
+        self.scenarios.append("F - Decisao")
+        approve = pub.get_by_test_id("approval-approve")
+        changes = pub.get_by_test_id("approval-request-changes")
+        self.check("F", "botoes desabilitados sem identificacao e declaracao", approve.is_disabled() and changes.is_disabled())
+        pub.locator("#ap-name").fill("Maria da Marca")
+        pub.locator("#ap-contact").fill("maria@marca.invalid")
+        self.check("F", "aprovar segue desabilitado sem a declaracao de autoridade", approve.is_disabled())
+        pub.get_by_test_id("approval-authority").check()
+        self.check("F", "aprovar habilita com N1 completo", not approve.is_disabled())
+        self.check("F", "solicitar alteracao exige comentario", changes.is_disabled())
+        pub.locator("#ap-comment").fill("Trocar a cor do fundo e revisar a legenda.")
+        self.check("F", "com comentario, solicitar alteracao habilita", not changes.is_disabled())
+        self.check("F", "a tela nao apresenta N1 como identidade verificada", "Não é identidade autenticada nem verificada" in pub.inner_text("body"))
+        changes.click()
+        pub.get_by_test_id("approval-confirm").wait_for(timeout=5000)
+        pub.get_by_test_id("approval-confirm-yes").click()
+        result = pub.get_by_test_id("approval-result")
+        result.wait_for(timeout=20000)
+        self.check("F", "resposta registrada: alteracao solicitada", result.get_attribute("data-decision") == "CHANGES_REQUESTED")
+        pub.reload(wait_until="networkidle")
+        pub.get_by_test_id("approval-result").wait_for(timeout=15000)
+        self.ok("F", "ao recarregar, a resposta continua registrada (decisao unica)")
+        again = self.public_post("/public/approval/decision", {"token": token1, "decision": "APPROVED", "contentHash": "a" * 64,
+                                                               "approverName": "Outra Pessoa", "approverContact": "x@y.invalid", "authorityDeclared": True})
+        self.check("F", "segunda decisao na mesma versao e recusada (409)", again["status"] == 409, str(again["status"]))
+        self.shot(pub, "f8-f-decisao.png")
+        pub.context.close()
+
+        # G ---------------------------------------------------------------
+        self.scenarios.append("G - Acompanhamento interno")
+        self.goto(admin, f"/conteudo/{item_id}")
+        panel = admin.get_by_test_id("approval-panel")
+        panel.get_by_test_id("approval-decisions").wait_for(timeout=15000)
+        ptxt = panel.inner_text()
+        self.check("G", "status: alteracao solicitada", "Alteração solicitada" in ptxt)
+        self.check("G", "decisao com nome, contato, comentario e identificacao declarada (N1)",
+                   "Maria da Marca" in ptxt and "maria@marca.invalid" in ptxt and "Trocar a cor do fundo" in ptxt and "identificação declarada (N1), não verificada" in ptxt)
+        self.check("G", "historico registra a resposta do cliente", admin.get_by_test_id("content-history").locator('[data-event-type="CLIENT_CHANGES_REQUESTED"]').count() == 1)
+        self.shot(admin, "f8-g-acompanhamento.png")
+
+        # H ---------------------------------------------------------------
+        self.scenarios.append("H - Nova versao")
+        admin.get_by_test_id("new-version").click()
+        admin.get_by_text("Nova versão criada").first.wait_for(timeout=15000)
+        admin.locator("#c-caption").fill("Legenda revisada na versao 2")
+        admin.get_by_test_id("save-content-data").click()
+        admin.get_by_text("Alterações salvas").first.wait_for(timeout=15000)
+        self.check("H", "versao 1 preservada e versao 2 editavel",
+                   admin.get_by_test_id("versions-panel").locator('[data-version="1"]').count() == 1 and admin.get_by_test_id("versions-panel").locator('[data-version="2"]').count() == 1)
+        url2 = self.generate_link(admin)
+        pub2 = self.open_public(browser, url2)
+        pub2.get_by_test_id("approval-page").wait_for(timeout=20000)
+        self.check("H", "novo link mostra a versao 2 com a legenda revisada", "versão 2" in pub2.inner_text("body") and "Legenda revisada na versao 2" in pub2.inner_text("body"))
+        pub2.locator("#ap-name").fill("Maria da Marca")
+        pub2.locator("#ap-contact").fill("maria@marca.invalid")
+        pub2.get_by_test_id("approval-authority").check()
+        pub2.get_by_test_id("approval-approve").click()
+        pub2.get_by_test_id("approval-confirm-yes").click()
+        res2 = pub2.get_by_test_id("approval-result")
+        res2.wait_for(timeout=20000)
+        self.check("H", "aprovacao da versao 2 registrada", res2.get_attribute("data-decision") == "APPROVED")
+        pub2.context.close()
+        admin.reload(wait_until="networkidle")
+        admin.get_by_test_id("approval-panel").get_by_text("Aprovado pelo cliente").wait_for(timeout=15000)
+        self.check("H", "status interno: aprovado e duas decisoes preservadas", admin.get_by_test_id("approval-decisions").locator("li").count() == 2)
+        self.shot(admin, "f8-h-aprovado.png")
+
+        # I ---------------------------------------------------------------
+        self.scenarios.append("I - Reemissao, revogacao e expiracao")
+        item2 = self.new_content(admin, f"Gate F8 Reemissao {self.seed}", "Legenda reemissao")
+        self.upload_png(admin, self.seed + 1)
+        admin.get_by_test_id("media-item").first.wait_for(timeout=20000)
+        link_a = self.generate_link(admin)
+        admin.get_by_test_id("create-approval-link").click()
+        admin.wait_for_function(
+            "() => { const el = document.querySelector('[data-testid=approval-link-url]'); return el && el.value && !el.value.endsWith('%s'); }" % link_a.split("#", 1)[1]
+        )
+        link_b = admin.get_by_test_id("approval-link-url").input_value()
+        self.check("I", "reemissao gera outro token", link_a != link_b)
+        unknown_url = f"{self.base}/aprovacao#" + "x" * 43
+
+        def unavailable(url: str) -> bool:
+            pg = self.open_public(browser, url)
+            try:
+                pg.get_by_test_id("approval-unavailable").wait_for(timeout=15000)
+                return "Este link não está disponível" in pg.inner_text("body")
+            except Exception:  # noqa: BLE001
+                return False
+            finally:
+                pg.context.close()
+
+        self.check("I", "link anterior (reemitido) fica indisponivel", unavailable(link_a))
+        self.check("I", "link desconhecido mostra a mesma tela", unavailable(unknown_url))
+        # revogar o link B pela interface
+        admin.get_by_test_id("revoke-approval-link").first.click()
+        admin.get_by_text("Link revogado").first.wait_for(timeout=15000)
+        self.check("I", "link revogado fica indisponivel (mesma tela)", unavailable(link_b))
+        # novo link e expiracao forcada
+        link_c = self.generate_link(admin)
+        self.db_exec(f"return await p.approvalLink.updateMany({{where:{{itemId:'{item2}',revokedAt:null}},data:{{expiresAt:new Date(Date.now()-60000)}}}});")
+        self.check("I", "link expirado fica indisponivel (mesma tela)", unavailable(link_c))
+        admin.reload(wait_until="networkidle")
+        admin.get_by_test_id("approval-panel").get_by_text("Link expirado").first.wait_for(timeout=15000)
+        self.ok("I", "status interno distingue expirado do revogado")
+        r = self.public_post("/public/approval/decision", {"token": link_c.split("#", 1)[1], "decision": "APPROVED", "contentHash": "b" * 64,
+                                                           "approverName": "Pessoa", "approverContact": "p@q.invalid", "authorityDeclared": True})
+        self.check("I", "expirado e revogado nao aceitam decisao (404 generico)", r["status"] == 404, str(r["status"]))
+
+        # J ---------------------------------------------------------------
+        self.scenarios.append("J - Isolamento Org B")
+        pb = self.login(browser, self.email_b, self.password_b, "J")
+        self.check("J", "Org B: nenhum conteudo da Org A", (self.api(pb, "/content/items").get("body") or []) == [])
+        self.check("J", "Org B: acompanhamento da Org A recusado (404)", self.api(pb, f"/content/items/{item_id}/approval")["status"] == 404)
+        self.check("J", "Org B: nao gera link para conteudo da Org A (404)", self.api(pb, f"/content/items/{item_id}/approval-links", "POST", {})["status"] == 404)
+        self.goto(pb, "/conteudo")
+        pb.get_by_text("Nenhum conteúdo cadastrado").first.wait_for(timeout=15000)
+        self.ok("J", "Org B: tela vazia, sem dados da Org A")
+
+        # K ---------------------------------------------------------------
+        self.scenarios.append("K - Responsividade 390 px")
+        admin.set_viewport_size({"width": 390, "height": 800})
+        for path, label in [("/conteudo", "lista"), (f"/conteudo/{item_id}", "detalhe")]:
+            self.goto(admin, path)
+            admin.wait_for_timeout(800)
+            overflow = admin.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            self.check("K", f"390 px: {label} sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
+        pub3 = self.open_public(browser, url1, width=390)
+        pub3.get_by_test_id("approval-result").wait_for(timeout=15000)
+        pub3.wait_for_timeout(500)
+        overflow = pub3.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        self.check("K", "390 px: pagina publica sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
+        self.shot(pub3, "f8-k-publica-390.png")
+        pub3.context.close()
+
+
+if __name__ == "__main__":
+    sys.exit(ContentGate().run())

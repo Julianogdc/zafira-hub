@@ -1,0 +1,66 @@
+# ==============================================================================
+# ZAFIRA HUB 2.1 — DOCKER COMPOSE DE REFERÊNCIA PARA HOMOLOGAÇÃO / REHEARSAL
+# ==============================================================================
+# FINALIDADE: Arquivo de referência técnica e execução de ensaios locais / CI.
+#             A topologia final na VPS poderá ser adaptada para EasyPanel.
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: zafira-hub-postgres-hml
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_staging_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-zafira_hub_21_staging}
+    volumes:
+      - zafira_hub_21_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres} -d $${POSTGRES_DB:-zafira_hub_21_staging}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - zafira-hub-hml-net
+
+  api:
+    image: ${API_IMAGE_REF}
+    container_name: zafira-hub-api-hml
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres_staging_secret@postgres:5432/zafira_hub_21_staging?schema=public}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      HUB_INTERNAL_API_KEY: ${HUB_INTERNAL_API_KEY}
+    networks:
+      - zafira-hub-hml-net
+
+  web:
+    image: ${WEB_IMAGE_REF}
+    container_name: zafira-hub-web-hml
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      API_UPSTREAM: http://api:3001
+      NGINX_ENVSUBST_FILTER: API_UPSTREAM
+    ports:
+      # Porta publicada estritamente para ensaios locais e testes de smoke
+      - "${WEB_PORT:-8082}:80"
+    networks:
+      - zafira-hub-hml-net
+
+volumes:
+  zafira_hub_21_staging_data:
+
+networks:
+  zafira-hub-hml-net:
+    driver: bridge

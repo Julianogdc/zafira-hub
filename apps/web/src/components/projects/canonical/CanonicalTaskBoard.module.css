@@ -1,0 +1,245 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — QUADRO VISUAL DE TAREFAS ASANA (F6-IMP.4)
+   Somente leitura: sem arrastar e soltar, sem alteração no Asana.
+   ========================================================================== */
+
+.boardScroller {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--z-space-3, 12px);
+  overflow-x: auto;
+  padding-bottom: var(--z-space-2, 8px);
+  scroll-snap-type: x proximity;
+}
+
+.column {
+  flex: 0 0 280px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background-color: var(--z-surface-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.06));
+  border-radius: var(--z-radius-md, 8px);
+  scroll-snap-align: start;
+}
+
+@media (max-width: 480px) {
+  .column {
+    flex-basis: 85vw;
+  }
+}
+
+.columnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--z-border, rgba(255, 255, 255, 0.06));
+}
+
+.columnTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--z-text-primary, #f1f5f9);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.columnCount {
+  flex-shrink: 0;
+  min-width: 22px;
+  padding: 1px 7px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--z-text-secondary, #cbd5e1);
+  background-color: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+}
+
+.columnBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 68vh;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.emptyColumn {
+  margin: 0;
+  padding: 16px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background-color: var(--z-surface-card, #111116);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  transition: border-color 0.15s ease;
+}
+
+.card:hover {
+  border-color: rgba(129, 140, 248, 0.45);
+}
+
+.cardOverdue {
+  border-left: 3px solid #f87171;
+}
+
+.cardMain {
+  display: block;
+  width: 100%;
+  padding: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: inherit;
+}
+
+.cardMain:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.cardTitle {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--z-text-primary, #f1f5f9);
+}
+
+.cardTitleDone {
+  color: var(--z-text-muted, #94a3b8);
+  text-decoration: line-through;
+}
+
+.cardBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10.5px;
+  color: var(--z-text-secondary, #cbd5e1);
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+}
+
+.badgeDone {
+  color: #34d399;
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+.badgeOverdue {
+  color: #f87171;
+  background-color: rgba(239, 68, 68, 0.12);
+}
+
+.badgePending {
+  color: #a5b4fc;
+  background-color: rgba(99, 102, 241, 0.12);
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--z-text-secondary, #cbd5e1);
+}
+
+.due {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.dueOverdue {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  flex: 1;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-size: 10px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+}
+
+.avatarImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.assigneeName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unassigned {
+  color: var(--z-text-muted, #94a3b8);
+  font-style: italic;
+}
+
+.asanaLink {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  color: #818cf8;
+  background-color: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 4px;
+  text-decoration: none;
+}
+
+.asanaLink:hover {
+  color: #ffffff;
+  background-color: rgba(99, 102, 241, 0.18);
+}

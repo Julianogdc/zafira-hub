@@ -1,0 +1,426 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — DESIGN SYSTEM COMPONENT STYLES (F3.3)
+   Namespace Isolado: Consome exclusivamente tokens --z-* da F3.2
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. BUTTON & ICON BUTTON
+   -------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--z-font-ui);
+  font-weight: 600;
+  border-radius: var(--z-radius-md);
+  transition: all var(--z-transition);
+  cursor: pointer;
+  border: 1px solid transparent;
+  gap: var(--z-space-2);
+  white-space: nowrap;
+  user-select: none;
+  text-decoration: none;
+  outline: none;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 2px;
+}
+
+.btn:disabled,
+.btn.loading {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Button Variants */
+.btnPrimary {
+  background-color: var(--z-color-primary);
+  color: #FFFFFF;
+  border-color: var(--z-color-primary);
+  box-shadow: var(--z-shadow-subtle);
+}
+
+.btnPrimary:hover {
+  background-color: var(--z-color-primary-active);
+  border-color: var(--z-color-primary-active);
+}
+
+.btnSecondary {
+  background-color: var(--z-surface-card);
+  color: var(--z-text-primary);
+  border-color: var(--z-border-default);
+  box-shadow: var(--z-shadow-subtle);
+}
+
+.btnSecondary:hover {
+  background-color: var(--z-surface-hover);
+  border-color: var(--z-border-hover);
+}
+
+.btnGhost {
+  background-color: transparent;
+  color: var(--z-text-primary);
+  border-color: transparent;
+}
+
+.btnGhost:hover {
+  background-color: var(--z-surface-hover);
+}
+
+.btnDanger {
+  background-color: var(--z-color-danger);
+  color: #FFFFFF;
+  border-color: var(--z-color-danger);
+}
+
+.btnDanger:hover {
+  filter: brightness(0.92);
+}
+
+.btnWarning {
+  background-color: var(--z-color-warning);
+  color: #111116;
+  border-color: var(--z-color-warning);
+}
+
+.btnWarning:hover {
+  filter: brightness(0.92);
+}
+
+/* Button Sizes */
+.btnSm {
+  height: 30px;
+  padding: 0 var(--z-space-3);
+  font-size: 13px;
+}
+
+.btnMd {
+  height: 36px;
+  padding: 0 var(--z-space-4);
+  font-size: 14px;
+}
+
+.btnLg {
+  height: 40px;
+  padding: 0 24px;
+  font-size: 14px;
+}
+
+/* IconButton */
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--z-radius-md);
+  transition: all var(--z-transition);
+  cursor: pointer;
+  border: 1px solid transparent;
+  flex-shrink: 0;
+  outline: none;
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--z-color-accent);
+  outline-offset: 2px;
+}
+
+.iconBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.iconBtnSm {
+  width: 30px;
+  height: 30px;
+}
+
+.iconBtnMd {
+  width: 34px;
+  height: 34px;
+}
+
+.iconBtnLg {
+  width: 40px;
+  height: 40px;
+}
+
+/* Spinner dentro do Button */
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   2. BADGE
+   -------------------------------------------------------------------------- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--z-radius-sm);
+  font-family: var(--z-font-ui);
+  font-weight: 600;
+  white-space: nowrap;
+  line-height: 1;
+  gap: var(--z-space-1);
+}
+
+.badgeSm {
+  padding: 0 var(--z-space-2);
+  height: 22px;
+  font-size: 11px;
+}
+
+.badgeMd {
+  padding: 0 10px;
+  height: 26px;
+  font-size: 12px;
+}
+
+/* Badge Variants */
+.badgeNeutral {
+  background-color: var(--z-surface-secondary);
+  color: var(--z-text-primary);
+  border: 1px solid var(--z-border-default);
+}
+
+.badgePurple,
+.badgePrimary {
+  background-color: var(--z-color-purple-surface);
+  color: var(--z-color-primary);
+  border: 1px solid rgba(114, 86, 197, 0.2);
+}
+
+[data-theme='dark'] .badgePurple,
+[data-theme='dark'] .badgePrimary,
+.dark .badgePurple,
+.dark .badgePrimary {
+  background-color: rgba(65, 36, 147, 0.35);
+  color: var(--z-color-purple-light);
+  border-color: rgba(207, 197, 234, 0.2);
+}
+
+.badgeSuccess {
+  background-color: var(--z-success-bg);
+  border: 1px solid var(--z-success-border);
+  color: var(--z-success-text);
+}
+
+.badgeWarning {
+  background-color: var(--z-warning-bg);
+  border: 1px solid var(--z-warning-border);
+  color: var(--z-warning-text);
+}
+
+.badgeDanger {
+  background-color: var(--z-danger-bg);
+  border: 1px solid var(--z-danger-border);
+  color: var(--z-danger-text);
+}
+
+.badgeInfo {
+  background-color: var(--z-info-bg);
+  border: 1px solid var(--z-info-border);
+  color: var(--z-info-text);
+}
+
+/* --------------------------------------------------------------------------
+   3. CARD
+   -------------------------------------------------------------------------- */
+.card {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-lg);
+  box-shadow: var(--z-shadow-subtle);
+  display: flex;
+  flex-direction: column;
+}
+
+.cardInteractive {
+  cursor: pointer;
+  transition: border-color var(--z-transition), box-shadow var(--z-transition), transform var(--z-transition);
+}
+
+.cardInteractive:hover {
+  border-color: var(--z-border-hover);
+  box-shadow: var(--z-shadow-card);
+  transform: translateY(-1px);
+}
+
+.cardMuted {
+  background-color: var(--z-surface-secondary);
+}
+
+.cardHeader {
+  padding: 20px 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-1);
+}
+
+.cardTitle {
+  font-family: var(--z-font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--z-text-primary);
+  margin: 0;
+}
+
+.cardDescription {
+  font-family: var(--z-font-ui);
+  font-size: 13px;
+  color: var(--z-text-muted);
+  margin: 0;
+}
+
+.cardContent {
+  padding: 20px;
+  flex: 1;
+}
+
+.cardFooter {
+  padding: 0 20px 20px;
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3);
+}
+
+/* --------------------------------------------------------------------------
+   4. KPI CARD
+   -------------------------------------------------------------------------- */
+.kpiCard {
+  background-color: var(--z-surface-card);
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-md);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-3);
+  box-shadow: var(--z-shadow-subtle);
+}
+
+.kpiCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.kpiCardTitle {
+  font-family: var(--z-font-ui);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--z-text-secondary);
+}
+
+.kpiCardIcon {
+  color: var(--z-text-muted);
+  display: flex;
+  align-items: center;
+}
+
+.kpiCardValue {
+  font-family: var(--z-font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--z-color-kpi);
+  line-height: 1.2;
+}
+
+.kpiCardTrend {
+  font-family: var(--z-font-numeric);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-1);
+}
+
+.trendUp {
+  color: var(--z-color-success);
+}
+
+.trendDown {
+  color: var(--z-color-danger);
+}
+
+.trendNeutral {
+  color: var(--z-text-muted);
+}
+
+/* --------------------------------------------------------------------------
+   5. DATA TABLE
+   -------------------------------------------------------------------------- */
+.tableContainer {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--z-border-default);
+  border-radius: var(--z-radius-md);
+  background-color: var(--z-surface-card);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.table th,
+.table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--z-border-default);
+  font-family: var(--z-font-ui);
+  font-size: 13px;
+}
+
+.table th {
+  background-color: var(--z-surface-secondary);
+  font-weight: 600;
+  color: var(--z-text-muted);
+  user-select: none;
+}
+
+.table tbody tr {
+  transition: background-color var(--z-transition);
+}
+
+.table tbody tr:hover {
+  background-color: var(--z-surface-hover);
+}
+
+.table tbody tr.selected {
+  background-color: rgba(65, 36, 147, 0.08);
+}
+
+[data-theme='dark'] .table tbody tr.selected,
+.dark .table tbody tr.selected {
+  background-color: rgba(114, 86, 197, 0.16);
+}
+
+.tableRowClickable {
+  cursor: pointer;
+}
+
+.emptyCell {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--z-text-muted);
+  font-family: var(--z-font-ui);
+}

@@ -1,0 +1,34 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — TIPOGRAFIA OFICIAL (DESIGN SYSTEM)
+   Fontes empacotadas localmente via Fontsource (sem dependência de CDN/remoto)
+   ========================================================================== */
+
+/* 1. Funnel Display — Títulos, Headers e Destaques Institucionais */
+@import '@fontsource/funnel-display/400.css';
+@import '@fontsource/funnel-display/500.css';
+@import '@fontsource/funnel-display/600.css';
+@import '@fontsource/funnel-display/700.css';
+
+/* 2. Funnel Sans — Interface, Labels, Navegação e Corpo */
+@import '@fontsource/funnel-sans/400.css';
+@import '@fontsource/funnel-sans/500.css';
+@import '@fontsource/funnel-sans/600.css';
+@import '@fontsource/funnel-sans/700.css';
+
+/* 3. Manrope — Numerais, KPIs, Faturas, Extratos e Valores Financeiros */
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+
+:root {
+  /* Declaração de Variáveis Tipográficas Zafira */
+  --z-font-display: 'Funnel Display', system-ui, -apple-system, sans-serif;
+  --z-font-ui: 'Funnel Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --z-font-numeric: 'Manrope', system-ui, -apple-system, sans-serif;
+}
+
+/* Suporte a alinhamento numérico tabular em tabelas e KPIs */
+.z-tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

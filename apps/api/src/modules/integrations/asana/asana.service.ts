@@ -1,0 +1,2011 @@
+import crypto from 'crypto';
+import { prisma } from '../../../lib/prisma.js';
+import {
+  encryptToken,
+  decryptToken,
+  encryptIntegrationCredential,
+  decryptIntegrationCredential,
+} from '../../../lib/crypto.js';
+import { sseHub, AsanaNormalizedEvent } from '../../../lib/sseHub.js';
+import {
+  integrationObservabilityService,
+  sanitizeMetadata,
+  sanitizeErrorMessage,
+} from '../common/integration-observability.service.js';
+import { integrationConnectionService } from '../connections/integration-connection.service.js';
+import { AuditService } from '../../audit/audit.service.js';
+import { isOverdueInTimeZone, resolveTimeZone } from '@zafira/domain';
+
+export class AsanaIntegrationError extends Error {
+  constructor(public statusCode: number, message: string, public details?: any) {
+    super(message);
+    this.name = 'AsanaIntegrationError';
+  }
+}
+
+export interface AsanaStatus {
+  configured: boolean;
+  connected: boolean;
+  source?: 'organization' | 'env';
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+  user?: {
+    gid: string;
+    name: string;
+    email?: string;
+  } | null;
+}
+
+export interface AsanaProjectSummary {
+  gid: string;
+  name: string;
+  color?: string | null;
+  notes?: string | null;
+  workspaceGid?: string | null;
+}
+
+export type AsanaMetricsStatus = 'LIVE' | 'UNAVAILABLE' | 'ERROR';
+
+export interface ClientAsanaProject {
+  integrationId: string;
+  clientId: string;
+  projectGid: string;
+  projectName: string;
+  color?: string | null;
+  totalTasks: number | null;
+  completedTasks: number | null;
+  pendingTasks: number | null;
+  overdueTasks: number | null;
+  metricsStatus: AsanaMetricsStatus;
+  metricsUpdatedAt: string | null;
+  metricsError?: string | null;
+  createdAt: Date;
+}
+
+export interface AsanaTag {
+  gid: string;
+  name: string;
+}
+
+export interface AsanaSection {
+  gid: string;
+  name: string;
+}
+
+export interface AsanaEnumOption {
+  gid: string;
+  name: string;
+  color?: string | null;
+  enabled?: boolean;
+}
+
+export interface AsanaCustomField {
+  gid: string;
+  name: string;
+  value: string;
+  type: string;
+  textValue?: string | null;
+  numberValue?: number | null;
+  enumOptions?: AsanaEnumOption[];
+  enumValue?: { gid: string; name: string; color?: string | null } | null;
+}
+
+export interface AsanaDependency {
+  gid: string;
+  name: string;
+  completed: boolean;
+  relationship: 'blocking' | 'dependent';
+}
+
+export interface AsanaSubtask {
+  gid: string;
+  name: string;
+  completed: boolean;
+  dueOn: string | null;
+  dueAt: string | null;
+  assignee?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
+export interface AsanaStory {
+  gid: string;
+  text: string;
+  htmlText?: string | null;
+  type: 'comment' | 'system';
+  createdAt: string;
+  createdBy?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+}
+
+export interface AsanaAttachment {
+  gid: string;
+  name: string;
+  downloadUrl: string | null;
+  viewUrl: string | null;
+  permanentUrl: string | null;
+  host: string;
+  size: number | null;
+  createdAt: string;
+}
+
+export interface AsanaUser {
+  gid: string;
+  name: string;
+  email?: string | null;
+  photoUrl?: string | null;
+}
+
+export interface ClientAsanaTask {
+  gid: string;
+  name: string;
+  notes?: string | null;
+  htmlNotes?: string | null;
+  completed: boolean;
+  dueOn: string | null;
+  dueAt: string | null;
+  isOverdue: boolean;
+  sectionName?: string | null;
+  sectionGid?: string | null;
+  assignee?: {
+    gid: string;
+    name: string;
+    photoUrl?: string | null;
+  } | null;
+  permalinkUrl?: string | null;
+  projectGid: string;
+  projectName: string;
+  tags?: AsanaTag[];
+  customFields?: AsanaCustomField[];
+}
+
+export class AsanaService {
+  /**
+   * Endereço da API do Asana. ASANA_API_BASE_URL só vale FORA de produção (Asana simulado do
+   * Browser Gate F6 no CI); em produção é sempre o Asana oficial e a variável é ignorada.
+   */
+  private asanaBaseUrl =
+    process.env.NODE_ENV !== 'production' && process.env.ASANA_API_BASE_URL
+      ? process.env.ASANA_API_BASE_URL.replace(/\/$/, '')
+      : 'https://app.asana.com/api/1.0';
+
+  /**
+   * Resolve e valida o token a partir de uma IntegrationConnection canônica.
+   * Aplica regras canônicas de expiração, refresh e proteção contra token expirado sem refresh.
+   */
+  private async resolveCanonicalConnectionToken(
+    conn: any,
+    organizationId: string
+  ): Promise<{ token: string; source: 'organization'; workspaceId?: string | null }> {
+    if (conn.status === 'DISCONNECTED') {
+      throw new AsanaIntegrationError(400, 'A integração com o Asana foi desconectada nesta organização. Reconexão necessária.');
+    }
+
+    if (conn.status === 'ERROR') {
+      throw new AsanaIntegrationError(400, 'A integração com o Asana está em estado de erro. Reconexão necessária.');
+    }
+
+    if (conn.status !== 'ACTIVE') {
+      throw new AsanaIntegrationError(400, `Conexão do Asana em estado inválido (${conn.status}). Reconexão necessária.`);
+    }
+
+    if (!conn.credentialCiphertext) {
+      throw new AsanaIntegrationError(400, 'Credencial ausente na conexão ativa do Asana. Reconexão necessária.');
+    }
+
+    try {
+      const plain = decryptIntegrationCredential(conn.credentialCiphertext);
+      let accessToken = plain;
+      let refreshToken: string | null = null;
+      let expiresAt: Date | null = null;
+
+      // Se o payload for JSON estruturado (OAuth)
+      if (plain.startsWith('{') && plain.endsWith('}')) {
+        try {
+          const parsed = JSON.parse(plain);
+          accessToken = parsed.accessToken || plain;
+          refreshToken = parsed.refreshToken || null;
+          expiresAt = parsed.expiresAt ? new Date(parsed.expiresAt) : null;
+        } catch {
+          // fallback plain string
+        }
+      }
+
+      // Verifica expiração
+      const isExpired = Boolean(expiresAt && expiresAt <= new Date());
+
+      if (isExpired) {
+        if (refreshToken) {
+          // Caso 1: Token expirado e possui refreshToken -> renova token
+          try {
+            const refreshed = await this.refreshToken(conn.id, refreshToken);
+            return { token: refreshed.accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+          } catch (refreshErr: any) {
+            await integrationObservabilityService.recordError({
+              organizationId,
+              connectionId: conn.id,
+              provider: 'ASANA',
+              operation: 'OAUTH_REFRESH',
+              code: 'TOKEN_REFRESH_FAILED',
+              message: refreshErr?.message || 'Falha ao renovar token do Asana',
+              retryable: false,
+            }).catch(() => {});
+
+            await prisma.integrationConnection.update({
+              where: { id: conn.id },
+              data: { status: 'ERROR', updatedAt: new Date() },
+            }).catch(() => {});
+
+            throw new AsanaIntegrationError(401, 'Sessão do Asana expirada e renovação falhou. Reconexão necessária.');
+          }
+        } else {
+          // Caso 2: Token expirado SEM refreshToken -> bloqueia e marca ERROR
+          await integrationObservabilityService.recordError({
+            organizationId,
+            connectionId: conn.id,
+            provider: 'ASANA',
+            operation: 'OAUTH_VALIDATE',
+            code: 'TOKEN_EXPIRED_NO_REFRESH',
+            message: 'Token de acesso do Asana expirado e sem refresh token para renovação automática',
+            retryable: false,
+          }).catch(() => {});
+
+          await prisma.integrationConnection.update({
+            where: { id: conn.id },
+            data: { status: 'ERROR', updatedAt: new Date() },
+          }).catch(() => {});
+
+          throw new AsanaIntegrationError(401, 'Sessão do Asana expirada e sem refresh token disponível. Reconexão necessária.');
+        }
+      }
+
+      // Cleanup assíncrono seguro de registro legado residual se a conexão canônica está 100% ativa e válida
+      prisma.organizationIntegration.deleteMany({
+        where: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      }).catch(() => {});
+
+      return { token: accessToken, source: 'organization', workspaceId: conn.externalScopeId };
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+
+      await integrationObservabilityService.recordError({
+        organizationId,
+        connectionId: conn.id,
+        provider: 'ASANA',
+        operation: 'DECRYPT_CREDENTIAL',
+        code: 'CORRUPTED_CREDENTIAL',
+        message: 'Falha ao descriptografar credencial da conexão canônica',
+        retryable: false,
+      }).catch(() => {});
+
+      throw new AsanaIntegrationError(400, 'Credencial do Asana corrompida ou inválida. Reconexão necessária.');
+    }
+  }
+
+  /**
+   * Obtém token de acesso válido para a organização.
+   * Regra Canônica:
+   * 1. Se existir qualquer IntegrationConnection organizacional (provider=ASANA):
+   *    - Valida status, expiração e refresh via resolveCanonicalConnectionToken;
+   *    - DISCONNECTED / ERROR / Corrompido: erro explícito, NÃO consulta legado.
+   * 2. Somente se NÃO existir nenhuma IntegrationConnection:
+   *    - Executa migração atômica de OrganizationIntegration legado;
+   *    - Processa imediatamente a conexão recém-criada via resolveCanonicalConnectionToken.
+   * 3. Fallback estrito de desenvolvimento (apenas se NODE_ENV !== 'production').
+   */
+  async getValidToken(organizationId: string): Promise<{ token: string; source: 'organization' | 'env'; workspaceId?: string | null }> {
+    // 1. Consulta canônica em IntegrationConnection (org-level)
+    const conn = await prisma.integrationConnection.findFirst({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+        clientId: null,
+      },
+    });
+
+    if (conn) {
+      return await this.resolveCanonicalConnectionToken(conn, organizationId);
+    }
+
+    // 2. Caminho de migração explícito e ATÔMICO apenas se nenhuma IntegrationConnection existir
+    const legacy = await prisma.organizationIntegration.findUnique({
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      },
+    });
+
+    if (legacy?.accessToken) {
+      const migrated = await this.migrateLegacyOrganizationIntegration(organizationId);
+      if (migrated.migrated && migrated.connectionId) {
+        const newlyCreatedConn = await prisma.integrationConnection.findUnique({
+          where: { id: migrated.connectionId },
+        });
+
+        if (newlyCreatedConn) {
+          return await this.resolveCanonicalConnectionToken(newlyCreatedConn, organizationId);
+        }
+      }
+    }
+
+    // 3. Fallback estrito para ambiente de desenvolvimento local (NUNCA em produção)
+    if (process.env.NODE_ENV !== 'production') {
+      const devToken = process.env.ASANA_DEV_PAT || process.env.ASANA_ACCESS_TOKEN;
+      if (devToken) {
+        return { token: devToken, source: 'env' };
+      }
+    }
+
+    throw new AsanaIntegrationError(400, 'A integração com o Asana não está configurada para esta organização.');
+  }
+
+  /**
+   * Migração ATÔMICA transacional de OrganizationIntegration legado para IntegrationConnection canônica.
+   * Garante:
+   * 1. Se conexão canônica já existir, não sobrescreve.
+   * 2. Descriptografa e cria IntegrationConnection com status ACTIVE.
+   * 3. Deleta OrganizationIntegration na mesma transação.
+   * 4. Se falhar, faz rollback completo mantendo legado intacto.
+   */
+  async migrateLegacyOrganizationIntegration(organizationId: string): Promise<{ migrated: boolean; token?: string; connectionId?: string }> {
+    return await prisma.$transaction(async (tx) => {
+      // 1. Confirmar novamente na transação que não existe conexão canônica
+      const existingConn = await tx.integrationConnection.findFirst({
+        where: {
+          organizationId,
+          provider: 'ASANA',
+          clientId: null,
+        },
+      });
+
+      if (existingConn) {
+        return { migrated: false };
+      }
+
+      // 2. Carregar registro legado
+      const legacy = await tx.organizationIntegration.findUnique({
+        where: {
+          organizationId_provider: {
+            organizationId,
+            provider: 'ASANA',
+          },
+        },
+      });
+
+      if (!legacy || !legacy.accessToken) {
+        return { migrated: false };
+      }
+
+      // 3. Descriptografar tokens legados
+      const plainAccessToken = decryptToken(legacy.accessToken);
+      const plainRefreshToken = legacy.refreshToken ? decryptToken(legacy.refreshToken) : null;
+
+      const payload = JSON.stringify({
+        accessToken: plainAccessToken,
+        refreshToken: plainRefreshToken,
+        expiresAt: legacy.expiresAt?.toISOString() || null,
+        workspaceId: legacy.workspaceId || null,
+      });
+
+      const credentialCiphertext = encryptIntegrationCredential(payload);
+      const meta = (typeof legacy.metadata === 'object' && legacy.metadata !== null ? legacy.metadata : {}) as Record<string, any>;
+
+      // 4. Criar IntegrationConnection criptografada com status ACTIVE
+      const conn = await tx.integrationConnection.create({
+        data: {
+          organizationId,
+          provider: 'ASANA',
+          authType: 'OAUTH2',
+          externalScopeId: legacy.workspaceId || null,
+          displayName: meta.userName ? `Asana (${meta.userName})` : 'Asana Workspace',
+          credentialCiphertext,
+          metadata: {
+            ...meta,
+            migratedFromLegacyAt: new Date().toISOString(),
+          },
+          status: 'ACTIVE',
+          lastValidatedAt: new Date(),
+        },
+      });
+
+      // 5. Deletar OrganizationIntegration legado na mesma transação
+      await tx.organizationIntegration.delete({
+        where: { id: legacy.id },
+      });
+
+      return { migrated: true, token: plainAccessToken, connectionId: conn.id };
+    });
+  }
+
+  /**
+   * Realiza chamadas HTTP à API do Asana retornando o envelope bruto (data, next_page, etc).
+   */
+  private async fetchAsanaRaw<T = any>(
+    endpoint: string,
+    token: string,
+    options: RequestInit = {}
+  ): Promise<{ data: T; next_page?: { offset?: string | null; path?: string | null; uri?: string | null } | null }> {
+    const url = endpoint.startsWith('http') ? endpoint : `${this.asanaBaseUrl}${endpoint}`;
+    const response = await fetch(url, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const errorData = ((await response.json().catch(() => ({}))) as { errors?: Array<{ message?: string }> }) || {};
+      const rawMessage = errorData?.errors?.[0]?.message || `Erro na comunicação com a API do Asana (HTTP ${response.status})`;
+      const message = sanitizeErrorMessage(rawMessage) || rawMessage;
+      const sanitizedDetails = sanitizeMetadata(errorData);
+      throw new AsanaIntegrationError(response.status, message, sanitizedDetails);
+    }
+
+    if (response.status === 204) {
+      return { data: {} as T, next_page: null };
+    }
+
+    const text = await response.text();
+    if (!text || text.trim().length === 0) {
+      return { data: {} as T, next_page: null };
+    }
+
+    let parsed: any;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new AsanaIntegrationError(502, 'Resposta inválida recebida da API do Asana (formato não-JSON).');
+    }
+
+    if (parsed === null || typeof parsed !== 'object') {
+      throw new AsanaIntegrationError(502, 'Resposta malformada recebida da API do Asana.');
+    }
+
+    return parsed;
+  }
+
+  /**
+   * Realiza chamadas seguras à API oficial do Asana (preservando o contrato de data desembrulhada).
+   */
+  private async fetchAsana<T = any>(endpoint: string, token: string, options: RequestInit = {}): Promise<T> {
+    const raw = await this.fetchAsanaRaw<T>(endpoint, token, options);
+    return raw.data !== undefined ? raw.data : (raw as any);
+  }
+
+  /**
+   * Lê todas as tarefas de um projeto no Asana através de paginação completa com cursores.
+   * Solicita limit=100, valida integridade de cada página e previne ciclos infinitos.
+   */
+  private async fetchAllProjectTasks(
+    projectGid: string,
+    token: string,
+    optFields: string
+  ): Promise<any[]> {
+    const allTasks: any[] = [];
+    const seenOffsets = new Set<string>();
+    let currentOffset: string | null = null;
+    let pageCount = 0;
+    const MAX_PAGES = 500;
+
+    while (true) {
+      pageCount++;
+      if (pageCount > MAX_PAGES) {
+        throw new AsanaIntegrationError(
+          502,
+          `Limite operacional de páginas excedido (${MAX_PAGES}) para o projeto ${projectGid}.`
+        );
+      }
+
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      params.set('opt_fields', optFields);
+      if (currentOffset) {
+        params.set('offset', currentOffset);
+      }
+
+      const endpoint = `/projects/${encodeURIComponent(projectGid)}/tasks?${params.toString()}`;
+      const pageResult = await this.fetchAsanaRaw<any[]>(endpoint, token);
+
+      if (!pageResult || !Array.isArray(pageResult.data)) {
+        throw new AsanaIntegrationError(
+          502,
+          `Resposta malformada na página ${pageCount} do projeto ${projectGid}: campo 'data' ausente ou inválido.`
+        );
+      }
+
+      allTasks.push(...pageResult.data);
+
+      const nextOffset = pageResult.next_page?.offset;
+      if (!nextOffset) {
+        break;
+      }
+
+      if (seenOffsets.has(nextOffset)) {
+        throw new AsanaIntegrationError(
+          502,
+          `Ciclo de paginação detectado na API do Asana para o projeto ${projectGid} com o cursor "${nextOffset}".`
+        );
+      }
+
+      seenOffsets.add(nextOffset);
+      currentOffset = nextOffset;
+    }
+
+    return allTasks;
+  }
+
+  /**
+   * F6-IMP.8 — Leitura completa (todas as páginas) das tarefas de um projeto para o espelho.
+   * Somente GET; falha em qualquer página interrompe a leitura (nunca devolve lista parcial).
+   */
+  async fetchProjectTasksForMirror(projectGid: string, token: string): Promise<any[]> {
+    return this.fetchAllProjectTasks(
+      projectGid,
+      token,
+      'name,completed,due_on,due_at,assignee.name,memberships.project.gid,memberships.section.name,memberships.section.gid,permalink_url'
+    );
+  }
+
+  /** F6-IMP.8 — Nome atual do projeto (somente leitura); null se indisponível. */
+  async fetchProjectNameForMirror(projectGid: string, token: string): Promise<string | null> {
+    const details = await this.fetchAsana<any>(`/projects/${encodeURIComponent(projectGid)}?opt_fields=name`, token).catch(() => null);
+    return typeof details?.name === 'string' ? details.name : null;
+  }
+
+  /**
+   * Retorna o status de conexão da organização com o Asana.
+   */
+  async getStatus(organizationId: string): Promise<AsanaStatus> {
+    try {
+      const { token, source, workspaceId } = await this.getValidToken(organizationId);
+
+      // Valida o token buscando /users/me
+      const me = await this.fetchAsana<any>('/users/me', token);
+
+      const defaultWorkspace = me.workspaces?.[0];
+      const activeWorkspaceId = workspaceId || defaultWorkspace?.gid || null;
+      const activeWorkspaceName = defaultWorkspace?.name || null;
+
+      return {
+        configured: true,
+        connected: true,
+        source,
+        workspaceId: activeWorkspaceId,
+        workspaceName: activeWorkspaceName,
+        user: {
+          gid: me.gid,
+          name: me.name,
+          email: me.email,
+        },
+      };
+    } catch (error: any) {
+      if (error instanceof AsanaIntegrationError && error.statusCode === 400) {
+        return {
+          configured: false,
+          connected: false,
+        };
+      }
+      return {
+        configured: true,
+        connected: false,
+      };
+    }
+  }
+
+  /**
+   * Lista todos os projetos disponíveis no workspace do Asana para vincular a clientes.
+   */
+  async getWorkspaceProjects(organizationId: string): Promise<AsanaProjectSummary[]> {
+    const { token } = await this.getValidToken(organizationId);
+    const me = await this.fetchAsana<any>('/users/me', token);
+    const workspaceGid = me.workspaces?.[0]?.gid;
+
+    if (!workspaceGid) {
+      throw new AsanaIntegrationError(404, 'Nenhum workspace encontrado no Asana.');
+    }
+
+    const projects = await this.fetchAsana<any[]>(
+      `/projects?workspace=${workspaceGid}&archived=false&opt_fields=name,color,notes`,
+      token
+    );
+
+    return projects.map((p) => ({
+      gid: p.gid,
+      name: p.name,
+      color: p.color || null,
+      notes: p.notes || null,
+      workspaceGid,
+    }));
+  }
+
+  /**
+   * Retorna os projetos Asana vinculados a um cliente com métricas de progresso.
+   */
+  async getClientProjects(clientId: string, organizationId: string): Promise<ClientAsanaProject[]> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+        // DEC-F6-005: fuso da organização na mesma consulta
+        organization: { select: { config: { select: { timezone: true } } } },
+      },
+    });
+
+    if (!client) {
+      throw new AsanaIntegrationError(404, 'Cliente não encontrado.');
+    }
+
+    if (client.integrations.length === 0) {
+      return [];
+    }
+
+    let token: string | null = null;
+    try {
+      const auth = await this.getValidToken(organizationId);
+      token = auth.token;
+    } catch {
+      // Se Asana não estiver configurado/conectado ou credencial ausente/inválida
+      token = null;
+    }
+
+    const now = new Date();
+    const timeZone = resolveTimeZone((client as { organization?: { config?: { timezone?: string } | null } }).organization?.config?.timezone);
+    const result: ClientAsanaProject[] = [];
+
+    for (const integration of client.integrations) {
+      const meta = (integration.metadata as any) || {};
+      let projectName = meta.projectName || `Projeto Asana (${integration.externalId})`;
+      let color = meta.color || null;
+
+      if (!token) {
+        // Integração desconectada ou token indisponível:
+        // Métricas NÃO foram consultadas. Não retornar zeros falsos ou lastSyncAt falso.
+        result.push({
+          integrationId: integration.id,
+          clientId: client.id,
+          projectGid: integration.externalId,
+          projectName,
+          color,
+          totalTasks: null,
+          completedTasks: null,
+          pendingTasks: null,
+          overdueTasks: null,
+          metricsStatus: 'UNAVAILABLE',
+          metricsUpdatedAt: null,
+          metricsError: null,
+          createdAt: integration.createdAt,
+        });
+        continue;
+      }
+
+      try {
+        // Busca detalhes do projeto e tarefas do Asana com paginação completa
+        const [projectDetails, tasks] = await Promise.all([
+          this.fetchAsana<any>(`/projects/${integration.externalId}?opt_fields=name,color`, token).catch(() => null),
+          this.fetchAllProjectTasks(
+            integration.externalId,
+            token,
+            'name,completed,due_on,due_at'
+          ),
+        ]);
+
+        if (projectDetails?.name) {
+          projectName = projectDetails.name;
+          color = projectDetails.color || color;
+        }
+
+        const safeTasks = Array.isArray(tasks) ? tasks : [];
+        let completedTasks = 0;
+        let pendingTasks = 0;
+        let overdueTasks = 0;
+
+        for (const t of safeTasks) {
+          if (t.completed) {
+            completedTasks++;
+          } else {
+            pendingTasks++;
+            // DEC-F6-005: atraso no fuso da organização
+            if (isOverdueInTimeZone({ completed: false, dueOn: t.due_on, dueAt: t.due_at }, timeZone, now)) {
+              overdueTasks++;
+            }
+          }
+        }
+
+        result.push({
+          integrationId: integration.id,
+          clientId: client.id,
+          projectGid: integration.externalId,
+          projectName,
+          color,
+          totalTasks: safeTasks.length, // Zero confirmado pela API
+          completedTasks,
+          pendingTasks,
+          overdueTasks,
+          metricsStatus: 'LIVE',
+          metricsUpdatedAt: new Date().toISOString(),
+          metricsError: null,
+          createdAt: integration.createdAt,
+        });
+      } catch (err: any) {
+        // Falha na consulta de tarefas: registrar erro e NÃO colocar contadores zerados
+        const errMsg =
+          err instanceof AsanaIntegrationError
+            ? err.message
+            : 'Falha ao consultar tarefas do projeto no Asana.';
+
+        result.push({
+          integrationId: integration.id,
+          clientId: client.id,
+          projectGid: integration.externalId,
+          projectName,
+          color,
+          totalTasks: null,
+          completedTasks: null,
+          pendingTasks: null,
+          overdueTasks: null,
+          metricsStatus: 'ERROR',
+          metricsUpdatedAt: null,
+          metricsError: errMsg,
+          createdAt: integration.createdAt,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Vincula um ou mais projetos Asana a um cliente em client_integrations.
+   */
+  async linkProjectsToClient(
+    clientId: string,
+    organizationId: string,
+    projectGids: string[]
+  ): Promise<{ linked: number }> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+    });
+
+    if (!client) {
+      throw new AsanaIntegrationError(404, 'Cliente não encontrado.');
+    }
+
+    if (!projectGids || projectGids.length === 0) {
+      throw new AsanaIntegrationError(400, 'Nenhum projeto fornecido para vincular.');
+    }
+
+    let token: string | null = null;
+    try {
+      const auth = await this.getValidToken(organizationId);
+      token = auth.token;
+    } catch {
+      token = null;
+    }
+
+    let linkedCount = 0;
+
+    for (const projectGid of projectGids) {
+      let projectName = `Projeto ${projectGid}`;
+      let color: string | null = null;
+
+      if (token) {
+        try {
+          const p = await this.fetchAsana<any>(`/projects/${projectGid}?opt_fields=name,color`, token);
+          if (p?.name) {
+            projectName = p.name;
+            color = p.color || null;
+          }
+        } catch {
+          // Prossegue com nome padrão se a consulta falhar
+        }
+      }
+
+      // Upsert para garantir idempotência sem duplicar
+      await prisma.clientIntegration.upsert({
+        where: {
+          clientId_provider_externalId: {
+            clientId,
+            provider: 'ASANA',
+            externalId: projectGid,
+          },
+        },
+        create: {
+          clientId,
+          provider: 'ASANA',
+          externalId: projectGid,
+          metadata: {
+            projectName,
+            color,
+            linkedAt: new Date().toISOString(),
+          },
+        },
+        update: {
+          metadata: {
+            projectName,
+            color,
+            updatedAt: new Date().toISOString(),
+          },
+        },
+      });
+
+      // Cria ou assegura webhook ativo para o projeto nesta organização
+      await this.createProjectWebhook(organizationId, projectGid).catch((err) => {
+        console.warn(`[AsanaService] Não foi possível registrar webhook para o projeto ${projectGid}:`, err?.message || err);
+      });
+
+      linkedCount++;
+    }
+
+    return { linked: linkedCount };
+  }
+
+  /**
+   * Desvincula um projeto Asana de um cliente.
+   */
+  async unlinkProject(clientId: string, organizationId: string, integrationId: string): Promise<void> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+    });
+
+    if (!client) {
+      throw new AsanaIntegrationError(404, 'Cliente não encontrado.');
+    }
+
+    const integration = await prisma.clientIntegration.findFirst({
+      where: {
+        id: integrationId,
+        clientId,
+        provider: 'ASANA',
+      },
+    });
+
+    if (!integration) {
+      throw new AsanaIntegrationError(404, 'Vínculo de integração não encontrado.');
+    }
+
+    const projectGid = integration.externalId;
+
+    await prisma.clientIntegration.delete({
+      where: { id: integrationId },
+    });
+
+    // Se nenhum outro cliente da organização ainda usar este projeto, remove o webhook
+    await this.removeProjectWebhookIfNeeded(organizationId, projectGid).catch((err) => {
+      console.warn(`[AsanaService] Erro ao verificar/remover webhook do projeto ${projectGid}:`, err?.message || err);
+    });
+  }
+
+  /**
+   * Retorna as tarefas consolidadas de todos os projetos vinculados ao cliente.
+   */
+  async getClientTasks(clientId: string, organizationId: string): Promise<ClientAsanaTask[]> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+        // DEC-F6-005: fuso da organização na mesma consulta
+        organization: { select: { config: { select: { timezone: true } } } },
+      },
+    });
+
+    if (!client) {
+      throw new AsanaIntegrationError(404, 'Cliente não encontrado.');
+    }
+
+    if (client.integrations.length === 0) {
+      return [];
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+    const now = new Date();
+    const timeZone = resolveTimeZone((client as { organization?: { config?: { timezone?: string } | null } }).organization?.config?.timezone);
+    const allTasks: ClientAsanaTask[] = [];
+
+    for (const integration of client.integrations) {
+      const meta = (integration.metadata as any) || {};
+      const projectName = meta.projectName || `Projeto ${integration.externalId}`;
+
+      try {
+        const tasks = await this.fetchAllProjectTasks(
+          integration.externalId,
+          token,
+          'name,completed,due_on,due_at,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,permalink_url'
+        );
+
+        for (const t of tasks) {
+          // DEC-F6-005: atraso no fuso da organização
+          const isOverdue = isOverdueInTimeZone({ completed: t.completed, dueOn: t.due_on, dueAt: t.due_at }, timeZone, now);
+
+          const sectionMembership = t.memberships?.find((m: any) => m.section?.name);
+          const sectionName = sectionMembership?.section?.name || null;
+          const sectionGid = sectionMembership?.section?.gid || null;
+
+          allTasks.push({
+            gid: t.gid,
+            name: t.name,
+            completed: t.completed || false,
+            dueOn: t.due_on || null,
+            dueAt: t.due_at || null,
+            isOverdue,
+            sectionName,
+            sectionGid,
+            assignee: t.assignee
+              ? {
+                  gid: t.assignee.gid,
+                  name: t.assignee.name,
+                  photoUrl: t.assignee.photo?.image_60x60 || null,
+                }
+              : null,
+            permalinkUrl: t.permalink_url || `https://app.asana.com/0/${integration.externalId}/${t.gid}`,
+            projectGid: integration.externalId,
+            projectName,
+          });
+        }
+      } catch (err: any) {
+        // Falha parcial não é ignorada silenciosamente.
+        // Retorna erro controlado e sanitizado sem expor credenciais ou tokens.
+        const status = err instanceof AsanaIntegrationError ? err.statusCode : 502;
+        const sanitizedMsg =
+          err instanceof AsanaIntegrationError
+            ? `Falha ao carregar tarefas do projeto "${projectName}": ${err.message}`
+            : `Falha ao carregar tarefas do projeto "${projectName}" no Asana.`;
+        throw new AsanaIntegrationError(status, sanitizedMsg, {
+          projectGid: integration.externalId,
+          projectName,
+        });
+      }
+    }
+
+    // Ordenação: primeiro pendentes (atrasadas primeiro), depois concluídas
+    return allTasks.sort((a, b) => {
+      if (a.completed !== b.completed) {
+        return a.completed ? 1 : -1;
+      }
+      if (a.isOverdue !== b.isOverdue) {
+        return a.isOverdue ? -1 : 1;
+      }
+      if (a.dueOn && b.dueOn) {
+        return a.dueOn.localeCompare(b.dueOn);
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  /**
+   * Busca os dados detalhados de uma única tarefa no Asana.
+   * Valida estritamente se a tarefa pertence a um dos projetos vinculados ao cliente.
+   */
+  async getClientSingleTask(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<ClientAsanaTask | null> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      return null;
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+    const now = new Date();
+
+    try {
+      const t = await this.fetchAsana<any>(
+        `/tasks/${taskGid}?opt_fields=name,completed,due_on,due_at,notes,html_notes,assignee.name,assignee.photo,memberships.section.name,memberships.section.gid,memberships.project.name,memberships.project.gid,permalink_url,projects.gid,projects.name,tags.name,custom_fields.name,custom_fields.display_value,custom_fields.resource_subtype,custom_fields.text_value,custom_fields.number_value,custom_fields.enum_options.name,custom_fields.enum_options.color,custom_fields.enum_options.enabled,custom_fields.enum_value.name,custom_fields.enum_value.color`,
+        token
+      );
+
+      if (!t || !t.gid) return null;
+
+      const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+      const matchingProject = t.projects?.find((p: any) => clientProjectGids.has(p.gid));
+
+      // Validação estrita de pertencimento: impede acesso a tarefas fora dos projetos vinculados ao cliente
+      if (!matchingProject) {
+        throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos Asana vinculados a este cliente.');
+      }
+
+      let isOverdue = false;
+      if (!t.completed && (t.due_on || t.due_at)) {
+        const dueDate = new Date(t.due_at || `${t.due_on}T23:59:59`);
+        if (dueDate < now) {
+          isOverdue = true;
+        }
+      }
+
+      const sectionMembership = t.memberships?.find((m: any) => m.section?.name);
+      const sectionName = sectionMembership?.section?.name || null;
+      const sectionGid = sectionMembership?.section?.gid || null;
+
+      const projectGid = matchingProject.gid;
+      const meta = (client.integrations.find((i) => i.externalId === projectGid)?.metadata as any) || {};
+      const projectName = matchingProject.name || meta.projectName || `Projeto ${projectGid}`;
+
+      const tags: AsanaTag[] = Array.isArray(t.tags)
+        ? t.tags.map((tag: any) => ({ gid: tag.gid, name: tag.name }))
+        : [];
+
+      const customFields: AsanaCustomField[] = Array.isArray(t.custom_fields)
+        ? t.custom_fields.map((cf: any) => ({
+            gid: cf.gid,
+            name: cf.name,
+            value: cf.display_value !== null && cf.display_value !== undefined ? String(cf.display_value) : '',
+            type: cf.resource_subtype || 'text',
+            textValue: cf.text_value ?? null,
+            numberValue: typeof cf.number_value === 'number' ? cf.number_value : null,
+            enumOptions: Array.isArray(cf.enum_options)
+              ? cf.enum_options.map((opt: any) => ({
+                  gid: opt.gid,
+                  name: opt.name,
+                  color: opt.color || null,
+                  enabled: opt.enabled ?? true,
+                }))
+              : undefined,
+            enumValue: cf.enum_value
+              ? {
+                  gid: cf.enum_value.gid,
+                  name: cf.enum_value.name,
+                  color: cf.enum_value.color || null,
+                }
+              : null,
+          }))
+        : [];
+
+      return {
+        gid: t.gid,
+        name: t.name,
+        notes: t.notes || null,
+        htmlNotes: t.html_notes || null,
+        completed: t.completed || false,
+        dueOn: t.due_on || null,
+        dueAt: t.due_at || null,
+        isOverdue,
+        sectionName,
+        sectionGid,
+        assignee: t.assignee
+          ? {
+              gid: t.assignee.gid,
+              name: t.assignee.name,
+              photoUrl: t.assignee.photo?.image_60x60 || null,
+            }
+          : null,
+        permalinkUrl: t.permalink_url || `https://app.asana.com/0/${projectGid}/${t.gid}`,
+        projectGid,
+        projectName,
+        tags,
+        customFields,
+      };
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) {
+        throw err;
+      }
+      if (err?.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Retorna as seções válidas de um projeto Asana vinculado ao cliente.
+   */
+  async getProjectSections(
+    clientId: string,
+    organizationId: string,
+    projectGid: string
+  ): Promise<AsanaSection[]> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA', externalId: projectGid },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Projeto não encontrado ou não vinculado a este cliente.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+
+    try {
+      const sections = await this.fetchAsana<any[]>(
+        `/projects/${projectGid}/sections?opt_fields=name`,
+        token
+      );
+
+      if (!Array.isArray(sections)) return [];
+
+      return sections.map((s) => ({
+        gid: s.gid,
+        name: s.name,
+      }));
+    } catch (err: any) {
+      console.warn(`[AsanaService] Falha ao buscar seções do projeto ${projectGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Helper privado para validar se a tarefa informada pertence a projetos vinculados ao cliente
+   */
+  private async validateTaskBelongsToClient(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<{ token: string; task: any }> {
+    const client = await prisma.client.findFirst({
+      where: { id: clientId, organizationId },
+      include: {
+        integrations: {
+          where: { provider: 'ASANA' },
+        },
+      },
+    });
+
+    if (!client || client.integrations.length === 0) {
+      throw new AsanaIntegrationError(404, 'Cliente ou projetos vinculados não encontrados.');
+    }
+
+    const { token } = await this.getValidToken(organizationId);
+    const task = await this.fetchAsana<any>(`/tasks/${taskGid}?opt_fields=projects.gid,parent.projects.gid`, token);
+    if (!task || !task.gid) {
+      throw new AsanaIntegrationError(404, 'Tarefa não encontrada no Asana.');
+    }
+
+    const clientProjectGids = new Set(client.integrations.map((i) => i.externalId));
+    const belongsDirectly = task.projects?.some((p: any) => clientProjectGids.has(p.gid));
+    const belongsViaParent = task.parent?.projects?.some((p: any) => clientProjectGids.has(p.gid));
+
+    if (!belongsDirectly && !belongsViaParent) {
+      throw new AsanaIntegrationError(403, 'A tarefa informada não pertence aos projetos vinculados a este cliente.');
+    }
+
+    return { token, task };
+  }
+
+  /**
+   * Lista subtarefas de uma tarefa Asana vinculada ao cliente.
+   */
+  async getTaskSubtasks(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaSubtask[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const subtasks = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/subtasks?opt_fields=name,completed,due_on,due_at,assignee.name,assignee.photo`,
+        token
+      );
+
+      if (!Array.isArray(subtasks)) return [];
+
+      return subtasks.map((st) => ({
+        gid: st.gid,
+        name: st.name || 'Subtarefa sem título',
+        completed: Boolean(st.completed),
+        dueOn: st.due_on || null,
+        dueAt: st.due_at || null,
+        assignee: st.assignee
+          ? {
+              gid: st.assignee.gid,
+              name: st.assignee.name,
+              photoUrl: st.assignee.photo?.image_60x60 || null,
+            }
+          : null,
+      }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar subtarefas da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Lista histórico de comentários e atividades (stories) da tarefa.
+   */
+  async getTaskStories(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaStory[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const stories = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/stories?opt_fields=text,html_text,created_at,created_by.name,created_by.photo,type,resource_subtype`,
+        token
+      );
+
+      if (!Array.isArray(stories)) return [];
+
+      return stories
+        .filter((s) => Boolean(s.text || s.html_text))
+        .map((s) => ({
+          gid: s.gid,
+          text: s.text || '',
+          htmlText: s.html_text || null,
+          type: s.resource_subtype === 'comment_added' || s.type === 'comment' ? ('comment' as const) : ('system' as const),
+          createdAt: s.created_at || new Date().toISOString(),
+          createdBy: s.created_by
+            ? {
+                gid: s.created_by.gid,
+                name: s.created_by.name,
+                photoUrl: s.created_by.photo?.image_60x60 || null,
+              }
+            : null,
+        }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar stories da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Lista anexos vinculados a uma tarefa no Asana Cloud.
+   */
+  async getTaskAttachments(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaAttachment[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const attachments = await this.fetchAsana<any[]>(
+        `/tasks/${taskGid}/attachments?opt_fields=name,download_url,view_url,permanent_url,host,size,created_at`,
+        token
+      );
+
+      if (!Array.isArray(attachments)) return [];
+
+      return attachments.map((att) => ({
+        gid: att.gid,
+        name: att.name || 'Anexo sem nome',
+        downloadUrl: att.download_url || null,
+        viewUrl: att.view_url || null,
+        permanentUrl: att.permanent_url || null,
+        host: att.host || 'asana',
+        size: typeof att.size === 'number' ? att.size : null,
+        createdAt: att.created_at || new Date().toISOString(),
+      }));
+    } catch (err: any) {
+      if (err instanceof AsanaIntegrationError) throw err;
+      console.warn(`[AsanaService] Erro ao buscar anexos da tarefa ${taskGid}:`, err);
+      return [];
+    }
+  }
+
+  /**
+   * Lista tags disponíveis no workspace do Asana
+   */
+  async getWorkspaceTags(organizationId: string): Promise<AsanaTag[]> {
+    const { token, workspaceId: storedWorkspaceId } = await this.getValidToken(organizationId);
+    let workspaceId = storedWorkspaceId;
+    if (!workspaceId) {
+      const workspaces = await this.fetchAsana<any[]>('/workspaces', token);
+      workspaceId = workspaces?.[0]?.gid;
+    }
+    if (!workspaceId) return [];
+
+    try {
+      const tags = await this.fetchAsana<any[]>(`/workspaces/${workspaceId}/tags?opt_fields=name`, token);
+      if (!Array.isArray(tags)) return [];
+      return tags.map((t) => ({ gid: t.gid, name: t.name }));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Lista dependências (tarefas que bloqueiam e tarefas bloqueadas por esta)
+   */
+  async getTaskDependencies(
+    clientId: string,
+    organizationId: string,
+    taskGid: string
+  ): Promise<AsanaDependency[]> {
+    const { token } = await this.validateTaskBelongsToClient(clientId, organizationId, taskGid);
+
+    try {
+      const [dependencies, dependents] = await Promise.all([
+        this.fetchAsana<any[]>(`/tasks/${taskGid}/dependencies?opt_fields=name,completed`, token).catch(() => []),
+        this.fetchAsana<any[]>(`/tasks/${taskGid}/dependents?opt_fields=name,completed`, token).catch(() => []),
+      ]);
+
+      const result: AsanaDependency[] = [];
+
+      if (Array.isArray(dependencies)) {
+        for (const dep of dependencies) {
+          result.push({
+            gid: dep.gid,
+            name: dep.name || 'Tarefa sem nome',
+            completed: Boolean(dep.completed),
+            relationship: 'blocking',
+          });
+        }
+      }
+
+      if (Array.isArray(dependents)) {
+        for (const dep of dependents) {
+          result.push({
+            gid: dep.gid,
+            name: dep.name || 'Tarefa sem nome',
+            completed: Boolean(dep.completed),
+            relationship: 'dependent',
+          });
+        }
+      }
+
+      return result;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Retorna os membros do workspace Asana para atribuição de responsável.
+   */
+  async getWorkspaceUsers(organizationId: string): Promise<AsanaUser[]> {
+    const { token, workspaceId: storedWorkspaceId } = await this.getValidToken(organizationId);
+
+    let workspaceId = storedWorkspaceId;
+    if (!workspaceId) {
+      const workspaces = await this.fetchAsana<any[]>('/workspaces', token);
+      workspaceId = workspaces?.[0]?.gid;
+    }
+
+    if (!workspaceId) {
+      return [];
+    }
+
+    try {
+      const users = await this.fetchAsana<any[]>(
+        `/workspaces/${workspaceId}/users?opt_fields=name,email,photo.image_60x60`,
+        token
+      );
+
+      if (!Array.isArray(users)) return [];
+
+      return users
+        .map((u) => ({
+          gid: u.gid,
+          name: u.name,
+          email: u.email || null,
+          photoUrl: u.photo?.image_60x60 || null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    } catch (err) {
+      console.warn('[AsanaService] Falha ao obter usuários do workspace:', err);
+      return [];
+    }
+  }
+
+  /**
+   * Renovação automática do token OAuth via Refresh Token no backend.
+   */
+  private async refreshToken(integrationId: string, refreshToken: string): Promise<{ accessToken: string }> {
+    const clientId = process.env.ASANA_CLIENT_ID;
+    const clientSecret = process.env.ASANA_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new AsanaIntegrationError(500, 'Configurações de OAuth do Asana ausentes no servidor.');
+    }
+
+    const params = new URLSearchParams({
+      grant_type: 'refresh_token',
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+
+    const response = await fetch('https://app.asana.com/-/oauth_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      throw new AsanaIntegrationError(response.status, 'Falha ao renovar token do Asana.');
+    }
+
+    const data = (await response.json()) as { expires_in?: number; access_token: string; refresh_token?: string };
+    const expiresAt = data.expires_in ? new Date(Date.now() + data.expires_in * 1000) : null;
+    const newRefreshToken = data.refresh_token || refreshToken;
+
+    // Atualiza a IntegrationConnection canônica
+    const connection = await prisma.integrationConnection.findUnique({
+      where: { id: integrationId },
+    });
+
+    if (!connection) {
+      throw new AsanaIntegrationError(404, 'Conexão canônica do Asana não encontrada para renovação.');
+    }
+
+    await integrationConnectionService.upsertConnection({
+      organizationId: connection.organizationId,
+      provider: 'ASANA',
+      rawCredential: {
+        accessToken: data.access_token,
+        refreshToken: newRefreshToken,
+        expiresAt: expiresAt?.toISOString() || null,
+      },
+      displayName: connection.displayName || 'Asana Workspace',
+      externalAccountId: connection.externalScopeId,
+      status: 'ACTIVE',
+      metadata: {
+        ...(typeof connection.metadata === 'object' && connection.metadata !== null ? connection.metadata : {}),
+        lastRefreshedAt: new Date().toISOString(),
+      },
+    });
+
+    return { accessToken: data.access_token };
+  }
+
+  /**
+   * Troca o Authorization Code retornado pelo Asana por Access Token e Refresh Token no backend.
+   * Persiste canonicamente em IntegrationConnection com criptografia.
+   */
+  async exchangeOAuthCode(organizationId: string, code: string, redirectUri: string): Promise<void> {
+    const clientId = process.env.ASANA_CLIENT_ID;
+    const clientSecret = process.env.ASANA_CLIENT_SECRET;
+
+    if (!clientId || !clientSecret) {
+      throw new AsanaIntegrationError(500, 'Credenciais ASANA_CLIENT_ID ou ASANA_CLIENT_SECRET não configuradas no servidor.');
+    }
+
+    const params = new URLSearchParams({
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      code,
+    });
+
+    const response = await fetch('https://app.asana.com/-/oauth_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+    });
+
+    if (!response.ok) {
+      const err = ((await response.json().catch(() => ({}))) as { error_description?: string }) || {};
+      throw new AsanaIntegrationError(response.status, err.error_description || 'Falha ao autenticar com o Asana.');
+    }
+
+    const tokenData = (await response.json()) as {
+      expires_in?: number;
+      access_token: string;
+      refresh_token?: string;
+      data?: { gid?: string; name?: string; email?: string; workspaces?: Array<{ gid?: string; name?: string }> };
+    };
+    const expiresAt = tokenData.expires_in ? new Date(Date.now() + tokenData.expires_in * 1000) : null;
+    const workspaceId = tokenData.data?.workspaces?.[0]?.gid || null;
+    const workspaceName = tokenData.data?.workspaces?.[0]?.name || 'Asana Workspace';
+
+    // Persiste canonicamente em IntegrationConnection (Criptografado)
+    await integrationConnectionService.upsertConnection({
+      organizationId,
+      provider: 'ASANA',
+      rawCredential: {
+        accessToken: tokenData.access_token,
+        refreshToken: tokenData.refresh_token || null,
+        expiresAt: expiresAt?.toISOString() || null,
+        workspaceId,
+      },
+      displayName: tokenData.data?.name ? `${workspaceName} (${tokenData.data.name})` : workspaceName,
+      externalAccountId: workspaceId || tokenData.data?.gid || null,
+      status: 'ACTIVE',
+      metadata: {
+        userGid: tokenData.data?.gid,
+        userName: tokenData.data?.name,
+        userEmail: tokenData.data?.email,
+        workspaceId,
+        connectedAt: new Date().toISOString(),
+      },
+    });
+
+    // Se houver registro legado na OrganizationIntegration, remove para evitar fontes conflitantes
+    await prisma.organizationIntegration.deleteMany({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+      },
+    }).catch(() => {});
+  }
+
+  /**
+   * Tenta revogar o token OAuth no servidor do Asana (RFC 7009).
+   * Falhas de rede ou tokens já revogados são silenciadas para garantir que a desconexão local sempre ocorra.
+   */
+  private async revokeToken(token: string): Promise<void> {
+    try {
+      const clientId = process.env.ASANA_CLIENT_ID;
+      const clientSecret = process.env.ASANA_CLIENT_SECRET;
+      if (!clientId || !clientSecret || !token) return;
+
+      const params = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        token,
+      });
+
+      await fetch('https://app.asana.com/-/oauth_revoke', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      }).catch(() => {});
+    } catch {
+      // Falha remota não bloqueia o expurgo local seguro
+    }
+  }
+
+  /**
+   * Desconecta completamente o Asana da organização:
+   * 1. Revoga o token no Asana (se possível);
+   * 2. Remove todos os webhooks remotos e locais da organização;
+   * 3. Atualiza IntegrationConnection para DISCONNECTED usando o serviço canônico;
+   * 4. Exclui o registro OrganizationIntegration do Asana se ainda existir;
+   * 5. PRESERVA TODOS os ClientIntegration (vínculo de projetos com clientes permanece);
+   * 6. NÃO envia nenhuma deleção para projetos ou tarefas reais no Asana.
+   */
+  async disconnect(organizationId: string): Promise<void> {
+    // 1. Localiza conexão canônica ou legado
+    const canonicalConn = await prisma.integrationConnection.findFirst({
+      where: {
+        organizationId,
+        provider: 'ASANA',
+        clientId: null,
+      },
+    });
+
+    const orgIntegration = await prisma.organizationIntegration.findUnique({
+      where: {
+        organizationId_provider: {
+          organizationId,
+          provider: 'ASANA',
+        },
+      },
+    });
+
+    if (!canonicalConn && !orgIntegration) {
+      throw new AsanaIntegrationError(404, 'Nenhuma integração Asana ativa encontrada para esta organização.');
+    }
+
+    // 2. Remove todos os webhooks remotos e locais da organização
+    await this.removeAllWebhooks(organizationId).catch(() => {});
+
+    // 3. Revogação remota segura de tokens
+    try {
+      if (canonicalConn) {
+        const cred = integrationConnectionService.getDecryptedCredential<{ accessToken?: string; refreshToken?: string }>(canonicalConn);
+        if (cred?.refreshToken) {
+          await this.revokeToken(cred.refreshToken);
+        } else if (cred?.accessToken) {
+          await this.revokeToken(cred.accessToken);
+        }
+      } else if (orgIntegration) {
+        const refreshToken = orgIntegration.refreshToken ? decryptToken(orgIntegration.refreshToken) : null;
+        const accessToken = orgIntegration.accessToken ? decryptToken(orgIntegration.accessToken) : null;
+        if (refreshToken) {
+          await this.revokeToken(refreshToken);
+        } else if (accessToken) {
+          await this.revokeToken(accessToken);
+        }
+      }
+    } catch {
+      // Prossegue mesmo se a chamada remota falhar
+    }
+
+    // 4. ClientIntegration (Cliente <-> Projeto Asana) é PRESERVADO por regra de integridade do histórico!
+
+    // 5. Atualiza status na IntegrationConnection canônica para DISCONNECTED via serviço canônico
+    if (canonicalConn) {
+      await integrationConnectionService.disconnectConnection(organizationId, canonicalConn.id);
+    }
+
+    // 6. Remove a integração legada se ainda existir
+    if (orgIntegration) {
+      await prisma.organizationIntegration.delete({
+        where: { id: orgIntegration.id },
+      }).catch(() => {});
+    }
+  }
+
+  /**
+   * Retorna a URL base para receber webhooks do Asana.
+   */
+  /**
+   * Endereço público deste Hub para receber avisos do Asana (DEC-F6-004).
+   * Sem WEBHOOK_BASE_URL/API_BASE_URL configurado, recusa: antes caía no endereço do Hub 2.0,
+   * o que mandaria os avisos para o sistema errado.
+   */
+  getWebhookBaseUrl(): string {
+    const configured = process.env.WEBHOOK_BASE_URL || process.env.API_BASE_URL;
+    if (!configured || !/^https:\/\//i.test(configured)) {
+      throw new AsanaIntegrationError(
+        503,
+        'Endereço público do Hub para avisos do Asana não configurado (WEBHOOK_BASE_URL com https://).'
+      );
+    }
+    return configured.replace(/\/$/, '');
+  }
+
+  /**
+   * Cria ou assegura assinatura de webhook ativa para o projeto na organização.
+   */
+  async createProjectWebhook(organizationId: string, projectGid: string) {
+    // 1. Verifica se já existe webhook para este projeto na organização
+    const existing = await prisma.asanaWebhookSubscription.findUnique({
+      where: {
+        organizationId_resourceGid: {
+          organizationId,
+          resourceGid: projectGid,
+        },
+      },
+    });
+
+    if (existing && existing.active) {
+      return existing;
+    }
+
+    const subscriptionId = existing?.id || crypto.randomUUID();
+    const target = `${this.getWebhookBaseUrl()}/integrations/asana/webhooks/${subscriptionId}`;
+    const initialSecret = existing?.secret || encryptToken('pending_handshake');
+
+    const subscription = existing
+      ? await prisma.asanaWebhookSubscription.update({
+          where: { id: existing.id },
+          data: { target, updatedAt: new Date() },
+        })
+      : await prisma.asanaWebhookSubscription.create({
+          data: {
+            id: subscriptionId,
+            organizationId,
+            resourceGid: projectGid,
+            target,
+            secret: initialSecret,
+            active: false,
+          },
+        });
+
+    // 2. Tenta registrar o webhook no Asana via API oficial
+    try {
+      const { token } = await this.getValidToken(organizationId);
+      const res = await this.fetchAsana<any>('/webhooks', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          data: {
+            resource: projectGid,
+            target,
+          },
+        }),
+      });
+
+      if (res?.gid) {
+        await prisma.asanaWebhookSubscription.update({
+          where: { id: subscription.id },
+          data: { webhookGid: res.gid },
+        });
+      }
+    } catch {
+      // Falha no registro remoto (ex: em desenvolvimento sem IP público) não impede fluxo
+    }
+
+    return subscription;
+  }
+
+  /**
+   * Remove o webhook remoto no Asana e localmente se nenhum outro cliente da mesma organização usar o projeto.
+   */
+  async removeProjectWebhookIfNeeded(organizationId: string, projectGid: string): Promise<void> {
+    const orgClients = await prisma.client.findMany({
+      where: { organizationId },
+      select: { id: true },
+    });
+
+    const clientIds = orgClients.map((c) => c.id);
+    const remainingCount = await prisma.clientIntegration.count({
+      where: {
+        clientId: { in: clientIds },
+        provider: 'ASANA',
+        externalId: projectGid,
+      },
+    });
+
+    // Se ainda houver vínculo em outro cliente da mesma organização, mantém o webhook
+    if (remainingCount > 0) {
+      return;
+    }
+
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: {
+        organizationId_resourceGid: {
+          organizationId,
+          resourceGid: projectGid,
+        },
+      },
+    });
+
+    if (!sub) return;
+
+    if (sub.webhookGid) {
+      try {
+        const { token } = await this.getValidToken(organizationId);
+        await this.fetchAsana(`/webhooks/${sub.webhookGid}`, token, { method: 'DELETE' }).catch(() => {});
+      } catch {}
+    }
+
+    await prisma.asanaWebhookSubscription.delete({
+      where: { id: sub.id },
+    });
+  }
+
+  /**
+   * Remove todos os webhooks da organização ao desconectar a conta.
+   */
+  async removeAllWebhooks(organizationId: string): Promise<void> {
+    const subs = await prisma.asanaWebhookSubscription.findMany({
+      where: { organizationId },
+    });
+
+    if (subs.length === 0) return;
+
+    try {
+      const { token } = await this.getValidToken(organizationId);
+      for (const sub of subs) {
+        if (sub.webhookGid) {
+          await this.fetchAsana(`/webhooks/${sub.webhookGid}`, token, { method: 'DELETE' }).catch(() => {});
+        }
+      }
+    } catch {}
+
+    await prisma.asanaWebhookSubscription.deleteMany({
+      where: { organizationId },
+    });
+  }
+
+  /**
+   * Processa o handshake do Asana salvando o secret criptografado e ativando a subscription.
+   */
+  async handleWebhookHandshake(subscriptionId: string, xHookSecret: string): Promise<void> {
+    const encryptedSecret = encryptToken(xHookSecret);
+
+    const sub = await prisma.asanaWebhookSubscription.update({
+      where: { id: subscriptionId },
+      data: {
+        secret: encryptedSecret,
+        active: true,
+        updatedAt: new Date(),
+      },
+    });
+
+    console.log(`[Asana Webhook] handshake recebido subscriptionId=${subscriptionId} resourceGid=${sub.resourceGid} handshake=success`);
+  }
+
+  /**
+   * Valida a assinatura HMAC-SHA256 e retorna a subscription em uma única consulta ao banco.
+   */
+  async verifyAndGetSubscription(subscriptionId: string, signature: string, rawBody: string) {
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: { id: subscriptionId },
+    });
+
+    if (!sub || !sub.secret || !signature) {
+      return null;
+    }
+
+    try {
+      const plainSecret = decryptToken(sub.secret);
+      const computedSignature = crypto.createHmac('sha256', plainSecret).update(rawBody).digest('hex');
+
+      const sigBuffer = Buffer.from(signature);
+      const computedBuffer = Buffer.from(computedSignature);
+
+      if (sigBuffer.length !== computedBuffer.length) {
+        return null;
+      }
+
+      if (!crypto.timingSafeEqual(sigBuffer, computedBuffer)) {
+        return null;
+      }
+
+      return sub;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Valida a assinatura HMAC-SHA256 do webhook usando o payload bruto (compatibilidade legada).
+   */
+  async verifyWebhookSignature(subscriptionId: string, signature: string, rawBody: string): Promise<boolean> {
+    const sub = await this.verifyAndGetSubscription(subscriptionId, signature, rawBody);
+    return sub !== null;
+  }
+
+  /**
+   * Processa os eventos e publica via SSE imediatamente, gravando no banco em background para latência zero.
+   */
+  processWebhookPayloadFast(sub: any, payload: any, tWebhookReceived: number): void {
+    // 1. Atualiza lastEventAt no PostgreSQL em background (fire-and-forget, sem bloquear SSE)
+    prisma.asanaWebhookSubscription.update({
+      where: { id: sub.id },
+      data: { lastEventAt: new Date() },
+    }).catch((err) => {
+      console.warn(`[Asana Webhook] Falha assíncrona ao atualizar lastEventAt:`, err?.message || err);
+    });
+
+    const events = Array.isArray(payload?.events) ? payload.events : [];
+    const tServerPublished = Date.now();
+
+    for (const event of events) {
+      const resType = event.resource?.resource_type || 'task';
+      const action = event.action || 'changed';
+
+      const normalized: AsanaNormalizedEvent = {
+        type: `asana.${resType}.${action}`,
+        organizationId: sub.organizationId,
+        projectGid: sub.resourceGid,
+        resourceGid: event.resource?.gid,
+        resourceType: resType,
+        action,
+        timestamp: event.created_at || new Date().toISOString(),
+        details: event,
+        timing: {
+          asanaCreatedAt: event.created_at || null,
+          serverReceivedAt: tWebhookReceived,
+          serverPublishedAt: tServerPublished,
+        },
+      };
+
+      sseHub.publishToOrganization(sub.organizationId, normalized);
+    }
+  }
+
+  /**
+   * Processa os eventos recebidos pelo webhook (compatibilidade).
+   */
+  async processWebhookPayload(subscriptionId: string, payload: any): Promise<void> {
+    const sub = await prisma.asanaWebhookSubscription.findUnique({
+      where: { id: subscriptionId },
+    });
+
+    if (!sub) return;
+    this.processWebhookPayloadFast(sub, payload, Date.now());
+  }
+
+  /**
+   * Retorna diagnóstico seguro do pipeline de webhooks e SSE para a organização (ADMIN).
+   */
+  async getDiagnostics(organizationId: string) {
+    let tableExists = false;
+    let subscriptions: any[] = [];
+    let dbError: string | null = null;
+
+    try {
+      const check = await prisma.$queryRaw<any[]>`
+        SELECT to_regclass('public.asana_webhook_subscriptions') as table_name;
+      `;
+      tableExists = check && check[0] && check[0].table_name !== null;
+
+      if (tableExists) {
+        subscriptions = await prisma.asanaWebhookSubscription.findMany({
+          where: { organizationId },
+          select: {
+            id: true,
+            organizationId: true,
+            resourceGid: true,
+            webhookGid: true,
+            target: true,
+            active: true,
+            lastEventAt: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+      }
+    } catch (err: any) {
+      dbError = err?.message || String(err);
+    }
+
+    let remoteWebhooks: any = null;
+    let remoteError: string | null = null;
+    let workspaceId: string | null = null;
+
+    try {
+      const auth = await this.getValidToken(organizationId);
+      workspaceId = auth.workspaceId || null;
+      if (workspaceId) {
+        remoteWebhooks = await this.fetchAsana(`/webhooks?workspace=${workspaceId}`, auth.token);
+      }
+    } catch (err: any) {
+      remoteError = err?.message || String(err);
+    }
+
+    const linkedProjects = await prisma.clientIntegration.findMany({
+      where: {
+        client: { organizationId },
+        provider: 'ASANA',
+      },
+      select: {
+        id: true,
+        clientId: true,
+        externalId: true,
+        metadata: true,
+        createdAt: true,
+      },
+    });
+
+    const activeSSEConnections = sseHub.getActiveConnectionsCount(organizationId);
+
+    return {
+      organizationId,
+      workspaceId,
+      tableExists,
+      dbError,
+      subscriptions,
+      remoteWebhooks,
+      remoteError,
+      linkedProjects,
+      activeSSEConnections,
+    };
+  }
+
+  /**
+   * Sincroniza e garante webhooks remotos e locais para todos os projetos vinculados da organização.
+   */
+  async syncWebhooks(organizationId: string) {
+    const linkedProjects = await prisma.clientIntegration.findMany({
+      where: {
+        client: { organizationId },
+        provider: 'ASANA',
+      },
+      select: { externalId: true },
+    });
+
+    const uniqueGids = Array.from(new Set(linkedProjects.map((p) => p.externalId)));
+    const results: any[] = [];
+
+    for (const gid of uniqueGids) {
+      try {
+        const sub = await this.createProjectWebhook(organizationId, gid);
+        results.push({ projectGid: gid, success: true, subscriptionId: sub?.id, active: sub?.active });
+      } catch (err: any) {
+        results.push({ projectGid: gid, success: false, error: err?.message || String(err) });
+      }
+    }
+
+    return { synced: results.length, details: results };
+  }
+}
+
+export const asanaService = new AsanaService();
+

@@ -1,0 +1,394 @@
+/* ==========================================================================
+   ZAFIRA HUB 2.1 — ENTRADA CANÔNICA DE PROJETOS (F6-IMP.1)
+   CSS Module canônico e responsivo consumindo exclusivamente tokens --z-*
+   ========================================================================== */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-6, 24px);
+  width: 100%;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--z-space-4, 16px) var(--z-space-4, 16px) var(--z-space-12, 48px);
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding: var(--z-space-6, 24px) var(--z-space-6, 24px) var(--z-space-12, 48px);
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Cabeçalho da Página
+   -------------------------------------------------------------------------- */
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-4, 16px);
+  padding-bottom: var(--z-space-4, 16px);
+  border-bottom: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+}
+
+@media (min-width: 768px) {
+  .header {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.headerInfo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-1, 4px);
+}
+
+.headerTitle {
+  font-family: var(--z-font-ui, inherit);
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--z-text-primary, #ffffff);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.headerSubtitle {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-2, 8px);
+  font-size: 14px;
+  color: var(--z-text-muted, #94a3b8);
+  margin: 0;
+}
+
+.headerOrgBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: var(--z-text-secondary, #cbd5e1);
+}
+
+/* Status Corporativo do Asana */
+.statusContainer {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3, 12px);
+}
+
+.statusCard {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3, 12px);
+  padding: var(--z-space-2, 8px) var(--z-space-3, 12px);
+  background-color: var(--z-surface-card, #111116);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-md, 8px);
+  font-size: 13px;
+}
+
+.statusIndicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.statusConnected {
+  background-color: var(--z-status-success, #10b981);
+  box-shadow: 0 0 8px rgba(16, 185, 129, 0.4);
+}
+
+.statusDisconnected {
+  background-color: var(--z-status-warning, #f59e0b);
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.4);
+}
+
+.statusError {
+  background-color: var(--z-status-danger, #ef4444);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.4);
+}
+
+.statusLoading {
+  background-color: var(--z-text-muted, #64748b);
+  animation: pulse 1.5s infinite;
+}
+
+.statusRetryBtn {
+  font-size: 11px;
+  color: #f87171;
+  text-decoration: underline;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.statusDetails {
+  display: flex;
+  flex-direction: column;
+}
+
+.statusTitle {
+  font-weight: 600;
+  color: var(--z-text-primary, #ffffff);
+}
+
+.statusMeta {
+  font-size: 11px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+/* --------------------------------------------------------------------------
+   Seletor de Cliente
+   -------------------------------------------------------------------------- */
+.selectorCard {
+  background-color: var(--z-surface-card, #111116);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-lg, 12px);
+  padding: var(--z-space-4, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-3, 12px);
+}
+
+@media (min-width: 640px) {
+  .selectorCard {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+}
+
+.selectorLabelGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-3, 12px);
+}
+
+.selectorIconBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-md, 8px);
+  color: var(--z-text-secondary, #cbd5e1);
+  flex-shrink: 0;
+}
+
+.selectorTexts {
+  display: flex;
+  flex-direction: column;
+}
+
+.selectorTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--z-text-primary, #ffffff);
+}
+
+.selectorHint {
+  font-size: 12px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+.selectorControls {
+  min-width: 260px;
+  max-width: 380px;
+  width: 100%;
+}
+
+/* --------------------------------------------------------------------------
+   Área de Conteúdo e Grid de Projetos
+   -------------------------------------------------------------------------- */
+.contentArea {
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-4, 16px);
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sectionTitle {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--z-text-primary, #ffffff);
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-2, 8px);
+}
+
+.projectCountBadge {
+  font-size: 12px;
+  padding: 2px 8px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border-radius: var(--z-radius-sm, 6px);
+  color: var(--z-text-secondary, #cbd5e1);
+  font-weight: 500;
+}
+
+.projectsGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--z-space-4, 16px);
+}
+
+@media (min-width: 768px) {
+  .projectsGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (min-width: 1100px) {
+  .projectsGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.projectCard {
+  background-color: var(--z-surface-card, #111116);
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--z-radius-lg, 12px);
+  padding: var(--z-space-4, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--z-space-3, 12px);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.projectCard:hover {
+  border-color: var(--z-border-active, rgba(255, 255, 255, 0.18));
+  transform: translateY(-1px);
+}
+
+.projectCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--z-space-2, 8px);
+}
+
+.projectCardName {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--z-text-primary, #ffffff);
+  line-height: 1.3;
+}
+
+.projectCardGid {
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--z-text-muted, #64748b);
+  background-color: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--z-space-2, 8px);
+  padding: var(--z-space-3, 12px);
+  background-color: var(--z-surface-subtle, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--z-border, rgba(255, 255, 255, 0.05));
+  border-radius: var(--z-radius-md, 8px);
+}
+
+.metricBox {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.metricLabel {
+  font-size: 11px;
+  color: var(--z-text-muted, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metricValue {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--z-text-primary, #ffffff);
+}
+
+.metricOverdue {
+  color: var(--z-status-danger, #ef4444);
+}
+
+.projectFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: var(--z-space-2, 8px);
+  border-top: 1px solid var(--z-border, rgba(255, 255, 255, 0.05));
+  font-size: 12px;
+  color: var(--z-text-muted, #94a3b8);
+}
+
+/* --------------------------------------------------------------------------
+   Banners e Avisos Contextuais
+   -------------------------------------------------------------------------- */
+.warningBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--z-space-3, 12px);
+  padding: var(--z-space-3, 12px) var(--z-space-4, 16px);
+  background-color: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--z-radius-md, 8px);
+  font-size: 13px;
+  color: #fde68a;
+}
+
+.warningBannerTitle {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.errorBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--z-space-3, 12px);
+  padding: var(--z-space-3, 12px) var(--z-space-4, 16px);
+  background-color: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--z-radius-md, 8px);
+  font-size: 13px;
+  color: #fca5a5;
+}
+
+.roadmapNotice {
+  display: flex;
+  align-items: center;
+  gap: var(--z-space-2, 8px);
+  padding: var(--z-space-3, 12px) var(--z-space-4, 16px);
+  background-color: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: var(--z-radius-md, 8px);
+  font-size: 13px;
+  color: #c7d2fe;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
