@@ -55,7 +55,7 @@ test('Integration Gate: Contador de Entregas por estagio (F8-3) em PostgreSQL', 
   }
   // sem content.view (excecao individual): ve Entregas, mas nao os contadores de conteudo
   await prisma.organizationMemberPermission.create({
-    data: { organizationMemberId: noContentA.member.id, permissionCode: 'content.view', allowed: false },
+    data: { organizationId: orgA.id, organizationMemberId: noContentA.member.id, permissionCode: 'content.view', allowed: false },
   });
 
   // Entregas: plano de c1 em 2026-09 (meta 5) com duas pecas; plano de c2 com uma peca
