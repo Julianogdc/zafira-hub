@@ -36,6 +36,26 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b R0 concluída: causa da divergência e leituras finais (DEC-F8-012) — Claude
+- AUTORIZAÇÃO: DEC-F8-012 — somente GET; parada em erro de autorização ou de isolamento (não ocorreu).
+- RESULTADO: `/me/` 200 (só `view_analytics`, 1 conta); `/accounts/` 200 com **a mesma conta** (também com parâmetro anti-cache; sem barra → 301); posts filtrados pela conta 200 (total 0); conta fora da allowlist 404 (**isolamento ok**); **métricas da conta 200** (`analytics_available` true); mídia 200 (0 itens, cursor). Detalhe de post, permalink e métricas de post não aplicáveis (conta sem posts). Commit de documentação com `[skip ci]`.
+- CAUSA DA DIVERGÊNCIA: cache da chave (com contas pré-carregadas) por até 30 s em cada processo do servidor (`apps/api_keys/services.py`, `4e5bef9`); `/me/` e `/accounts/` foram atendidos por processos com cópias diferentes logo após a correção da allowlist. Identificada pelo código e pelo desaparecimento da divergência. Para a F8-4: aguardar ≥ 30 s após alterar/revogar uma chave.
+- CAPACIDADES COM EVIDÊNCIA REAL: #10, #27, listagem de mídia, **#37**, **#38** (com isolamento). Pendentes para R2: detalhe/permalink de post e #36.
+- CONTA DE TESTE: confirmada pela Direção como conta própria de testes (registro no interno).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: **R0 concluída; aceite pendente da Direção.** R1/R1+/R2 não autorizadas.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial qualquer escrita/publicação no BrightBean, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-012 — Continuidade controlada da R0 da F8-0b e confirmação da conta de teste (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: divergência entre `/me/` e `/accounts/` (DEC-F8-011) e leituras restantes da R0.
+- Decisão: (1) **Autorizada a continuidade da R0, somente GET:** investigar por leitura a divergência (versão implantada, filtros, permissões, cache), sem alterar a instância; consultar posts e métricas com o identificador da conta autorizado em `/me/`, se o endpoint aceitar e respeitar o escopo; consultar mídia e métricas de posts existentes. (2) Não usar outra conta; não ampliar permissões; sem escrita. (3) Interromper em erro de autorização, inconsistência de isolamento ou risco de expor dados de outra conta. (4) **A Direção confirmou que a conta vinculada à chave é conta própria destinada a testes**, autorizada a receber publicações experimentais em etapas futuras (identificação no repositório interno); isso **não** altera a autorização atual. (5) R1, R1+ e R2 dependem de autorização específica; sem VPS, produção ou credenciais.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: no aceite da R0.
+
 ### 2026-10-13 — F8-0b R0 reexecutada: divergência entre /me/ e /accounts/ (DEC-F8-011) — Claude
 - AUTORIZAÇÃO: DEC-F8-011 — somente GET; parar em divergência.
 - RESULTADO: `/me/` 200 com permissões **[view_analytics]** e **1 conta** liberada (`instagram_login`, conectada, `char_limit` 2200, `needs_title` false, `supports_first_comment` true); `/accounts/` 200 com **0 contas**. Portão não atendido → posts, mídia e métricas **não executados**. Uma leitura adicional de `/me/` (só campos técnicos, sem nomes) confirmou a conta. Commit de documentação com `[skip ci]`.

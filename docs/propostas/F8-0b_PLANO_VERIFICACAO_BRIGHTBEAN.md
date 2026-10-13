@@ -175,3 +175,30 @@ Somente GET, com a mesma chave local. Portão definido antes da execução: segu
 **Capacidades com evidência real:** #10 limites da conta (`char_limit` 2200, `needs_title`, `supports_first_comment`, `escaped_chars`) para `instagram_login`; #38 permissão efetiva = interseção chave ∩ emissor e allowlist por chave (agora com a configuração correta). Continuam pendentes: #27 com dados reais, #36/#37 métricas e R1/R1+/R2.
 
 **Para concluir a R0:** decisão da Direção entre (1) esclarecer a divergência de `/accounts/` (verificar a versão implantada da rota, sem alterar a instância) ou (2) autorizar seguir as leituras restantes usando o identificador da conta obtido em `/me/` (posts filtrados pela conta, métricas da conta e, se houver, de um post).
+
+### 8.2 Continuidade e conclusão da R0 (2026-10-13, DEC-F8-012)
+
+**Conta de teste:** a Direção confirmou que a conta vinculada à chave é **conta própria destinada a testes** (identificação no repositório interno), autorizada a receber publicações experimentais em etapas futuras, sempre com autorização específica por fase.
+
+Somente GET; parada automática em erro de autorização ou em dado de conta fora da allowlist (não ocorreu).
+
+| Endpoint | HTTP | Resultado |
+|---|---|---|
+| `GET /me/` | 200 | permissões [`view_analytics`]; 1 conta na allowlist |
+| `GET /accounts/` | 200 | **1 conta — a mesma do `/me/`** (divergência resolvida) |
+| `GET /accounts` (sem barra) | 301 | redireciona para a forma com barra |
+| `GET /accounts/?nocache=<ts>` | 200 | 1 conta (a mesma) |
+| `GET /posts/?social_account_id=<conta autorizada>&limit=5` | 200 | filtro por conta aceito; total 0 |
+| `GET /posts/?limit=5` | 200 | total 0 |
+| `GET /posts/?social_account_id=<id fora da allowlist>` | 404 | `not_found` — **isolamento confirmado** (não revela outras contas) |
+| `GET /analytics/accounts/<conta autorizada>?days=7` | 200 | `analytics_available` = true; campos `account_id`, `account_name`, `analytics_available`, `captured_at`, `connection_status`, `days`, `engagement`, `follower_growth`, `hero_metrics`, `next_sync_eta`, `platform`, `unavailable_reason` |
+| `GET /media/?limit=5` | 200 | 0 itens; paginação por cursor |
+| `GET /posts/{id}`, `GET /analytics/posts/{id}`, `GET /media/{id}` | não aplicável | a conta não tem posts nem mídia no workspace |
+
+Nenhum cabeçalho de cache HTTP nas respostas (só `Vary: Cookie`).
+
+**Causa da divergência (DEC-F8-011):** no código implantado (`apps/api_keys/services.py`, `4e5bef9`), a chave — com a lista de contas pré-carregada — fica em **cache por até 30 s em cada processo do servidor**; o próprio código documenta que outro processo pode ver a versão antiga até o cache expirar. Na reexecução, `/me/` foi atendido por um processo atualizado e `/accounts/` por um processo com a cópia anterior à correção da allowlist; expirado o cache, as duas rotas concordam. Causa **identificada pelo código e pelo desaparecimento da divergência** (não há acesso aos processos do servidor para observá-la diretamente). Implicação para a F8-4: depois de criar, alterar ou revogar uma chave, **aguardar ao menos 30 s** antes de confiar no novo escopo; revogação pode levar até 30 s para valer em todos os processos.
+
+**Capacidades com evidência real na R0:** #10 limites da conta (`instagram_login`: `char_limit` 2200, sem título, primeiro comentário suportado); #27 listagem de posts com filtro por conta e paginação por offset; listagem de mídia com cursor; **#37 métricas de conta** (200, dados disponíveis); **#38** permissões efetivas (chave ∩ emissor), allowlist por chave e **isolamento** (conta fora da allowlist → 404); propagação de mudanças de chave em até 30 s. **Não verificáveis na R0** (sem posts/mídia na conta): detalhe de post, permalink e #36 métricas de post — ficam para depois da primeira publicação de teste (R2).
+
+**R0 concluída**, pronta para aceite da Direção. Pendências para a R1: autorização específica; chave com `create_posts` + `upload_media`, **sem `publish_directly`**, mesma conta na allowlist; aguardar 30 s após alterar a chave.
