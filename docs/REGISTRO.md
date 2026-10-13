@@ -36,6 +36,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — Registro do aceite técnico da F8-2 (DEC-F8-005) e correção da P31 — Claude
+- AUTORIZAÇÃO: DEC-F8-005 — registrar o aceite e o encerramento técnico da F8-2 e corrigir a P31; somente documentação, com `[skip ci]`. Sem F8-3, VPS ou produção.
+- EXECUTADO: ESTADO_ATUAL, REGISTRO e MAPA_MESTRE atualizados nos dois repositórios, respeitando o saneamento (o público continua sem informação sensível; nenhum arquivo copiado do interno para o público). `AGENTS.md` público: removida a segunda cópia, idêntica, da seção "8. Dois repositórios: público e interno" (texto e regras inalterados). Commit único no público com `[skip ci]`.
+- BASELINE DE CÓDIGO: inalterada — `2fd34dc` no público (espelho `b7de353` no interno). Nenhum código alterado; nenhum run disparado.
+- STATUS: **F8-2 aceita e encerrada tecnicamente.** P31 resolvida. Nova P32 (trecho repetido na nota da parte C2 do Mapa público).
+- PRÓXIMA MICROETAPA PREVISTA NO MAPA: **F8-3** — contador de Entregas por estágio (arquivo recebido → enviado para aprovação → aprovado → publicado), sem alterar a meta contratual; ajustes no painel. **Não autorizada; não iniciada.**
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-3 a F8-5 sem DEC, F8-4 sem a F8-0b, BrightBean/S3 reais, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE (interno e público); AGENTS.md (público).
+
+### DEC-F8-005 — Aceite técnico e encerramento técnico da F8-2 (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: revisão da F8-2 (aprovação do cliente por link seguro) após o primeiro CI oficial no repositório público.
+- Decisão: (1) **Aceite técnico da F8-2**, com evidências verificadas pela Direção: commit `2fd34dc`; run 38429147116 (https://github.com/Julianogdc/zafira-hub/actions/runs/38429147116) com **CI 5/5 verde**; **Browser Gate F8 com 54 verificações aprovadas e 0 falhas**; **publicação GHCR aprovada**. (2) **Encerramento técnico da F8-2.** (3) Correção da duplicação da seção 8 do `AGENTS.md` público (**P31**), sem modificar regras de governança. (4) **F8-3 não autorizada** por esta decisão; F8-0b segue obrigatória antes da F8-4; sem VPS ou produção. (5) Alterações exclusivamente documentais com `[skip ci]`.
+- Alternativas consideradas: —
+- Impacto: documentação (ESTADO_ATUAL, REGISTRO, MAPA_MESTRE nos dois repositórios; `AGENTS.md` público). Nenhum código.
+- Revisão: na autorização da F8-3.
+
 ### 2026-10-13 — Registro do workflow no repositório público e primeiro CI oficial público (F8-2) — Claude
 - AUTORIZAÇÃO: Direção (2026-10-13), via proprietário: corrigir o registro do workflow de forma não destrutiva (alteração técnica mínima no workflow para provocar `push`), preservar jobs, testes e Browser Gates, sem excluir/recriar branches e sem force-push; acompanhar o CI e investigar falhas sem runs repetidos desnecessários; confirmar runners padrão gratuitos. Restrições: sem VPS/produção, sem Actions no privado, sem cobrança, sem F8-3.
 - SITUAÇÃO INICIAL (API do GitHub): público, Actions habilitado, **0 workflows registrados, 0 runs** (o commit raiz `5870f71` foi enviado com o Actions desativado, então o GitHub nunca leu o workflow); token padrão somente leitura; Actions do interno desativado.

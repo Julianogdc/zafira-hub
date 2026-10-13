@@ -109,19 +109,3 @@ Uma cópia de leitura dos documentos oficiais pode existir no Google Drive. Ela 
 3. Toda DEC tem versão pública; se tiver parte sensível, a parte sensível fica no interno com o mesmo número.
 4. Ao encerrar sessão, atualize **os dois** `ESTADO` e `REGISTRO` quando houver conteúdo em ambos, e faça commit separado em cada repositório (público: apenas CI-safe; commits só de documentação usam `[skip ci]`).
 5. Nunca copie arquivo do interno para o público sem passar por `node scripts/ci/public-guard.mjs repo`.
-
-## 8. Dois repositórios: público e interno
-
-| Repositório | Visibilidade | Conteúdo |
-|---|---|---|
-| `Julianogdc/zafira-hub` (este) | **público** | código, testes, CI e Browser Gates (runners padrão gratuitos), documentação técnica e governança **sem** informação operacional |
-| `Julianogdc/zafira-hub-internal` | **privado**, sem workflows | histórico original completo, infraestrutura (VPS, backups, implantação), auditorias e triagens de segurança, documentos confidenciais, governança integral |
-
-**Layout local esperado:** os dois diretórios lado a lado (ex.: `C:\Projetos\zafirahub-v2.1-as` e `C:\Projetos\zafira-hub-internal`). **Sem submódulo** (o CI público não lê repositório privado).
-
-**Regras para qualquer agente (Claude, Antigravity ou outro):**
-1. Na leitura inicial (seção 1), leia também `../zafira-hub-internal/docs/ESTADO_INTERNO.md` **se existir**. Se o repositório interno não estiver disponível, execute apenas o que não depende dele e peça acesso ao proprietário quando necessário.
-2. Informação sensível **nunca** vai para o repositório público: registre-a no interno (`docs/REGISTRO_INTERNO.md`, identificador `INT-<n>`) e, no público, deixe só a referência `INT-<n>`.
-3. Toda DEC tem versão pública; se tiver parte sensível, a parte sensível fica no interno com o mesmo número.
-4. Ao encerrar sessão, atualize **os dois** `ESTADO` e `REGISTRO` quando houver conteúdo em ambos, e faça commit separado em cada repositório (público: apenas CI-safe; commits só de documentação usam `[skip ci]`).
-5. Nunca copie arquivo do interno para o público sem passar por `node scripts/ci/public-guard.mjs repo`.
