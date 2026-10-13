@@ -36,6 +36,27 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b Fase R0: leitura com chave temporária (DEC-F8-010) — Claude
+- AUTORIZAÇÃO: DEC-F8-010 — somente GET.
+- PROCEDIMENTO: chave guardada pelo proprietário como variável de ambiente do usuário Windows (`ZAFIRA_F80B_BB_KEY`), com entrada oculta; script temporário fora do repositório que **só faz GET**, nunca imprime a chave e grava apenas códigos HTTP, nomes de campos e contagens. Commit de documentação com `[skip ci]`.
+- RESULTADO: `/me/` 200 (autenticação válida); `/accounts/` 200 com **0 contas**; `/posts/` 200 (listagem com `items/limit/offset/total`, total 0; paginação por offset aceita); `/media/` 200 (listagem com cursor, 0 itens). Métricas, detalhe de post/mídia e filtro por conta **não executados** (sem alvo). Nenhum 403.
+- ACHADOS: (1) **chave sem conta na allowlist** — a conta pretendida não está vinculada; (2) **permissões efetivas** = `create_posts`, `approve_posts`, `edit_others_posts`, `view_analytics` (interseção chave ∩ emissor, pelo código), **diferente do informado (só `view_analytics`)**; sem `publish_directly` e sem `upload_media`. Nenhuma escrita tentada.
+- CAPACIDADES COM EVIDÊNCIA REAL: #27 (listagem de posts e paginação), listagem de mídia com cursor, #38 (modelo de permissão e allowlist por chave). Pendentes: #10, #36, #37 e R1/R1+/R2.
+- PENDÊNCIAS PARA R1: reemitir/corrigir a chave com a conta de teste na allowlist e só as permissões da fase; repetir T02/T05 com conta visível; confirmar que a conta é de teste; autorização expressa da R1.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R0 **executada com limitação** (sem conta visível). R1 e R2 **não autorizadas**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial qualquer escrita/publicação no BrightBean, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-010 — Execução da Fase R0 da F8-0b (somente leitura) com chave temporária (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: executar a Fase R0 (T01–T05) do plano da F8-0b.
+- Decisão: (1) O proprietário criou chave temporária (workspace e conta indicados no repositório interno; permissão selecionada **view_analytics**; validade 20/10/2026), mantida fora da conversa e do GitHub. (2) **Autorizada exclusivamente a R0**: autenticação, contas, posts, mídia e métricas, **somente GET**; identificar o que o escopo permite e o que retorna 403. (3) Proibido: ampliar permissões, POST/PUT/PATCH/DELETE, criar/editar/cancelar/agendar/publicar, alterar instância, VPS ou produção. Consulta não permitida: registrar e interromper. (4) R1 e R2 só com nova autorização.
+- Alternativas consideradas: —
+- Impacto: documentação. Nenhum código, credencial ou serviço alterado pelo agente.
+- Revisão: na autorização da R1.
+
 ### 2026-10-13 — F8-0b: preparação da verificação ativa do BrightBean (DEC-F8-009) — Claude
 - AUTORIZAÇÃO: DEC-F8-009 — somente preparação; leitura sem credencial; nenhuma escrita, publicação, alteração de configuração, credencial ou VPS.
 - EXECUTADO: plano em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`. Diagnóstico da instância por acessos de leitura sem credencial (endereço e perfil da conta no repositório interno): aplicação responde (302), API v1 exige chave (`/api/v1/me/` → 401), OpenAPI pública versão 1.0.0 com **16 rotas idênticas** ao fork `brightbean-studio` branch `zafira-custom-v1` commit `4e5bef9` (código lido, clone temporário fora do repositório). **Contas conectadas não verificadas**: exigem chave; a chave da homologação 2C2H foi revogada e criar outra é alteração de credencial (fora da etapa). Commit de documentação com `[skip ci]`.

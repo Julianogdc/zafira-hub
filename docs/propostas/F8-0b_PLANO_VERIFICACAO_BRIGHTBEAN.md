@@ -136,3 +136,26 @@ Execução por um script de verificação do repositório (somente as rotas do t
 4. Resíduos listados e removidos (ou aceitos) pelo proprietário.
 5. Matriz F8-0 atualizada e contrato do simulador da F8-4 proposto.
 6. Aceite apenas da Direção.
+
+## 8. Resultado da Fase R0 (2026-10-13, DEC-F8-010)
+
+Execução **somente GET**, com chave temporária criada pelo proprietário e lida de variável de ambiente local (nunca exibida, gravada ou transmitida a terceiros). Evidência guardada fora do repositório; abaixo só códigos HTTP, nomes de campos e contagens.
+
+| Endpoint | HTTP | Resultado |
+|---|---|---|
+| `GET /me/` | 200 | autenticação válida; campos `api_key_id`, `workspace_id`, `workspace_name`, `organization_id`, `permissions`, `storage`, `allowlisted_accounts` (sem data de validade na resposta) |
+| `GET /accounts/` | 200 | **0 contas** liberadas para a chave |
+| `GET /posts/?limit=2&offset=0` | 200 | listagem existe: `items`, `limit`, `offset`, `total`; total **0** (só posts das contas liberadas) |
+| `GET /posts/?limit=2&offset=2` | 200 | paginação por `offset` aceita; 0 itens |
+| `GET /media/?limit=2` | 200 | listagem existe com paginação por **cursor** (`items`, `limit`, `next_cursor`); 0 itens |
+| `GET /posts/?social_account_id=…`, `GET /posts/{id}`, `GET /media/{id}`, `GET /analytics/accounts/{id}`, `GET /analytics/posts/{id}` | **não executados** | sem conta liberada e sem post/mídia visíveis: não havia alvo; verificação interrompida conforme a autorização |
+
+Nenhuma rota respondeu 403: as leituras não exigem escopo específico além de uma chave válida (pelo código, `view_analytics` só é exigida nas rotas de métricas, que não puderam ser chamadas).
+
+**Achado 1 — chave sem conta:** `allowlisted_accounts` e `/accounts/` vazios. A conta pretendida não ficou vinculada à chave (ou está em outro workspace). Com allowlist vazia, qualquer operação que mire uma conta é recusada pelo servidor.
+
+**Achado 2 — permissões efetivas diferentes do informado:** `/me/` devolveu `permissions` = `create_posts`, `approve_posts`, `edit_others_posts`, `view_analytics`. Pelo código (`apps/api/auth.py`), esse campo é a **interseção entre as permissões gravadas na chave e as do usuário que a emitiu** — ou seja, a chave carrega mais do que `view_analytics`. Não carrega `publish_directly` nem `upload_media` (não agenda, não publica, não envia mídia), e a allowlist vazia impede criar posts. **Nenhuma escrita foi tentada.**
+
+**Capacidades com evidência real nesta fase:** #27 listagem de posts (forma da resposta e paginação por offset); listagem de mídia com cursor; #38 modelo de permissão da chave (interseção chave ∩ emissor) e allowlist por chave. Continuam pendentes: #10/#37 (dependem de conta), #36 métricas e todo o R1/R1+/R2.
+
+**Pendências para a R1:** (a) **reemitir a chave** (ou corrigir a atual) com a conta de teste **na allowlist** e somente as permissões da fase autorizada — para a R0 completa, apenas `view_analytics`; para a R1, `create_posts` + `upload_media`, **sem `publish_directly`**; (b) repetir T02 e T05 com a conta visível (limites da conta e métricas); (c) confirmar que a conta é de teste (§4); (d) autorização expressa da R1.
