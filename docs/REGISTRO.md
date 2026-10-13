@@ -36,6 +36,27 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b: preparação da verificação ativa do BrightBean (DEC-F8-009) — Claude
+- AUTORIZAÇÃO: DEC-F8-009 — somente preparação; leitura sem credencial; nenhuma escrita, publicação, alteração de configuração, credencial ou VPS.
+- EXECUTADO: plano em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`. Diagnóstico da instância por acessos de leitura sem credencial (endereço e perfil da conta no repositório interno): aplicação responde (302), API v1 exige chave (`/api/v1/me/` → 401), OpenAPI pública versão 1.0.0 com **16 rotas idênticas** ao fork `brightbean-studio` branch `zafira-custom-v1` commit `4e5bef9` (código lido, clone temporário fora do repositório). **Contas conectadas não verificadas**: exigem chave; a chave da homologação 2C2H foi revogada e criar outra é alteração de credencial (fora da etapa). Commit de documentação com `[skip ci]`.
+- 13 CAPACIDADES NÃO VERIFICADAS: #8, #9, #12, #13, #15, #18, #19, #23, #24, #27, #28, #29, #30. Pelo código e pela OpenAPI: listagem existe (#27); busca por referência (#28) e webhooks (#29) **não existem**; não há publicação imediata, mas `scheduled_at` no passado dispara em ~15 s (#18); idempotência por chave de API com replay/422/409 (#24); cancelar devolve o agendado a rascunho e repete com 409 (#23, #30); mídia pertence ao workspace (#15); limites padrão imagem 20 MB / vídeo 1 GB (#13). Todos ainda **sem observação em execução**.
+- ACHADOS PARA A F8-4: imagens acima de 20 MB (aceitas pelo Hub até 100 MB) são recusadas pelo BrightBean por padrão; horário passado publica em ~15 s (o Hub deve recusar); teto de 25 publicações/dia por conta do Instagram; sem webhooks nem busca por referência.
+- RISCO PRINCIPAL: a conta conectada registrada é o **perfil real da agência** no Instagram e no Facebook; publicações são públicas e não removíveis pela API. Recomendado conectar conta de teste dedicada antes de qualquer teste R2.
+- MATRIZ DE TESTES: R0 leitura (T01–T05), R1 rascunhos/uploads sem publicação (T10–T17), R1+ agendamento a +7 dias seguido de cancelamento (T20–T23), R2 publicação real com aprovação por teste (T30–T34).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: preparação **concluída**; execução **não autorizada**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Para a Fase 1 (R0): autorização + chave exclusiva criada pelo proprietário (sem `publish_directly`, allowlist só da conta de teste), guardada como variável de ambiente local, nunca na conversa.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial qualquer escrita/publicação no BrightBean sem autorização, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / plano da F8-0b (interno e público).
+
+### DEC-F8-009 — Preparação da F8-0b (verificação ativa do BrightBean), sem escrita nem publicação (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: preparar os testes reais exigidos antes da F8-4 (matriz F8-0, §5). A Direção confirmou que a instância BrightBean da VPS segue funcionando, com conta social conectada.
+- Decisão: (1) **Autorizada exclusivamente a preparação da F8-0b:** identificar as 13 capacidades não verificadas; verificar **somente por leitura** o estado da instância e das contas, sem expor credenciais; confirmar as rotas REST v1 e quais operações exigem teste real; preparar a matriz de testes (mídia, rascunho, agendamento, fuso, idempotência, cancelamento, falhas, permalink, métricas); separar testes seguros sem publicação dos que exigem publicação e aprovação específica; avaliar se a conta conectada é adequada e o risco de publicar em perfil real; apresentar roteiro, riscos e critérios de aceite. (2) **Proibido nesta etapa:** criar, agendar, publicar, cancelar ou modificar posts; alterar configurações ou credenciais; modificar a VPS ou serviços; usar dados de clientes; iniciar a F8-4; executar workflows no privado. (3) Qualquer escrita ou publicação depende de **autorização expressa**.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`). Nenhum código, credencial ou serviço alterado.
+- Revisão: na autorização da execução da F8-0b.
+
 ### 2026-10-13 — Registro do aceite técnico da F8-3 (DEC-F8-008) e correção da P32 — Claude
 - AUTORIZAÇÃO: aceite técnico da F8-3 pela Direção (DEC-F8-008); somente documentação, com `[skip ci]`. Sem F8-4, F8-0b, VPS, produção ou workflows no privado.
 - EXECUTADO: F8-3 marcada como **concluída** no ESTADO, no Mapa e no contrato; evidências do CI e do Browser Gate F8 registradas na DEC. **P32 corrigida** no `MAPA_MESTRE.md` público (removido o trecho repetido "`(repositório interno)` (repositório interno)" da nota de abertura da parte C2; nenhuma regra alterada). Commit de documentação com `[skip ci]`.
