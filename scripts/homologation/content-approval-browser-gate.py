@@ -495,21 +495,30 @@ class ContentGate:
         # K ---------------------------------------------------------------
         self.scenarios.append("K - Responsividade 390 px")
         admin.set_viewport_size({"width": 390, "height": 800})
-        for path, label in [("/conteudo", "lista"), (f"/conteudo/{item_id}", "detalhe"), (f"/projetos?clientId={CLIENT_1}", "Entregas com contador")]:
+        for path, label in [("/conteudo", "lista"), (f"/conteudo/{item_id}", "detalhe")]:
             self.goto(admin, path)
             admin.wait_for_timeout(800)
             overflow = admin.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
             self.check("K", f"390 px: {label} sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
+        # Entregas com o contador: mesmo caminho do cenario L (aba "Entregas" quando o cliente tem projeto Asana)
+        self.goto(admin, f"/projetos?clientId={CLIENT_1}")
         cards = admin.get_by_test_id("content-stages-panel")
-        if cards.count() > 0:
-            cards.get_by_test_id("content-stage-received").wait_for(timeout=15000)
+        try:
+            cards.wait_for(timeout=8000)
+        except Exception:  # noqa: BLE001
+            admin.get_by_role("button", name="Entregas").first.click()
+        try:
+            cards.get_by_test_id("content-stage-received").wait_for(timeout=20000)
+            admin.wait_for_timeout(500)
+            overflow = admin.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            self.check("K", "390 px: Entregas com contador sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
             r1 = cards.get_by_test_id("content-stage-received").bounding_box()
             r2 = cards.get_by_test_id("content-stage-sent").bounding_box()
             self.check("K", "390 px: cartoes do contador em duas colunas",
                        bool(r1 and r2 and abs(r1["y"] - r2["y"]) < 2 and r2["x"] > r1["x"]), f"{r1} {r2}")
             self.shot(admin, "f8-k-contador-390.png")
-        else:
-            self.fail("K", "390 px: contador visivel em Entregas", "painel nao encontrado")
+        except Exception as exc:  # noqa: BLE001
+            self.fail("K", "390 px: contador visivel em Entregas", f"{type(exc).__name__}: {exc}")
         pub3 = self.open_public(browser, url1, width=390)
         pub3.get_by_test_id("approval-result").wait_for(timeout=15000)
         pub3.wait_for_timeout(500)
