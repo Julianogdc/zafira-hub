@@ -3,7 +3,8 @@
 Zafira Hub 2.1 - F8 Conteudo e Aprovacao do cliente por link - Browser Runtime Gate (Homologation Rehearsal)
 Chromium autenticado (Playwright) contra as imagens publicadas e o banco de ensaio. NENHUM BrightBean, Asana ou
 cliente real; arquivos sao bytes de teste com assinatura valida; pessoas e clientes ficticios.
-Cobre a F8-1 (cadastro e upload) e a F8-2 (link seguro, pagina publica, decisao, nova versao, revogacao).
+Cobre a F8-1 (cadastro e upload), a F8-2 (link seguro, pagina publica, decisao, nova versao, revogacao)
+e a F8-3 (contador de Entregas por estagio, somente leitura, publicados indisponivel).
 
 Cenarios:
   A  Capacidades e menu
@@ -17,6 +18,7 @@ Cenarios:
   I  Reemissao, revogacao e expiracao: respostas identicas
   J  Isolamento da Org B
   K  Responsividade 390 px
+  L  Contador de Entregas por estagio (F8-3): sem duplicidade, publicados indisponivel, meta intacta
 """
 
 import json
@@ -28,8 +30,10 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 from playwright.sync_api import Browser, Page, sync_playwright
 
@@ -158,6 +162,30 @@ class ContentGate:
         )
         return proc.stdout.strip().splitlines()[-1] if proc.stdout.strip() else ""
 
+    def stages(self, page: Page) -> Dict[str, Any]:
+        """F8-3: contador do mes corrente no fuso da organizacao (devolvido pela propria API)."""
+        tz = "America/Sao_Paulo"
+        out: Dict[str, Any] = {}
+        for _ in range(2):
+            period = datetime.now(ZoneInfo(tz)).strftime("%Y-%m")
+            r = self.api(page, f"/clients/{CLIENT_1}/deliverables/content-stages?period={period}")
+            body = r.get("body") or {}
+            out = {"status": r["status"], "body": body, "period": period}
+            if r["status"] != 200 or body.get("timeZone") in (None, tz):
+                break
+            tz = body["timeZone"]
+        return out
+
+    def plan_snapshot(self, page: Page, period: str) -> str:
+        """Meta contratual e pecas do cliente no periodo (prova de que a F8-3 nao altera Entregas)."""
+        plan = (self.api(page, f"/clients/{CLIENT_1}/deliverables?period={period}").get("body") or {}).get("plan")
+        if not plan:
+            return "sem plano"
+        return json.dumps([plan.get("targetCount"), plan.get("status"),
+                           [(i.get("targetQuantity"), i.get("deliveredQuantity"),
+                             [(p.get("stage"), p.get("approvedAt"), p.get("deliveredAt")) for p in i.get("pieces", [])])
+                            for i in plan.get("items", [])]])
+
     # ------------------------------------------------------------------ helpers de tela
     def new_content(self, page: Page, title: str, caption: str) -> str:
         self.goto(page, "/conteudo")
@@ -236,6 +264,9 @@ class ContentGate:
         self.goto(admin, "/conteudo")
         admin.get_by_test_id("content-page").wait_for(timeout=15000)
         self.check("A", "menu lateral exibe Arquivos de conteudo", admin.locator("nav[aria-label='Navegação do sistema'] a").filter(has_text="Arquivos de conteúdo").count() > 0)
+        # F8-3: ponto de partida do contador e da meta, antes de qualquer conteudo deste gate
+        stages_before = self.stages(admin)
+        plan_before = self.plan_snapshot(admin, stages_before["period"])
 
         # B ---------------------------------------------------------------
         self.scenarios.append("B - Cadastro e upload")
@@ -409,12 +440,54 @@ class ContentGate:
                                                            "approverName": "Pessoa", "approverContact": "p@q.invalid", "authorityDeclared": True})
         self.check("I", "expirado e revogado nao aceitam decisao (404 generico)", r["status"] == 404, str(r["status"]))
 
+        # L ---------------------------------------------------------------
+        self.scenarios.append("L - Contador de Entregas por estagio (F8-3)")
+        after = self.stages(admin)
+        self.check("L", "endpoint do contador responde (200)", after["status"] == 200 and stages_before["status"] == 200,
+                   f"{stages_before['status']} / {after['status']}")
+        cb = stages_before["body"].get("counts") or {}
+        ca = after["body"].get("counts") or {}
+        delta = {k: (ca.get(k) or 0) - (cb.get(k) or 0) for k in ("received", "sent", "approved")}
+        self.check("L", "duas pecas recebidas, duas enviadas e uma aprovada: versoes, reenvios e revogacoes nao duplicam",
+                   delta == {"received": 2, "sent": 2, "approved": 1}, str(delta))
+        self.check("L", "contagem cumulativa: recebidos >= enviados >= aprovados",
+                   (ca.get("received") or 0) >= (ca.get("sent") or 0) >= (ca.get("approved") or 0), str(ca))
+        self.check("L", "publicados indisponivel (null), nunca 0",
+                   "published" in ca and ca.get("published") is None and ca.get("publishedSource") == "NOT_INTEGRATED", str(ca))
+        stage_of = {i.get("id"): i.get("stage") for i in after["body"].get("items", [])}
+        self.check("L", "peca com alteracao pedida e nova versao conta uma vez, como aprovada", stage_of.get(item_id) == "APPROVED", str(stage_of.get(item_id)))
+        self.check("L", "peca reemitida, revogada e expirada conta como enviada", stage_of.get(item2) == "SENT", str(stage_of.get(item2)))
+        self.check("L", "resposta sem midia, storage ou dados do aprovador",
+                   all(k not in json.dumps(after["body"]) for k in ["storageKey", "sha256", "approverName", "approverContact", "tokenHash"]))
+        self.check("L", "meta contratual e pecas de Entregas intactas", self.plan_snapshot(admin, after["period"]) == plan_before, plan_before[:120])
+        rm = self.api(member, f"/clients/{CLIENT_1}/deliverables/content-stages?period={after['period']}")
+        self.check("L", "membro com ver Entregas e ver Conteudos tambem consulta (somente leitura)", rm["status"] == 200, str(rm["status"]))
+        self.goto(admin, f"/projetos?clientId={CLIENT_1}")
+        panel = admin.get_by_test_id("content-stages-panel")
+        try:
+            panel.wait_for(timeout=8000)
+        except Exception:  # noqa: BLE001 - cliente com projeto Asana: Entregas fica em uma aba
+            admin.get_by_role("button", name="Entregas").first.click()
+        panel.get_by_test_id("content-stage-received-value").wait_for(timeout=20000)
+        ui = {k: panel.get_by_test_id(f"content-stage-{k}-value").inner_text().strip() for k in ("received", "sent", "approved", "published")}
+        self.check("L", "cartoes mostram os mesmos numeros da API",
+                   [ui["received"], ui["sent"], ui["approved"]] == [str(ca.get("received")), str(ca.get("sent")), str(ca.get("approved"))], str(ui))
+        self.check("L", "cartao Publicados: aguardando integracao, nunca 0",
+                   ui["published"] == "—" and "Aguardando integração" in panel.get_by_test_id("content-stage-published").inner_text(), ui["published"])
+        bar = panel.get_by_test_id("content-stages-bar")
+        self.check("L", "barra neutra, sem percentual, enquanto a publicacao nao estiver integrada",
+                   bar.get_attribute("data-state") == "NOT_INTEGRATED" and "%" not in bar.inner_text(), bar.inner_text()[:120])
+        self.check("L", "painel somente leitura (nenhum botao de acao)", panel.locator("button").count() == 0)
+        self.shot(admin, "f8-l-contador-entregas.png")
+
         # J ---------------------------------------------------------------
         self.scenarios.append("J - Isolamento Org B")
         pb = self.login(browser, self.email_b, self.password_b, "J")
         self.check("J", "Org B: nenhum conteudo da Org A", (self.api(pb, "/content/items").get("body") or []) == [])
         self.check("J", "Org B: acompanhamento da Org A recusado (404)", self.api(pb, f"/content/items/{item_id}/approval")["status"] == 404)
         self.check("J", "Org B: nao gera link para conteudo da Org A (404)", self.api(pb, f"/content/items/{item_id}/approval-links", "POST", {})["status"] == 404)
+        self.check("J", "Org B: contador de Entregas do cliente da Org A recusado (404)",
+                   self.api(pb, f"/clients/{CLIENT_1}/deliverables/content-stages?period={after['period']}")["status"] == 404)
         self.goto(pb, "/conteudo")
         pb.get_by_text("Nenhum conteúdo cadastrado").first.wait_for(timeout=15000)
         self.ok("J", "Org B: tela vazia, sem dados da Org A")
@@ -422,11 +495,21 @@ class ContentGate:
         # K ---------------------------------------------------------------
         self.scenarios.append("K - Responsividade 390 px")
         admin.set_viewport_size({"width": 390, "height": 800})
-        for path, label in [("/conteudo", "lista"), (f"/conteudo/{item_id}", "detalhe")]:
+        for path, label in [("/conteudo", "lista"), (f"/conteudo/{item_id}", "detalhe"), (f"/projetos?clientId={CLIENT_1}", "Entregas com contador")]:
             self.goto(admin, path)
             admin.wait_for_timeout(800)
             overflow = admin.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
             self.check("K", f"390 px: {label} sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
+        cards = admin.get_by_test_id("content-stages-panel")
+        if cards.count() > 0:
+            cards.get_by_test_id("content-stage-received").wait_for(timeout=15000)
+            r1 = cards.get_by_test_id("content-stage-received").bounding_box()
+            r2 = cards.get_by_test_id("content-stage-sent").bounding_box()
+            self.check("K", "390 px: cartoes do contador em duas colunas",
+                       bool(r1 and r2 and abs(r1["y"] - r2["y"]) < 2 and r2["x"] > r1["x"]), f"{r1} {r2}")
+            self.shot(admin, "f8-k-contador-390.png")
+        else:
+            self.fail("K", "390 px: contador visivel em Entregas", "painel nao encontrado")
         pub3 = self.open_public(browser, url1, width=390)
         pub3.get_by_test_id("approval-result").wait_for(timeout=15000)
         pub3.wait_for_timeout(500)

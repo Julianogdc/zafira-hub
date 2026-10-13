@@ -56,6 +56,7 @@ import {
 import { useAuthStore } from '@/store/useAuthStore';
 import { currentPeriodInTimeZone, isoDateToCalendarDate, todayInTimeZone } from '@/lib/organization-time';
 import styles from './CanonicalDeliverablesView.module.css';
+import { ContentStagesPanel } from './ContentStagesPanel';
 
 export interface CanonicalDeliverablesViewProps {
   clientId: string;
@@ -346,6 +347,9 @@ export function CanonicalDeliverablesView({
           )}
         </div>
       </div>
+
+      {/* F8-3: conteúdos do mês por estágio (somente leitura; independe do plano e não altera a meta) */}
+      <ContentStagesPanel clientId={clientId} period={period} />
 
       {!plan ? (
         showCreate && permissions.canPlan ? (

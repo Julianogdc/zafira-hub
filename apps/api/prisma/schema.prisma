@@ -1820,7 +1820,7 @@ model ContentItem {
   title              String
   format             ContentFormat
   asanaTaskGid       String? // vinculo local; nenhuma escrita no Asana
-  deliverablePieceId String? // vinculo com Entregas; sem alterar contadores (F8-3)
+  deliverablePieceId String? // vinculo com Entregas; uma peca por conteudo, mesma organizacao e cliente (F8-3/D3: indice unico parcial e gatilho na migration 20261013030000)
   createdByUserId    String?
   archivedAt         DateTime?
   createdAt          DateTime      @default(now())

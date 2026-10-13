@@ -47,6 +47,22 @@ export class ContentError extends Error {
 const hashOf = (caption: string, shas: string[]) =>
   createHash('sha256').update(JSON.stringify({ caption, media: shas })).digest('hex');
 
+/**
+ * F8-3 (D3): violacoes das regras de vinculo com Entregas garantidas pelo banco (indice unico parcial
+ * e gatilho de escopo). Cobre a corrida entre a checagem do servico e a gravacao.
+ */
+function linkConflictOf(error: unknown): ContentError | null {
+  const text = `${(error as { message?: string })?.message ?? ''} ${JSON.stringify((error as { meta?: unknown })?.meta ?? '')}`;
+  const isUnique = error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+  if (isUnique && (text.includes('content_items_one_per_deliverable_piece') || text.includes('deliverablePieceId'))) {
+    return new ContentError(409, 'PIECE_ALREADY_LINKED', 'Esta peça de Entregas já está vinculada a outro conteúdo.');
+  }
+  if (text.includes('content_piece_scope')) {
+    return new ContentError(400, 'PIECE_NOT_FOUND', 'Peça de Entregas não encontrada para este cliente.');
+  }
+  return null;
+}
+
 export class ContentService {
   constructor(private readonly storageFactory: () => FileStorage = () => resolveFileStorage()) {}
 
@@ -114,7 +130,8 @@ export class ContentService {
     db: Tx | typeof prisma,
     ctx: ContentContext,
     clientId: string,
-    links: { asanaTaskGid?: string | null; deliverablePieceId?: string | null }
+    links: { asanaTaskGid?: string | null; deliverablePieceId?: string | null },
+    selfItemId?: string
   ) {
     if (links.asanaTaskGid) {
       const task = await db.asanaTaskMirror.findFirst({
@@ -135,6 +152,16 @@ export class ContentService {
         select: { id: true },
       });
       if (!piece) throw new ContentError(400, 'PIECE_NOT_FOUND', 'Peça de Entregas não encontrada para este cliente.');
+      // F8-3 (D3, DEC-F8-007): uma peça de Entregas por conteúdo
+      const other = await db.contentItem.findFirst({
+        where: { deliverablePieceId: links.deliverablePieceId, ...(selfItemId ? { id: { not: selfItemId } } : {}) },
+        select: { id: true, organizationId: true },
+      });
+      if (other) {
+        throw new ContentError(409, 'PIECE_ALREADY_LINKED', 'Esta peça de Entregas já está vinculada a outro conteúdo.', {
+          ...(other.organizationId === ctx.organizationId ? { existingId: other.id } : {}),
+        });
+      }
     }
   }
 
@@ -282,6 +309,8 @@ export class ContentService {
       });
       return this.get(ctx, id);
     } catch (error) {
+      const linkConflict = linkConflictOf(error);
+      if (linkConflict) throw linkConflict;
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const existing = input.asanaTaskGid
           ? await prisma.contentItem.findFirst({
@@ -320,7 +349,7 @@ export class ContentService {
       if (input.deliverablePieceId !== undefined && input.deliverablePieceId !== item.deliverablePieceId) {
         links.deliverablePieceId = input.deliverablePieceId;
       }
-      await this.validateLinks(tx, ctx, item.clientId, links);
+      await this.validateLinks(tx, ctx, item.clientId, links, item.id);
 
       const changed: string[] = [];
       const itemData: Prisma.ContentItemUpdateInput = {};
@@ -344,6 +373,8 @@ export class ContentService {
         try {
           await tx.contentItem.update({ where: { id }, data: itemData });
         } catch (error) {
+          const linkConflict = linkConflictOf(error);
+          if (linkConflict) throw linkConflict;
           if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
             throw new ContentError(409, 'DUPLICATE_ASANA_TASK', 'Já existe um conteúdo vinculado a esta tarefa do Asana.');
           }

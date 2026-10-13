@@ -71,3 +71,42 @@ export const PublicApprovalDecisionRequestSchema = z.object({
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type PublicApprovalDecisionRequest = z.infer<typeof PublicApprovalDecisionRequestSchema>;
+
+/* ==========================================================================
+   F8-3 (DEC-F8-007) - Contador de Entregas por estagio (somente leitura).
+   Publicados: sem confirmacao confiavel nesta fatia -> null (NOT_INTEGRATED), nunca 0.
+   ========================================================================== */
+
+export const ContentStageSchema = z.enum(['RECEIVED', 'SENT', 'APPROVED']);
+export type ContentStage = z.infer<typeof ContentStageSchema>;
+
+export const ContentStagesQuerySchema = z.object({
+  period: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, 'Competencia invalida (use AAAA-MM).'),
+});
+
+export interface ContentStageItem {
+  id: string;
+  title: string;
+  format: ContentFormat;
+  stage: ContentStage;
+  periodSource: 'PLAN' | 'FIRST_FILE';
+  receivedAt: string | null;
+  sentAt: string | null;
+  approvedAt: string | null;
+  /** Situacao da versao atual (ex.: nova versao em preparacao depois de aprovada). */
+  currentStatus: 'NOT_SENT' | 'AWAITING_CLIENT' | 'APPROVED' | 'CHANGES_REQUESTED' | 'LINK_EXPIRED' | 'LINK_REVOKED';
+}
+
+export interface ContentStagesResponse {
+  clientId: string;
+  period: string;
+  timeZone: string;
+  counts: {
+    received: number;
+    sent: number;
+    approved: number;
+    published: null;
+    publishedSource: 'NOT_INTEGRATED';
+  };
+  items: ContentStageItem[];
+}

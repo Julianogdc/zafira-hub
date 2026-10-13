@@ -3,6 +3,7 @@ import type {
   AdjustDeliverableTargetRequest,
   AdvanceDeliverablePieceRequest,
   CancelDeliverablePieceRequest,
+  ContentStagesResponse,
   CreateDeliverableItemRequest,
   CreateDeliverablePieceRequest,
   CreateDeliverablePlanRequest,
@@ -112,5 +113,17 @@ export const deliverablesOperations = {
   },
   async reopenPlan(clientId: string, planId: string, body: ReopenDeliverablePlanRequest) {
     return toPlan(await api.post<GetDeliverablesResponse>(`${planBase(clientId, planId)}/reopen`, body));
+  },
+};
+
+/**
+ * F8-3 (DEC-F8-007) - Contador de Entregas por estágio (somente leitura).
+ * Exige deliverables.view e content.view; erros (403/404) são propagados para a tela.
+ */
+export const contentStagesService = {
+  async get(clientId: string, period: string): Promise<ContentStagesResponse> {
+    return apiFetch<ContentStagesResponse>(
+      `${base(clientId)}/content-stages?period=${encodeURIComponent(period)}`
+    );
   },
 };

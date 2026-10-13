@@ -4,6 +4,8 @@
  * ACEITO PELO HUB != HOMOLOGADO PARA PUBLICACAO NO BRIGHTBEAN (matriz F8-0): a publicabilidade e "a verificar".
  */
 
+import { dateInTimeZone } from '../time/organization-time.js';
+
 export const CONTENT_FORMATS = ['FEED_IMAGE', 'CAROUSEL', 'REEL', 'STORY'] as const;
 export type ContentFormat = (typeof CONTENT_FORMATS)[number];
 
@@ -241,6 +243,77 @@ export function validateApprovalInput(input: {
   }
   return problems;
 }
+
+/* ==========================================================================
+   F8-3 (DEC-F8-007) - Contador de Entregas por estagio, derivado dos registros reais.
+   Unidade: o conteudo (uma peca), independentemente de versoes, links ou reenvios.
+   Publicacao: sem fonte confiavel nesta fatia -> sempre indisponivel (null), nunca zero.
+   ========================================================================== */
+
+export const CONTENT_STAGES = ['RECEIVED', 'SENT', 'APPROVED'] as const;
+export type ContentStage = (typeof CONTENT_STAGES)[number];
+
+export interface ContentStageDates {
+  /** Primeiro arquivo enviado (inclusive se removido depois). */
+  receivedAt: Date | string | null;
+  /** Primeiro envio de uma versao ao cliente. */
+  sentAt: Date | string | null;
+  /** Primeira decisao APPROVED do cliente. */
+  approvedAt: Date | string | null;
+}
+
+/** Estagio mais alto alcancado; null quando o conteudo ainda nao tem arquivo nem envio. */
+export function contentStageOf(dates: ContentStageDates): ContentStage | null {
+  if (dates.approvedAt) return 'APPROVED';
+  if (dates.sentAt) return 'SENT';
+  if (dates.receivedAt) return 'RECEIVED';
+  return null;
+}
+
+export type ContentPeriodSource = 'PLAN' | 'FIRST_FILE';
+
+/**
+ * Competencia do conteudo (D1): a do plano da peca de Entregas vinculada; sem vinculo, o mes do
+ * primeiro arquivo recebido no fuso da organizacao. Sem vinculo e sem arquivo: sem competencia.
+ */
+export function contentPeriodOf(
+  input: { linkedPlanPeriod: string | null; receivedAt: Date | string | null },
+  timeZone: unknown
+): { period: string; source: ContentPeriodSource } | null {
+  if (input.linkedPlanPeriod) return { period: input.linkedPlanPeriod, source: 'PLAN' };
+  if (!input.receivedAt) return null;
+  const day = dateInTimeZone(input.receivedAt, timeZone);
+  return day ? { period: day.slice(0, 7), source: 'FIRST_FILE' } : null;
+}
+
+export interface ContentStageCounts {
+  received: number;
+  sent: number;
+  approved: number;
+  /** Sem confirmacao confiavel de publicacao (F8-4/F8-5): sempre null, nunca 0. */
+  published: null;
+  publishedSource: 'NOT_INTEGRATED';
+}
+
+/** Contagem cumulativa por estagio alcancado: recebidos >= enviados >= aprovados. */
+export function countContentStages(stages: readonly (ContentStage | null)[]): ContentStageCounts {
+  const rank = (s: ContentStage | null) => (s ? CONTENT_STAGES.indexOf(s) + 1 : 0);
+  return {
+    received: stages.filter((s) => rank(s) >= 1).length,
+    sent: stages.filter((s) => rank(s) >= 2).length,
+    approved: stages.filter((s) => rank(s) >= 3).length,
+    published: null,
+    publishedSource: 'NOT_INTEGRATED',
+  };
+}
+
+/** Proporcao publicadas / recebidas para a barra; null enquanto nao houver dado confiavel ou recebidos. */
+export function publishedRatio(counts: Pick<ContentStageCounts, 'received' | 'published'>): number | null {
+  if (counts.published === null || counts.received <= 0) return null;
+  return Math.min(1, Math.max(0, counts.published / counts.received));
+}
+
+export const CONTENT_PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export type ApprovalStatus = 'NOT_SENT' | 'AWAITING_CLIENT' | 'APPROVED' | 'CHANGES_REQUESTED' | 'LINK_EXPIRED' | 'LINK_REVOKED';
 

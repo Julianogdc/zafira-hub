@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import {
   CreateApprovalLinkRequestSchema,
+  ContentStagesQuerySchema,
   CreateContentItemRequestSchema,
   RevokeApprovalLinkRequestSchema,
   UpdateContentItemRequestSchema,
@@ -10,6 +11,7 @@ import type { PermissionCode, RoleType } from '@zafira/domain';
 import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { ContentContext, ContentError, contentService as service } from './content.service.js';
 import { approvalService } from './approval.service.js';
+import { contentStagesService } from './content-stages.service.js';
 
 /**
  * F8-1 (DEC-F8-003) - Rotas de conteudo. Prefixos "" e "/api".
@@ -44,7 +46,7 @@ export async function contentRoutes(app: FastifyInstance) {
   const route = (
     method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
-    permission: PermissionCode,
+    permission: PermissionCode | PermissionCode[],
     handler: (ctx: ContentContext, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>,
     successStatus = 200
   ) => {
@@ -53,7 +55,8 @@ export async function contentRoutes(app: FastifyInstance) {
       app.route({
         method,
         url: `${prefix}${path}`,
-        preHandler: [authenticate, requirePermission(permission)],
+        // varias permissoes = todas exigidas (negacao por padrao)
+        preHandler: [authenticate, ...(Array.isArray(permission) ? permission : [permission]).map((p) => requirePermission(p))],
         handler: async (request, reply) => {
           const ctx = contextOf(request, reply);
           if (!ctx) return reply;
@@ -106,6 +109,9 @@ export async function contentRoutes(app: FastifyInstance) {
     approvalService.createLink(ctx, params(r).id, CreateApprovalLinkRequestSchema.parse(r.body ?? {})), 201);
   route('POST', '/content/items/:id/approval-links/:linkId/revoke', 'content.send_to_client', (ctx, r) =>
     approvalService.revokeLink(ctx, params(r).id, params(r).linkId, RevokeApprovalLinkRequestSchema.parse(r.body ?? {}).reason));
+  // F8-3: contador de Entregas por estagio (somente leitura; exige ver Entregas E ver Conteudos)
+  route('GET', '/clients/:id/deliverables/content-stages', ['deliverables.view', 'content.view'], (ctx, r) =>
+    contentStagesService.forClientPeriod(ctx, params(r).id, ContentStagesQuerySchema.parse(query(r)).period));
   // Arquivo servido pela API (autorizado por sessao/carteira); nunca URL publica do storage
   route('GET', '/content/items/:id/media/:mediaId/file', 'content.view', async (ctx, r, reply) => {
     const f = await service.readFile(ctx, params(r).id, params(r).mediaId);
