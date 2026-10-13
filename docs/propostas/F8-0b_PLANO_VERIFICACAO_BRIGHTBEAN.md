@@ -313,3 +313,19 @@ Sim. O agendamento usa o `post_id` de rascunhos existentes; as mídias já estã
 Resposta do cancelamento com filho `draft`; `GET /posts/{id}` com post e filhos em `draft` e `scheduled_at` nulo; `GET /posts/?social_account_id=<conta>&status=scheduled` com total 0; segundo cancelamento devolvendo 409 (não há mais agendado). Como o publicador só seleciona `scheduled`, um post em `draft` sem horário **não é publicado depois**.
 
 **Critérios de aceite da R1+:** T20–T23 com os resultados esperados (ou 422 de aprovação registrado); **nenhum post publicado nem em `publishing`**; zero agendados ao fim; evidências sem chave nem dados pessoais.
+
+## 11. Tentativa de execução da R1+ (2026-10-13, DEC-F8-015) — interrompida no portão, sem escrita
+
+Executor com travas no código (só D6 e D7; só agendar, reagendar com `scheduled_at` e cancelar; horário com fuso explícito e ≥ agora + 6 dias; parada na primeira resposta inesperada). Espera de 35 s após a alteração da chave antes do portão.
+
+| Verificação | Resultado |
+|---|---|
+| `GET /me/` × 3 | 200 × 3, consistentes; **permissões efetivas = [`create_posts`]** — **`publish_directly` ausente** (esperado: `create_posts` + `publish_directly`) |
+| Conta | 1 conta de teste, `instagram_login`, conectada |
+| Decisão do portão | **interrompido; nenhuma escrita** (T20–T23 não executados) |
+| D6 e D7 (final e após 3 min) | `draft`, `scheduled_at` nulo no post e no filho |
+| Totais da conta (final e após 3 min) | `scheduled` 0, `publishing` 0, `published` 0, `failed` 0 |
+
+**Diagnóstico:** as permissões efetivas são a **interseção** entre o que está gravado na chave e o que o usuário que a emitiu pode fazer no workspace (código: `apps/api/auth.py`). Com a espera de 35 s e três leituras idênticas, cache está descartado. Hipóteses, a confirmar pela Direção na interface do BrightBean, sem alteração pelo agente: (a) a opção `publish_directly` não ficou salva na chave; (b) **o usuário emissor da chave não tem `publish_directly` no seu papel do workspace** — nesse caso nenhuma chave emitida por ele terá essa permissão (indício: em nenhuma leitura desde a R0 `publish_directly` apareceu, mesmo quando a chave trouxe permissões além das selecionadas).
+
+**Pendências:** corrigir a chave ou o papel do emissor (decisão e ação da Direção); depois, repetir a R1+ com o mesmo executor e os mesmos controles. A R2 continua dependendo da R1+.

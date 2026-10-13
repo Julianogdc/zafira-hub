@@ -36,6 +36,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b R1+ interrompida no portão: `publish_directly` ausente (DEC-F8-015) — Claude
+- AUTORIZAÇÃO: DEC-F8-015.
+- RESULTADO: após 35 s, 3× `/me/` (200, consistentes) com permissões efetivas **[`create_posts`]**, sem `publish_directly`; conta de teste conectada. **Portão não atendido → nenhuma escrita**; T20–T23 não executados. Estado final e após 3 min: D6 e D7 em `draft` sem horário; conta com `scheduled` 0, `publishing` 0, `published` 0, `failed` 0. Commit de documentação com `[skip ci]`.
+- DIAGNÓSTICO: permissão efetiva = chave ∩ papel do emissor; cache descartado (35 s e 3 leituras iguais). Hipóteses: `publish_directly` não salva na chave, ou o emissor não tem `publish_directly` no workspace (nunca apareceu desde a R0).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R1+ **não executada (bloqueio de permissão)**; R2 não autorizada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (repetição da R1+ depende da correção pela Direção).
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial publicar, alterar credenciais pelo agente, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-015 — Execução controlada da R1+ da F8-0b (T20–T23) (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: executar agendamento, cancelamento e reagendamento na conta própria de testes.
+- Decisão: (1) Chave com permissões exclusivas **`create_posts` e `publish_directly`** (conta e workspace no repositório interno; validade 20/10/2026). (2) Antes de escrever: aguardar ≥ 30 s; 3× `GET /me/` confirmando exatamente as duas permissões e a conta; confirmar ausência de agendamentos; divergência → interromper sem escrita. (3) Testes autorizados: T20 agendar D6 a +7 dias com fuso explícito; T21 cancelar D6; T22 repetir o cancelamento (409); T23 agendar D7 a +7 d, reagendar a +8 d, cancelar. (4) Controles: bloqueio no executor de horário < +6 dias; só D6 e D7; sem novos posts ou mídia; sem publicação imediata; horário sempre com fuso; falha → parar escritas e consultar estado; agendamento residual → reportar para cancelamento manual supervisionado; zero agendados ao fim e após alguns minutos. (5) Sem R2, VPS, produção ou Actions no privado; R1+ só encerrada com aceite técnico.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: na correção da chave e repetição da R1+.
+
 ### 2026-10-13 — F8-0b: preparação da R1+ por análise de código (DEC-F8-014) — Claude
 - AUTORIZAÇÃO: DEC-F8-014 — somente leitura de código.
 - EXECUTADO: leitura do fork em `4e5bef9` (rotas de posts, serviços e modelo de composição, motor do publicador); nenhuma chamada à instância. Roteiro em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §10. Commit de documentação com `[skip ci]`.
