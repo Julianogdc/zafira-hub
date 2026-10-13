@@ -171,6 +171,9 @@ export default function ConteudoDetalhe() {
       });
       setCreatedLink(out);
       sync(await contentService.get(detail.id));
+      // Gerar ou reemitir o link nao altera o conteudo (updatedAt/versoes), entao o painel de
+      // aprovacao precisa ser recarregado aqui: status, lista de links e botao Revogar.
+      await loadApproval();
       setNotice({ kind: 'ok', text: out.reissued ? 'Novo link gerado; o anterior foi revogado.' : 'Link de aprovação gerado.' });
     } catch (e) {
       const info = contentErrorInfo(e);
