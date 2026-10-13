@@ -329,3 +329,26 @@ Executor com travas no código (só D6 e D7; só agendar, reagendar com `schedul
 **Diagnóstico:** as permissões efetivas são a **interseção** entre o que está gravado na chave e o que o usuário que a emitiu pode fazer no workspace (código: `apps/api/auth.py`). Com a espera de 35 s e três leituras idênticas, cache está descartado. Hipóteses, a confirmar pela Direção na interface do BrightBean, sem alteração pelo agente: (a) a opção `publish_directly` não ficou salva na chave; (b) **o usuário emissor da chave não tem `publish_directly` no seu papel do workspace** — nesse caso nenhuma chave emitida por ele terá essa permissão (indício: em nenhuma leitura desde a R0 `publish_directly` apareceu, mesmo quando a chave trouxe permissões além das selecionadas).
 
 **Pendências:** corrigir a chave ou o papel do emissor (decisão e ação da Direção); depois, repetir a R1+ com o mesmo executor e os mesmos controles. A R2 continua dependendo da R1+.
+
+## 12. Execução da R1+ (2026-10-13, DEC-F8-016)
+
+Mesmo executor da §11, sem alterações (travas: só D6 e D7; só agendar, reagendar com `scheduled_at` e cancelar; horário com fuso explícito e ≥ agora + 6 dias; parada na primeira resposta inesperada). Espera de 35 s após a correção da chave.
+
+**Portão:** 3× `GET /me/` (200, consistentes) com permissões efetivas **exatamente** `create_posts` e `publish_directly`; 1 conta de teste `instagram_login` conectada; conta com `scheduled`/`publishing`/`published`/`failed` = 0; D6 e D7 em `draft` sem horário. A permissão faltava na chave (hipótese (a) da §11).
+
+| Teste | Operação | HTTP | Estado depois |
+|---|---|---|---|
+| T20 | agendar D6 (Story imagem) enviando `2026-10-20T20:08:00-03:00` | 200 (esperado 200) | post e filho `scheduled`, horário `2026-10-20T23:08:00Z` — **mesmo instante, convertido para UTC** |
+| T21 | cancelar D6 | 200 (esperado 200) | post e filho `draft`, `scheduled_at` **nulo** |
+| T22 | cancelar D6 de novo | **409** (esperado 409) | "No scheduled platform posts to cancel."; D6 continua `draft` sem horário |
+| T23a | agendar D7 (Story vídeo) para `2026-10-20T20:08:00-03:00` | 200 | `scheduled`, `2026-10-20T23:08:00Z` |
+| T23b | reagendar D7 (`PATCH` só com `scheduled_at`) para `2026-10-21T20:08:00-03:00` | 200 | `scheduled`, `2026-10-21T23:08:00Z` — mesmo instante, post e filho atualizados |
+| T23c | cancelar D7 | 200 | post e filho `draft`, `scheduled_at` nulo |
+
+**Estados finais e releitura após 3 minutos:** D6 e D7 em `draft` sem horário; conta com `scheduled` 0, `publishing` 0, `published` 0, `failed` 0. **Zero publicações e zero agendamentos de teste.** Nenhuma operação fora das autorizadas; nenhum post ou mídia criados.
+
+**Capacidades confirmadas:** #17 agendar um rascunho; #19 fuso no agendamento (offset convertido para UTC no mesmo instante); #20 reagendar; #23 agendar/cancelar idempotentes pelo estado (repetição → 409); #30 cancelar devolve a rascunho e remove o horário.
+
+**Observação:** o horário de +7 dias caiu depois da validade informada da chave (20/10/2026); como a revogação ou expiração da chave **não** cancela agendados, o cancelamento imediato era obrigatório e foi feito.
+
+**Pendências para a R2:** retirar `publish_directly` da chave até a R2 ser autorizada; R2 teste a teste (T30–T34) na conta de testes, com aprovação específica; primeira publicação confirma #33 permalink, #36 métricas de post e #32/#34 estados de publicação e falha.

@@ -161,3 +161,13 @@ Evidência **[V]** = verificação real na instância (conta própria de testes)
 | 38 | Escopo da chave e allowlist | **Confirmada** | [V] permissões = chave ∩ emissor; conta fora da allowlist → 404; mudança da chave leva até 30 s para valer em todos os processos |
 
 Continuam **não verificadas**: #8 (Facebook Feed), #18 (horário passado dispara em ~15 s, pelo código), #23 e #30 (agendar/cancelar), #25, #32–#36 (publicação, falha, permalink, métricas de post). #9 fora do piloto.
+
+## 8. Atualização pela F8-0b R1+ (2026-10-13, DEC-F8-016)
+
+| # | Capacidade | Nova classe | Evidência |
+|---|---|---|---|
+| 17 | Agendar rascunho | **Confirmada** | [V] `POST /posts/{id}/schedule` → 200, `scheduled` (exige `create_posts` + `publish_directly`) |
+| 19 | Fuso no agendamento | **Confirmada** | [V] horário em `-03:00` armazenado em UTC no mesmo instante; antecedência mínima não validada pelo servidor (pelo código) |
+| 20 | Reagendar | **Confirmada** | [V] `PATCH` com `scheduled_at` → 200, post e filho atualizados |
+| 23 | Idempotência de agendar/reagendar/cancelar | **Confirmada (pelo estado)** | [V] cancelar repetido → 409; sem `Idempotency-Key` nessas rotas |
+| 30 | Cancelar agendado | **Confirmada** | [V] → `draft`, horário removido; nenhum agendado restante após 3 min |

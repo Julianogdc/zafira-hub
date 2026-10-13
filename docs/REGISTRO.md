@@ -36,6 +36,26 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b R1+ executada: T20–T23 aprovados, zero agendados e zero publicados (DEC-F8-016) — Claude
+- AUTORIZAÇÃO: DEC-F8-016.
+- PORTÃO: após 35 s, 3× `/me/` com permissões exatas `create_posts` + `publish_directly` e 1 conta de teste conectada; conta sem agendados/publicações; D6 e D7 em rascunho.
+- RESULTADO: T20 agendar D6 (`-03:00` → UTC, mesmo instante) 200; T21 cancelar 200 (`draft`, horário nulo); T22 cancelar de novo **409**; T23 agendar D7 200, reagendar +8 d 200 (horário atualizado), cancelar 200. **Final e após 3 min: D6 e D7 em `draft` sem horário; `scheduled` 0, `publishing` 0, `published` 0, `failed` 0.** Commit de documentação com `[skip ci]`.
+- CAPACIDADES CONFIRMADAS: #17, #19, #20, #23 (pelo estado), #30. Matriz F8-0 §8 acrescentada.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R1+ **executada; encerramento só com aceite técnico da Direção**. R2 não autorizada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PENDÊNCIAS: retirar `publish_directly` da chave até a R2; R2 teste a teste; limpeza dos rascunhos e arquivos de teste quando a Direção decidir; remover a chave da máquina e revogá-la ao fim da F8-0b.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial publicar, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b / matriz F8-0 (interno e público).
+
+### DEC-F8-016 — Repetição da R1+ da F8-0b após correção da permissão (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: a R1+ (DEC-F8-015) parou no portão por falta de `publish_directly` efetiva.
+- Decisão: (1) A Direção marcou `publish_directly` na chave temporária. (2) Aguardar a propagação; 3× `GET /me/`; confirmar **somente** `create_posts` e `publish_directly` e **somente** a conta de testes; divergência → interromper sem escrever. (3) Se correto, executar T20–T23 com o executor e os controles já preparados; confirmar o cancelamento de todos os agendamentos e verificar de novo após alguns minutos. (4) Sem novos posts, sem publicação imediata, sem contas reais da agência, sem VPS/produção; agendamento residual → interromper e informar para cancelamento supervisionado.
+- Alternativas consideradas: —
+- Impacto: documentação; operações de agendamento e cancelamento em rascunhos de teste.
+- Revisão: no aceite técnico da R1+.
+
 ### 2026-10-13 — F8-0b R1+ interrompida no portão: `publish_directly` ausente (DEC-F8-015) — Claude
 - AUTORIZAÇÃO: DEC-F8-015.
 - RESULTADO: após 35 s, 3× `/me/` (200, consistentes) com permissões efetivas **[`create_posts`]**, sem `publish_directly`; conta de teste conectada. **Portão não atendido → nenhuma escrita**; T20–T23 não executados. Estado final e após 3 min: D6 e D7 em `draft` sem horário; conta com `scheduled` 0, `publishing` 0, `published` 0, `failed` 0. Commit de documentação com `[skip ci]`.
