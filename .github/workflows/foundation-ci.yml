@@ -9,6 +9,11 @@ on:
       - hub-2.1
   workflow_dispatch:
 
+# Permissão mínima padrão para todos os jobs: somente leitura do código.
+# Jobs que precisam de mais declaram a própria permissão (publish-images, homologation-rehearsal).
+permissions:
+  contents: read
+
 jobs:
   quality:
     name: Code Quality and Tests
