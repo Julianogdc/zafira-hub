@@ -159,3 +159,19 @@ Nenhuma rota respondeu 403: as leituras não exigem escopo específico além de 
 **Capacidades com evidência real nesta fase:** #27 listagem de posts (forma da resposta e paginação por offset); listagem de mídia com cursor; #38 modelo de permissão da chave (interseção chave ∩ emissor) e allowlist por chave. Continuam pendentes: #10/#37 (dependem de conta), #36 métricas e todo o R1/R1+/R2.
 
 **Pendências para a R1:** (a) **reemitir a chave** (ou corrigir a atual) com a conta de teste **na allowlist** e somente as permissões da fase autorizada — para a R0 completa, apenas `view_analytics`; para a R1, `create_posts` + `upload_media`, **sem `publish_directly`**; (b) repetir T02 e T05 com a conta visível (limites da conta e métricas); (c) confirmar que a conta é de teste (§4); (d) autorização expressa da R1.
+
+### 8.1 Reexecução da R0 após correção da chave (2026-10-13, DEC-F8-011)
+
+Somente GET, com a mesma chave local. Portão definido antes da execução: seguir para posts, mídia e métricas **só** com permissões = `view_analytics` **e** a conta pretendida visível em `GET /accounts/`.
+
+| Endpoint | HTTP | Resultado |
+|---|---|---|
+| `GET /me/` | 200 | `permissions` = **[`view_analytics`]** (corrigido); `allowlisted_accounts` com **1 conta**: plataforma `instagram_login`, `connection_status` = `connected`, `char_limit` = **2200**, `needs_title` = false, `supports_first_comment` = true, `escaped_chars` vazio; é a conta pretendida |
+| `GET /accounts/` | 200 | **lista vazia (0 contas)** |
+| posts, mídia, métricas | **não executados** | portão não atendido: divergência entre `/me/` e `/accounts/` |
+
+**Diagnóstico:** a chave está correta (permissão única e conta liberada), mas a instância devolve a conta em `/me/` e **não** em `/accounts/`. No código do fork em `4e5bef9` as duas rotas leem a **mesma** lista (`api_key.social_accounts.all()`), então a instância **não se comporta como o código lido**. Hipóteses a confirmar pelo proprietário, sem alterar nada: (a) o código implantado não é exatamente `4e5bef9` nessa rota (ex.: filtro adicional por plataforma `instagram_login` ou por estado); (b) cache ou réplica de leitura. Implicação para a F8-4: **não depender de `/accounts/` para descobrir contas** até esclarecer; `/me/` traz os mesmos dados.
+
+**Capacidades com evidência real:** #10 limites da conta (`char_limit` 2200, `needs_title`, `supports_first_comment`, `escaped_chars`) para `instagram_login`; #38 permissão efetiva = interseção chave ∩ emissor e allowlist por chave (agora com a configuração correta). Continuam pendentes: #27 com dados reais, #36/#37 métricas e R1/R1+/R2.
+
+**Para concluir a R0:** decisão da Direção entre (1) esclarecer a divergência de `/accounts/` (verificar a versão implantada da rota, sem alterar a instância) ou (2) autorizar seguir as leituras restantes usando o identificador da conta obtido em `/me/` (posts filtrados pela conta, métricas da conta e, se houver, de um post).

@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b R0 reexecutada: divergência entre /me/ e /accounts/ (DEC-F8-011) — Claude
+- AUTORIZAÇÃO: DEC-F8-011 — somente GET; parar em divergência.
+- RESULTADO: `/me/` 200 com permissões **[view_analytics]** e **1 conta** liberada (`instagram_login`, conectada, `char_limit` 2200, `needs_title` false, `supports_first_comment` true); `/accounts/` 200 com **0 contas**. Portão não atendido → posts, mídia e métricas **não executados**. Uma leitura adicional de `/me/` (só campos técnicos, sem nomes) confirmou a conta. Commit de documentação com `[skip ci]`.
+- DIAGNÓSTICO: chave correta; a instância diverge do código lido (`4e5bef9`), em que as duas rotas leem a mesma lista. Hipóteses: código implantado diferente nessa rota ou cache. F8-4 não deve depender de `/accounts/` até esclarecer.
+- CAPACIDADES COM EVIDÊNCIA REAL: #10 (limites da conta `instagram_login`) e #38 (permissão efetiva e allowlist). Pendentes: #27 com dados, #36/#37, R1/R1+/R2.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R0 **interrompida por divergência**. R1 e R2 **não autorizadas**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial qualquer escrita/publicação no BrightBean, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-011 — Reexecução da Fase R0 da F8-0b após correção da chave (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: a primeira R0 (DEC-F8-010) mostrou chave sem conta e com permissões além do informado.
+- Decisão: (1) A Direção corrigiu a chave (conta vinculada indicada no repositório interno; única permissão **view_analytics**; validade 20/10/2026). (2) **Autorizada exclusivamente a reexecução dos GET da R0**: `/me/` (permissões efetivas), `/accounts/` (conta autorizada); se ambos corretos, posts, mídia e métricas. (3) **Qualquer divergência: interromper e apresentar diagnóstico.** (4) Sem POST/PUT/PATCH/DELETE; chave nunca impressa nem armazenada em arquivos versionados. Sem R1/R2, publicação, VPS ou produção.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: na decisão sobre a divergência de `/accounts/`.
+
 ### 2026-10-13 — F8-0b Fase R0: leitura com chave temporária (DEC-F8-010) — Claude
 - AUTORIZAÇÃO: DEC-F8-010 — somente GET.
 - PROCEDIMENTO: chave guardada pelo proprietário como variável de ambiente do usuário Windows (`ZAFIRA_F80B_BB_KEY`), com entrada oculta; script temporário fora do repositório que **só faz GET**, nunca imprime a chave e grava apenas códigos HTTP, nomes de campos e contagens. Commit de documentação com `[skip ci]`.
