@@ -36,6 +36,28 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b Fase R1: uploads e rascunhos sem publicação (DEC-F8-013) — Claude
+- AUTORIZAÇÃO: DEC-F8-013.
+- PORTÃO: 3 leituras de `/me/` consistentes; permissões exatas (`create_posts`, `upload_media`, `view_analytics`), sem `publish_directly`; conta de teste conectada.
+- EXECUÇÃO: executor temporário fora do repositório, com travas no código (só `GET`, `POST /media/`, `POST /posts/` com `action=draft` sem `scheduled_at`, `PATCH` de legenda) e parada em 5xx/401/403/429 (não ocorreu). Mídia sintética gerada localmente (System.Drawing; WebP e MP4 pelo navegador embutido, servidor local temporário em 127.0.0.1, já encerrado). Os carrosséis de 10 e 11 itens não rodaram na primeira passada por erro no executor (checagem mal escrita) e foram executados num complemento com o mesmo portão. Commit de documentação com `[skip ci]`.
+- RESULTADO: 17 uploads aceitos (JPG, PNG, WebP, MP4; "`.mov`" detectado como MP4); recusados com 422: imagem > 20 MB, > 30 MP e arquivo falso. 15 rascunhos criados (Feed, carrossel 2/10/11, Reel, Story imagem e vídeo, vídeo no Feed, PNG, WebP, legendas 2200 e 2201, idempotência, fuso); recusados com 422: story com 2 mídias e reel com imagem. Idempotência: replay com mesmo id e 422 para corpo diferente, no upload e na criação. `proposed_publish_at` com `-03:00` → UTC, mesmo instante. `PATCH` de legenda mantém rascunho. **Inventário final: 15 posts, todos `draft`; 17 mídias; nada agendado ou publicado.**
+- ACHADOS PARA A F8-4: servidor não valida máximo do carrossel nem `char_limit` na criação; deduplicação do upload por nome+tamanho; tipo detectado pelo conteúdo; vídeo passa por `pending`.
+- MATRIZ F8-0: §7 acrescentada (classes atualizadas de #6, #7, #10, #12, #13, #15, #16, #19, #22, #24, #27, #28, #29, #37, #38).
+- INVENTÁRIO PARA LIMPEZA: rascunhos e mídias listados com identificadores no repositório interno; nada removido.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R1 **executada; encerramento só após revisão da Direção**. R1+ e R2 não autorizadas.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial agendar/publicar, `publish_directly`, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b / matriz F8-0 (interno e público).
+
+### DEC-F8-013 — Execução da Fase R1 da F8-0b (uploads e rascunhos, sem publicação) (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: executar a R1 do plano da F8-0b na conta própria de testes.
+- Decisão: (1) Chave temporária com **`create_posts`, `upload_media` e `view_analytics`**, sem `publish_directly` (conta e workspace no repositório interno; validade 20/10/2026). (2) **Autorizada a R1:** conferir `/me/` antes de escrever e parar em permissão excessiva ou divergência; uploads de mídia fictícia e rascunhos nos formatos suportados; limites de arquivo, tipos, legenda e duplicidade; confirmar que só há rascunhos; registrar IDs e respostas sem dados sensíveis; inventariar para limpeza, sem excluir; atualizar a matriz e os documentos nos dois repositórios. (3) Proibido: publicar, agendar, reagendar, `publish_directly`, ampliar permissões, VPS/infraestrutura/produção, dados de clientes, R1+/R2, Actions no privado. (4) Comportamento inesperado: interromper. (5) A R1 só se encerra após revisão da Direção.
+- Alternativas consideradas: —
+- Impacto: documentação; rascunhos e arquivos de teste na conta de testes.
+- Revisão: na revisão da R1 pela Direção.
+
 ### 2026-10-13 — F8-0b R0 concluída: causa da divergência e leituras finais (DEC-F8-012) — Claude
 - AUTORIZAÇÃO: DEC-F8-012 — somente GET; parada em erro de autorização ou de isolamento (não ocorreu).
 - RESULTADO: `/me/` 200 (só `view_analytics`, 1 conta); `/accounts/` 200 com **a mesma conta** (também com parâmetro anti-cache; sem barra → 301); posts filtrados pela conta 200 (total 0); conta fora da allowlist 404 (**isolamento ok**); **métricas da conta 200** (`analytics_available` true); mídia 200 (0 itens, cursor). Detalhe de post, permalink e métricas de post não aplicáveis (conta sem posts). Commit de documentação com `[skip ci]`.

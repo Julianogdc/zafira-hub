@@ -137,3 +137,27 @@ Resultado: esta matriz atualizada (classes) e o contrato do simulador da F8-4.
 **Não liberar a F8-4** antes da F8-0b: 13 das 38 capacidades são "não verificadas" e a idempotência real é "parcial".
 
 **Contagem (38):** confirmadas 12 (incluindo a indisponibilidade comprovada da remoção); parcialmente confirmadas 13; não verificadas 13.
+
+## 7. Atualização pela F8-0b (2026-10-13 — R0 e R1, DEC-F8-010 a DEC-F8-013)
+
+Evidência **[V]** = verificação real na instância (conta própria de testes), sem publicação. Detalhes em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md` (§8 e §9).
+
+| # | Capacidade | Nova classe | Evidência |
+|---|---|---|---|
+| 6 | Carrossel | **Parcialmente confirmada** | [V] rascunho com 2, 10 e 11 imagens aceito; o servidor não valida o máximo na criação; publicação não testada |
+| 7 | Vídeo no Feed | **Parcialmente confirmada** | [V] rascunho de vídeo sem `post_type` aceito; efeito na publicação não testado |
+| 10 | Limites por conta | **Confirmada (leitura)** | [V] `char_limit` 2200, `needs_title` false, `supports_first_comment` true (`instagram_login`); **não aplicado na criação do rascunho** (2201 aceito) |
+| 12 | Tipos aceitos | **Confirmada na biblioteca** | [V] JPG, PNG, WebP e MP4 aceitos; tipo detectado pelo conteúdo; arquivo inválido → 422; MOV QuickTime verdadeiro e aceitação pela rede na publicação **não testados** |
+| 13 | Tamanho máximo | **Confirmada para imagem** | [V] imagem > 20 MB → 422; > 30 megapixels → 422; limite de vídeo (1 GB pelo código) não testado |
+| 15 | Mídia por workspace e reutilização | **Confirmada** | [V] a mesma mídia usada em dois rascunhos |
+| 16 | Criar rascunho | **Confirmada** | [V] Feed, carrossel, Reel, Story imagem e vídeo; story com 2 mídias e reel com imagem → 422 |
+| 19 | Fuso de horários | **Parcialmente confirmada** | [V] horário com `-03:00` convertido para UTC no mesmo instante (campo de rascunho); antecedência real só com agendamento |
+| 22 | Idempotência em upload e criação | **Confirmada** | [V] mesma chave + mesmo corpo → mesmo id; corpo diferente → 422; no upload, o "corpo" é nome + tamanho + metadados |
+| 24 | Não duplicar ao repetir | **Parcialmente confirmada** | [V] repetição sequencial sem duplicar; corrida e timeout reais não testados |
+| 27 | Listar posts | **Confirmada** | [V] filtros por conta e status, `limit`/`offset`, `total` |
+| 28 | Busca por referência externa | **Confirmada como indisponível** | código e OpenAPI publicada |
+| 29 | Webhooks | **Confirmada como indisponível** | código e OpenAPI publicada |
+| 37 | Métricas de conta | **Confirmada** | [V] HTTP 200, `analytics_available` true |
+| 38 | Escopo da chave e allowlist | **Confirmada** | [V] permissões = chave ∩ emissor; conta fora da allowlist → 404; mudança da chave leva até 30 s para valer em todos os processos |
+
+Continuam **não verificadas**: #8 (Facebook Feed), #18 (horário passado dispara em ~15 s, pelo código), #23 e #30 (agendar/cancelar), #25, #32–#36 (publicação, falha, permalink, métricas de post). #9 fora do piloto.

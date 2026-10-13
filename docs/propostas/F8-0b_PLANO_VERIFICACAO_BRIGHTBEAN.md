@@ -202,3 +202,62 @@ Nenhum cabeçalho de cache HTTP nas respostas (só `Vary: Cookie`).
 **Capacidades com evidência real na R0:** #10 limites da conta (`instagram_login`: `char_limit` 2200, sem título, primeiro comentário suportado); #27 listagem de posts com filtro por conta e paginação por offset; listagem de mídia com cursor; **#37 métricas de conta** (200, dados disponíveis); **#38** permissões efetivas (chave ∩ emissor), allowlist por chave e **isolamento** (conta fora da allowlist → 404); propagação de mudanças de chave em até 30 s. **Não verificáveis na R0** (sem posts/mídia na conta): detalhe de post, permalink e #36 métricas de post — ficam para depois da primeira publicação de teste (R2).
 
 **R0 concluída**, pronta para aceite da Direção. Pendências para a R1: autorização específica; chave com `create_posts` + `upload_media`, **sem `publish_directly`**, mesma conta na allowlist; aguardar 30 s após alterar a chave.
+
+## 9. Resultado da Fase R1 (2026-10-13, DEC-F8-013)
+
+Uploads de mídia **sintética** (gradientes, cores e números; sem pessoas, marcas ou dados de clientes) e **somente rascunhos**, na conta própria de testes. O executor bloqueava no próprio código qualquer operação fora de `GET`, `POST /media/`, `POST /posts/` com `action=draft` (sem `scheduled_at`) e `PATCH` de legenda; conferia o estado **rascunho** na resposta e numa releitura de cada post; e parava em 5xx, 401, 403 ou 429 (não ocorreu).
+
+**Portão (3 leituras de `/me/`, consistentes):** permissões exatamente `create_posts`, `upload_media`, `view_analytics`; **sem `publish_directly`**; 1 conta `instagram_login` conectada (conta de teste), `char_limit` 2200.
+
+### Uploads (`POST /media/`)
+| Teste | Arquivo | HTTP | Resultado |
+|---|---|---|---|
+| U1 | JPG 1080×1350 | 201 | `image/jpeg` |
+| U1r | mesmo arquivo, mesma `Idempotency-Key` | 201 | **mesmo media_id** (replay) |
+| U1x | outro arquivo, mesma chave | 422 | "idempotency_key reused with a different request body" |
+| U2 | PNG 1080×1080 | 201 | `image/png` |
+| U3 | WebP 1080×1080 | 201 | `image/webp` |
+| U4 | JPG 1080×1920 (story) | 201 | `image/jpeg` |
+| U5 | MP4 H.264 720×1280, 4 s, sem áudio | 201 | `video/mp4` |
+| U6 | o mesmo vídeo com extensão `.mov` e tipo `video/quicktime` | 201 | registrado como **`video/mp4`**: o servidor detecta o tipo pelo conteúdo (um MOV QuickTime verdadeiro não foi testado) |
+| C01–C11 | 11 JPG 1080×1080 | 201 | `image/jpeg` |
+| U8 | PNG de 23 MB (9 MP) | 422 | "File too large. Maximum size for image files is 20MB." |
+| U9 | PNG 6000×6000 (36 MP) | 422 | "the limit is 30 megapixels" |
+| U10 | texto com extensão `.jpg` | 422 | "Unsupported or unrecognised file type." |
+
+Todas as 17 mídias aceitas terminaram com `processing_status` = `completed` (o vídeo começa `pending`). Resposta do upload traz `width`, `height`, `aspect_ratio`, `duration`, `thumbnail_url`, `url`, entre outros.
+
+### Rascunhos (`POST /posts/`, `action=draft`)
+| Teste | Formato | HTTP | Resultado |
+|---|---|---|---|
+| D1 | Feed imagem (JPG) | 201 | rascunho |
+| D2 | Carrossel 2 imagens | 201 | rascunho |
+| D3 | Carrossel 10 imagens | 201 | rascunho |
+| D4 | Carrossel **11** imagens | 201 | **aceito como rascunho** — o servidor **não** valida o limite de 10 na criação |
+| D5 | Reel (MP4) | 201 | rascunho |
+| D6 | Story imagem | 201 | rascunho |
+| D7 | Story vídeo | 201 | rascunho |
+| D8 | Story com 2 mídias | 422 | "post_type 'story' requires exactly 1 media asset, got 2." |
+| D9 | Reel com imagem | 422 | "post_type 'reel' requires a video asset, got 'image'." |
+| D10 | vídeo no Feed (sem `post_type`) | 201 | aceito como rascunho (efeito na publicação não verificado) |
+| D11 | Feed PNG | 201 | rascunho |
+| D12 | Feed WebP | 201 | rascunho |
+| D13 | Reel com o arquivo "`.mov`" | 201 | rascunho |
+| D14 | legenda com 2200 caracteres | 201 | rascunho |
+| D15 | legenda com **2201** caracteres | 201 | **aceito como rascunho** — limite da conta **não** validado na criação |
+| D16 / D16r | mesma chave e mesmo corpo | 201 / 201 | **mesmo post_id** (replay) |
+| D16x | mesma chave, corpo diferente | 422 | "idempotency_key reused with a different request body" |
+| D17 | `proposed_publish_at` enviado com `-03:00` | 201 | devolvido em UTC (`Z`), **mesmo instante**; continua rascunho (não entra na fila) |
+| T17 | `PATCH` de legenda em D1 | 200 | legenda atualizada; continua rascunho |
+
+**Inventário final** (leitura após os testes): **15 posts, todos `draft`**; 17 mídias; nenhum agendado ou publicado.
+
+**Inventário para limpeza:** 15 rascunhos (legenda iniciando com `[TESTE F8-0b]`) e 17 arquivos (título `TESTE F8-0b`), com identificadores no repositório interno. Nada foi removido automaticamente.
+
+**Achados para a F8-4:**
+1. O BrightBean **não valida na criação do rascunho** o número de itens do carrossel (11 aceito) nem o limite de legenda da conta (2201 aceito): o Hub deve validar antes de enviar (o Hub já limita o carrossel a 10; falta validar a legenda contra o `char_limit` da conta).
+2. A deduplicação do **upload** compara nome do arquivo, tamanho e metadados (não o conteúdo): a chave de idempotência deve ser única por arquivo (ex.: derivada do SHA-256).
+3. O tipo é detectado pelo conteúdo (o "`.mov`" virou `video/mp4`): o Hub deve usar o tipo devolvido pelo servidor.
+4. Vídeo leva alguns segundos em `pending` antes de `completed`: aguardar o processamento antes de agendar.
+
+**Pendências para a R1+:** autorização específica; chave com `publish_directly` **somente** quando autorizada (agendar a +7 dias, reagendar e cancelar — T20 a T23); aguardar 30 s após alterar a chave; reaproveitar os rascunhos D1/D2 para os testes de agendamento e cancelamento.
