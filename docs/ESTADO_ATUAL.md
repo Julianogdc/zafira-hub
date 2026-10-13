@@ -6,11 +6,11 @@
 
 | Campo | Valor |
 |---|---|
-| Última atualização | 2026-10-13 — Claude — versão pública saneada (preparação da separação público/privado, DEC-GOV-005) |
+| Última atualização | 2026-10-13 — Claude — workflow registrado no repositório público; primeiro CI público **5/5** com Browser Gate F8 (run 38429147116) |
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
-| **Baseline de código** | `2482ba1` — F8-2: aprovação do cliente por link seguro (domínio, migration, API interna e pública, página pública, preview reutilizável, Browser Gate F8) |
-| Situação da baseline | **CI oficial NÃO concluído para `788dad3`/`2482ba1`:** o run 38397329866 falhou só no teste novo de PostgreSQL por ausência de `JWT_SECRET` no ambiente do job (corrigido em `2482ba1`); o run seguinte **não iniciou** por limite de gasto/pagamento do GitHub Actions. Última baseline com CI 5/5: `61bd2fd` (run 38340449956). **Evidência local:** domínio 87, API 822, web 84, PostgreSQL 140/140 em banco limpo. **F8-2 pendente de aceite técnico.** |
+| **Baseline de código** | `2fd34dc` no público `Julianogdc/zafira-hub` — F8-2 com correção do painel de aprovação (espelho no interno: `b7de353`) |
+| Situação da baseline | **CI oficial 5/5** no público, run 38429147116 (https://github.com/Julianogdc/zafira-hub/actions/runs/38429147116): domínio 87/87, API 822/822, web 84/84, PostgreSQL 140/140; **Browser Gate F8 PASS (54 verificações, 0 falhas)** e gates F4–F7 PASS; somente runners `ubuntu-latest`, **0 ms faturáveis**. **F8-2 aguarda aceite técnico da Direção.** |
 
 "Baseline de código" é o último commit que alterou código. Commits posteriores que só mudam `docs/`, `AGENTS.md`, `CLAUDE.md` ou `GEMINI.md` são esperados. A verificação está em `AGENTS.md`.
 
@@ -18,7 +18,7 @@
 
 - **Repositórios (DEC-GOV-005):** este é o repositório **público** de desenvolvimento (código, testes, CI, Browser Gates e documentação técnica sem informação operacional). Governança integral, infraestrutura, auditorias e histórico original ficam no repositório **interno privado**; itens sensíveis aparecem aqui só como referência `INT-<n>`. Os SHAs citados nos registros anteriores pertencem ao histórico interno.
 
-- **Fase:** **F7 — Onboarding e Agenda: ENCERRADA funcionalmente em 2026-10-12** (DEC-F7-018). **F8 — Conteúdos: EM EXECUÇÃO.** F8-0 aceita como levantamento histórico (DEC-F8-003); F8-1 aceita tecnicamente (DEC-F8-004); **F8-2 entregue, com aceite técnico PENDENTE** (aprovação do cliente por link seguro; CI oficial bloqueado por limite de cobrança). **Não autorizadas:** F8-3, F8-4 (exige antes a **F8-0b**) e F8-5. Refinamento estético adiado (DEC-F7-015).
+- **Fase:** **F7 — Onboarding e Agenda: ENCERRADA funcionalmente em 2026-10-12** (DEC-F7-018). **F8 — Conteúdos: EM EXECUÇÃO.** F8-0 aceita como levantamento histórico (DEC-F8-003); F8-1 aceita tecnicamente (DEC-F8-004); **F8-2 entregue, com CI oficial 5/5 e Browser Gate F8 aprovados (run 38429147116); aceite técnico PENDENTE da Direção**. **Não autorizadas:** F8-3, F8-4 (exige antes a **F8-0b**) e F8-5. Refinamento estético adiado (DEC-F7-015).
 - **Ressalvas da F7 (obrigatórias):** P22 bloqueia o primeiro deploy de homologação; P28 bloqueia dados reais; Google Calendar e n8n **não homologados com contas reais**; agendadores desligados até medição de capacidade e autorização; criar/editar evento pelo Hub não existe (DEC-F7-001, evolução futura).
 - **Mapa Mestre:** versão **2026.10.12-C2** — partes 13 a 17 incorporadas (critérios, portões F7–F18, transversais). Itens **[DECIDIR]** seguem pendentes. Sem nova fase para dashboards finais nem identidade visual (DEC-F6-006).
 - **Decisões vigentes da trilha F7:** DEC-F7-001 a DEC-F7-018. **Trilha F8:** DEC-F8-001 a DEC-F8-004.
@@ -32,14 +32,13 @@
 | F0–F5 | ✅ concluídas |
 | **F6 (IMP.1–9, RO.0–2)** | ✅ **encerrada** (ressalva → F15) |
 | F7 — Onboarding e Agenda | ✅ **encerrada funcionalmente em 2026-10-12** (DEC-F7-018), com ressalvas (P22, P28, sem homologação real de Calendar/n8n) |
-| **F8 — Conteúdos** | 🟡 F8-0 e F8-1 aceitas; **F8-2 entregue (aceite técnico pendente: CI/Browser Gate F8 não executados por bloqueio de cobrança)**; F8-3, F8-4 (exige F8-0b) e F8-5 não autorizadas |
+| **F8 — Conteúdos** | 🟡 F8-0 e F8-1 aceitas; **F8-2 entregue com CI 5/5 e Browser Gate F8 aprovados (run 38429147116); aceite técnico pendente**; F8-3, F8-4 (exige F8-0b) e F8-5 não autorizadas |
 | F9–F18 | ⬜ pendentes (critérios e portões no Mapa, parte C2) |
 
 ## Próximo passo concreto
 
 0. **Imediato:** itens de segurança/infraestrutura sob controle do proprietário (ver repositório interno, INT-001).
-1. **Decidir a separação em repositório público + privado** (plano em `docs/propostas/MIGRACAO_REPOSITORIO_PUBLICO_PLANO.md`; recomendado H3) e autorizar o roteiro; a validação da F8-2 ocorrerá no primeiro CI do repositório público.
-1b. **Desbloquear o GitHub Actions** (alternativa enquanto a separação não ocorre) (decisão da Direção; **auditoria e comparação das alternativas no REGISTRO de 2026-10-13: recomendada a opção de limite de gasto pequeno + otimizações de CI, mantendo o repositório privado**) (decisão do proprietário: saldo/limite de gasto; nada foi alterado em cobrança). Com minutos disponíveis, **reexecutar o CI oficial do commit `2482ba1`** (um único run) para o aceite técnico da F8-2 — o **Browser Gate F8 ainda nunca rodou** e, por ser script Python não executável localmente, pode exigir ajustes na primeira execução.
+1. **Direção: aceite técnico da F8-2** com base no run 38429147116 (CI 5/5, Browser Gate F8 54/0, 0 ms faturáveis). O CI público passa a ser o CI oficial; conferir minutos faturáveis = 0 a cada run (repositório público com runner padrão).
 2. Depois do aceite: autorizar a **F8-3** (contadores de Entregas por estágio) e, **antes da F8-4**, a **F8-0b**; provedor S3 antes da homologação.
 2. **Direção decide as recomendações de economia do CI R1–R7** (`docs/REGISTRO.md`, entrada de 2026-10-12): estimativa de consumo de 2.276 min nos últimos 100 runs; 59% dos runs foram de documentação. **Conferir o saldo no painel de cobrança antes de qualquer run completo.**
 3. **Antes de qualquer ambiente real:** `rbac:bootstrap` (**P22**); `N8N_ALLOWED_HOSTS`/`N8N_CALLBACK_BASE_URL`; despachante n8n, agendador do Calendar e do espelho do Asana **desligados** até medir capacidade e haver autorização.
@@ -71,7 +70,8 @@
 | P27 | Pendência de segurança/infraestrutura: detalhe e critério de saída no repositório interno (INT-008) | ver interno |
 | P28 | **Exclusão de cliente, retenção e privacidade** (Direção, DEC-F7-009): `ON DELETE CASCADE` entre cliente e execuções de onboarding pode apagar histórico na exclusão definitiva. Proposta em `docs/propostas/F7-2_RETENCAO_EXCLUSAO_CLIENTE_PROPOSTA.md`. Diferenciar desativação/arquivamento de exclusão definitiva e de remoção de organização. Não alterar o comportamento automaticamente | antes de homologação/produção com dados reais |
 | P29 | **Retificado:** valor descritivo (placeholder), sem credencial comprovada e sem revogação exigida por esse achado; `secret-scan` ampliado e valor removido da árvore | encerrado, salvo nova evidência |
-| P30 | Pendência de segurança/infraestrutura: detalhe e critério de saída no repositório interno (INT-001) | ver interno |
+| P30 | ~~GitHub Actions sem minutos~~ **resolvida (2026-10-13):** CI oficial roda no repositório público com runners padrão gratuitos (`ubuntu-latest`); runs 38424632457, 38425797903 e 38429147116 com 0 ms faturáveis | — |
+| P31 | `AGENTS.md` público tem a seção "8. Dois repositórios: público e interno" **duplicada** (mesmo texto duas vezes). Corrigir numa próxima alteração de documentação do público | próxima edição do `AGENTS.md` público |
 
 ## Proibições atuais
 

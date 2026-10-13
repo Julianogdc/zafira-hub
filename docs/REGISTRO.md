@@ -36,6 +36,21 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — Registro do workflow no repositório público e primeiro CI oficial público (F8-2) — Claude
+- AUTORIZAÇÃO: Direção (2026-10-13), via proprietário: corrigir o registro do workflow de forma não destrutiva (alteração técnica mínima no workflow para provocar `push`), preservar jobs, testes e Browser Gates, sem excluir/recriar branches e sem force-push; acompanhar o CI e investigar falhas sem runs repetidos desnecessários; confirmar runners padrão gratuitos. Restrições: sem VPS/produção, sem Actions no privado, sem cobrança, sem F8-3.
+- SITUAÇÃO INICIAL (API do GitHub): público, Actions habilitado, **0 workflows registrados, 0 runs** (o commit raiz `5870f71` foi enviado com o Actions desativado, então o GitHub nunca leu o workflow); token padrão somente leitura; Actions do interno desativado.
+- COMMITS NO PÚBLICO (todos sem force, branch `hub-2.1`):
+  1. `970dddb` — `permissions: contents: read` no topo do workflow (permissão mínima explícita; `publish-images` e `homologation-rehearsal` mantêm a própria). O push **registrou o workflow** ("Hub 2.1 Foundation CI", ativo) e iniciou o run 38424632457.
+  2. `c6ce0ae` — testes de integração PostgreSQL **em série** (`--test-concurrency=1`). Run 38424632457: PostgreSQL 136/140 — os 4 testes "0. Migration não cria dados" encontraram 1 registro gravado por outro arquivo; o executor do Node roda arquivos em paralelo e os 11 arquivos usam o mesmo banco (soma das durações ~19 s > ~13 s do passo). Fragilidade preexistente da suíte, exposta pelo runner com mais núcleos. Nenhum teste alterado.
+  3. `2fd34dc` — **defeito real da F8-2 corrigido:** gerar/reemitir o link não altera o conteúdo (updatedAt/versões), então o painel de aprovação só recarregava ao atualizar a página; após reemitir, a pessoa via a lista antiga e não encontrava "Revogar" do link novo. Run 38425797903: Publish Images ✔ (acesso GHCR confirmado), gates F4–F7 ✔, **Browser Gate F8 42/0 + tempo esgotado** esperando `revoke-approval-link` (os passos anteriores recarregavam a página e escondiam o defeito). Correção: `loadApproval()` logo após criar o link. **Gate não alterado.** Validação local antes do push: typecheck web 0 erros, web 84/84, lint do arquivo limpo, build.
+- CI OFICIAL: **run 38429147116 (https://github.com/Julianogdc/zafira-hub/actions/runs/38429147116) — 5/5 verdes**: domínio 87/87, API 822/822, web 84/84, PostgreSQL 140/140; Browser Gates F4 (autenticado), F5, F6, F7-1, F7-2, F7-3, F7-4 e **F8 PASS (54 verificações, 0 falhas — primeira execução bem-sucedida)**. Runners: somente `ubuntu-latest` (grupo GitHub Actions, hospedado); **billable 0 ms** nos três runs.
+- INTERNO: `b7de353` espelha as três mudanças (código idêntico ao público; o workflow difere só pelo saneamento já existente: passo Public Guard e padrão de domínio). Actions do interno segue desativado.
+- STATUS: F8-2 **entregue com CI oficial 5/5 e Browser Gate F8 aprovados; aceite técnico pendente da Direção** (não aceita automaticamente). F8-3 não iniciada.
+- LIMITES/LACUNAS: o Browser Gate não pode ser executado nesta máquina (sem Python/Playwright); a primeira execução real foi no CI. P31 registrada (seção 8 duplicada no `AGENTS.md` público).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguarda aceite técnico da F8-2; depois, autorização da F8-3; F8-0b antes da F8-4.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO (interno e público).
+
 ### 2026-10-12 — F8-1 — Domínio, arquivos, upload e telas mínimas de conteúdo — Claude
 - AUTORIZAÇÃO: DEC-F8-003 — exclusivamente a F8-1 (registrada antes do código, `93922fe`). Não iniciadas: F8-2 a F8-5; F8-0b não executada. Sem BrightBean/Asana reais, VPS, produção ou cobrança.
 - BASELINE (commit): `61bd2fd`.
