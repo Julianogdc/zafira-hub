@@ -288,7 +288,11 @@ export class ContentService {
     const active = (current?.media ?? []).filter((m) => !m.removedAt);
     const activeKinds = active.map((m) => m.kind as ContentMediaKind);
     // F8-5p.1 (P35): aviso ja no upload, antes da aprovacao, quando a imagem nao poderia ser publicada
-    const pixelProblems = active.flatMap((m) => (m.kind === 'IMAGE' ? [imagePixelProblem(m)].filter((p): p is NonNullable<typeof p> => p !== null) : []));
+    const pixelProblems = [
+      ...new Map(
+        active.flatMap((m) => (m.kind === 'IMAGE' ? [imagePixelProblem(m)].filter((p): p is NonNullable<typeof p> => p !== null) : [])).map((p) => [p.code, p])
+      ).values(),
+    ]; // um aviso por tipo de problema (carrossel nao repete a mesma mensagem)
     return {
       id: item.id,
       clientId: item.clientId,

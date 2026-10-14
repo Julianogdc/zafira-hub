@@ -69,8 +69,9 @@ test('Integration Gate: Conteudo (F8-1) em PostgreSQL', { concurrency: 1 }, asyn
   };
 
   const jpeg = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x05, 0x46, 0x04, 0x38, 0x03, 1, 1, 1, 1, 1, 1, 1, 1, 1]) /* JPEG minimo com SOF0 1080x1350 (P35) */, randomBytes(64)]);
-  const png = () => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(64)]);
-  const webp = () => Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP'), randomBytes(32)]);
+  // P35: PNG e WebP minimos com dimensoes legiveis (IHDR 1080x1080; VP8X 1080x1350)
+  const png = () => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0x04, 0x38, 0, 0, 0x04, 0x38, 8, 6, 0, 0, 0]), randomBytes(64)]);
+  const webp = () => Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP'), Buffer.from('VP8X'), Buffer.from([10, 0, 0, 0, 0, 0, 0, 0, 0x37, 0x04, 0x00, 0x45, 0x05, 0x00]), randomBytes(32)]);
   const mp4 = (brand = 'isom') => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftyp'), Buffer.from(brand), randomBytes(48)]);
 
   const createItem = async (who: Who, body: Record<string, unknown>) => A(who, 'POST', '/content/items', { caption: '', ...body });
