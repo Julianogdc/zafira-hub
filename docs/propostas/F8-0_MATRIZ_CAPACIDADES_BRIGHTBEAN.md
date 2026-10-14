@@ -190,3 +190,7 @@ Continuam **não verificadas**: #8 (Facebook Feed), #18 (horário passado dispar
 | 36 | Métricas de post | **Parcialmente confirmada** | [V] rota responde 200 e expõe 7 indicadores, mas **nenhuma coleta em 17 min** após a publicação: `captured_at` nulo, `series` vazias e valores **padrão 0**; `next_sync_eta` é estimativa móvel. Coleta efetiva não observada |
 | 37 | Métricas de conta | **Confirmada** | [V] `captured_at` registrado; próxima coleta em ~24 h |
 | 38 | Escopo da chave | **Confirmada** | [V] retirada de `publish_directly` refletida em `/me/` |
+
+## 11. Encerramento da F8-0b com ressalvas (2026-10-13, DEC-F8-022)
+
+Classificação final das 13 capacidades que estavam "não verificadas": **#12, #13, #15, #19, #23, #24, #27, #30** verificadas (algumas parcialmente, com regra definida no contrato); **#18** confirmada pelo código e pelo T30 (horário passado dispara no ciclo seguinte; o Hub bloqueia); **#28, #29** confirmadas como indisponíveis; **#8** adiada (piloto do Facebook); **#9** fora do piloto. Ressalvas RS1–RS7 em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §16–§17. Métricas de post (#36) seguem **parcialmente confirmadas**: sem coleta observada até ~28 min.

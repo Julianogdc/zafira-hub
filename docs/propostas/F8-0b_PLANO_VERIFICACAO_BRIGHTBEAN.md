@@ -465,3 +465,11 @@ Em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md`: credencial e es
 
 ### 16.6 Recomendação
 **Encerrar a F8-0b com as ressalvas RS1–RS7**, fazer a verificação GET das métricas (§16.4) e decidir a F8-4 com base no contrato (§16.5). Executar **apenas o T31 adaptado**, e só se o carrossel estiver no escopo do piloto, como teste de homologação antes de ligar o despachante. Dispensar T32 (até decisão das redes), T33 e T34 como testes reais.
+
+## 17. Encerramento técnico com ressalvas (2026-10-13, DEC-F8-022)
+
+**F8-0b encerrada tecnicamente com ressalvas**, sem T31–T34. Ressalvas: RS1 carrossel publicado de verdade (T31 adiado, condicionado ao piloto de carrossel); RS2 estado `failed` e retentativa não observados (T33 substituído por simulador e testes automatizados); RS3 coleta efetiva de métricas de post não observada; RS4 Facebook (T32 adiado, condicionado ao piloto do Facebook); RS5 MOV verdadeiro e limite real de vídeo não testados; RS6 corrida/timeout com duplicidade não testados; RS7 limpeza dos 15 rascunhos e 17 mídias de teste e revogação da chave temporária. T34 substituído por regra do Hub (recusar horário passado/próximo) e testes automatizados.
+
+**Métricas do T30 (só GET, 00:53 UTC, ~28 min após a publicação):** chave válida e restrita (`create_posts`, `view_analytics`; só a conta de testes); `GET /analytics/posts/{D6}` 200 com `captured_at` **nulo**, `series` vazias, 7 indicadores com **valor padrão 0** e `next_sync_eta` móvel (agora + 5 min). **Nenhuma métrica coletada; os zeros não são dados.** Métricas da conta: coleta das 00:17 UTC, próxima em 24 h. Verificação pendente (P34): ~2 h, ~6 h e ~20 h após a publicação, só GET.
+
+**Próximo passo técnico:** proposta da F8-4 em `docs/propostas/F8-4_PROPOSTA_EXECUCAO.md` (somente preparação) e contrato consolidado em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md`.

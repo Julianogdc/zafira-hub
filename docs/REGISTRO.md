@@ -36,6 +36,26 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b encerrada com ressalvas; contrato consolidado e proposta da F8-4 (DEC-F8-022) — Claude
+- AUTORIZAÇÃO: DEC-F8-022.
+- MÉTRICAS DO T30 (só GET, ~28 min após a publicação): chave válida e restrita; `captured_at` nulo, séries vazias, 7 indicadores com valor padrão 0; **nenhuma coleta** (esperado: coleta horária). Verificação pendente em ~2 h, ~6 h e ~20 h (P34). Commit de documentação com `[skip ci]`.
+- CONTRATO: `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` consolidado para revisão futura.
+- PROPOSTA DA F8-4: `docs/propostas/F8-4_PROPOSTA_EXECUCAO.md` — `ContentPublication` por versão aprovada + conta; `publication_outbox` transacional; despachante desligado por padrão com lease e leitura de estado antes de agir; idempotência por SHA-256 (upload) e por item (rascunho); validações que o BrightBean não faz; reconciliação por `externalPostId`; simulador com os comportamentos observados e modos de falha (substitui T33/T34); testes de domínio, API, PostgreSQL, simulador e Browser Gate; fatias F8-4a/F8-4b; decisões D-F84-1 a D-F84-4. **Achado:** as rotas síncronas herdadas do SocialPublisher (fase 2C2) permitem criar e agendar sem passar pela versão aprovada — a F8-4 deve restringi-las.
+- PENDÊNCIAS NOVAS: P33 limpeza dos 15 rascunhos e 17 mídias de teste e revogação da chave temporária; P34 verificação das métricas do T30.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: **F8-0b encerrada tecnicamente com ressalvas.** F8-4 **somente preparação; implementação não autorizada.**
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda aprovação da proposta da F8-4).
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial implementar a F8-4, publicar, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / matriz F8-0 / plano da F8-0b / contrato / proposta da F8-4 (interno e público).
+
+### DEC-F8-022 — Encerramento técnico da F8-0b com ressalvas e preparação técnica da F8-4 (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: decidir o fim da F8-0b depois da avaliação final (DEC-F8-020).
+- Decisão: (1) **F8-0b encerrada tecnicamente com ressalvas**, sem T31–T34 agora: **T31 adiado** (condicionado ao piloto de carrossel); **T32 adiado** (condicionado ao piloto do Facebook); **T33 e T34 dispensados** como testes reais, substituídos por simulações e testes automatizados. Ressalvas: RS1 carrossel publicado de verdade (T31 adiado, condicionado ao piloto de carrossel); RS2 estado `failed` e retentativa não observados (T33 substituído por simulador e testes automatizados); RS3 coleta efetiva de métricas de post não observada; RS4 Facebook (T32 adiado, condicionado ao piloto do Facebook); RS5 MOV verdadeiro e limite real de vídeo não testados; RS6 corrida/timeout com duplicidade não testados; RS7 limpeza dos 15 rascunhos e 17 mídias de teste e revogação da chave temporária. T34 substituído por regra do Hub (recusar horário passado/próximo) e testes automatizados. (2) **F8-4 autorizada apenas para preparação técnica, não para implementação.** (3) Tarefas: registrar o encerramento; atualizar ESTADO, REGISTRO, MAPA e matriz nos dois repositórios; consolidar o contrato do SocialPublisher; preparar a proposta de execução da F8-4 (simulador, caixa de saída, idempotência, permissões, recuperação de falhas, testes); verificar só por GET as métricas do T30; registrar a limpeza dos 15 rascunhos e 17 mídias e a revogação da chave como pendência. (4) Proibido: criar, agendar, publicar ou cancelar; implementar a F8-4; VPS, produção ou credenciais; workflows privados; tratar métricas sem `captured_at` como reais.
+- Alternativas consideradas: executar T31–T34 antes da F8-4 (avaliado na DEC-F8-020).
+- Impacto: documentação (`docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md`, `docs/propostas/F8-4_PROPOSTA_EXECUCAO.md`).
+- Revisão: na aprovação da proposta da F8-4.
+
 ### 2026-10-13 — F8-0b: avaliação técnica final, contrato do SocialPublisher e aceite da R1+ formalizado (DEC-F8-020, DEC-F8-021) — Claude
 - AUTORIZAÇÃO: DEC-F8-020 — somente leitura e análise; nenhuma chamada à API nesta etapa.
 - EXECUTADO: avaliação de T31–T34 (§16.1); capacidades obrigatórias para iniciar a F8-4 (§16.2, todas comprovadas); proposta de encerramento com ressalvas RS1–RS7 (§16.3); causa da falta de métricas do T30 pelo código (coleta horária; `next_sync_eta` = agora + 5 min sem coleta anterior) e verificação só GET em ~2 h, ~6 h e ~20 h (§16.4); contrato mínimo do adaptador em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` (§16.5); aceite da R1+ formalizado como **DEC-F8-021**. Commit de documentação com `[skip ci]`.

@@ -1,6 +1,6 @@
 # Contrato mínimo do adaptador SocialPublisher ↔ BrightBean (insumo da F8-4)
 
-> **Situação:** proposta da avaliação final da F8-0b (DEC-F8-020), para revisão da Direção. **Não autoriza a F8-4.**
+> **Situação:** **consolidado** no encerramento da F8-0b (DEC-F8-022), para revisão junto com a proposta da F8-4 (`docs/propostas/F8-4_PROPOSTA_EXECUCAO.md`). **Não autoriza a implementação da F8-4.**
 > Base: comportamento **observado** na instância (F8-0b R0, R1, R1+ e T30) e código do fork `zafira-custom-v1`, commit `4e5bef9`. Detalhes em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md` e na matriz `docs/propostas/F8-0_MATRIZ_CAPACIDADES_BRIGHTBEAN.md` (§7–§10).
 > Legenda: **[V]** observado em execução real; **[C]** lido no código (não observado).
 
