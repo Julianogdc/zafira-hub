@@ -1,5 +1,5 @@
 # ---------- STAGE 1: BUILD ----------
-FROM public.ecr.aws/docker/library/node:24.12.0-alpine AS build
+FROM ghcr.io/julianogdc/base-node:24.12.0-alpine@sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8 AS build
 
 WORKDIR /app
 
@@ -18,7 +18,7 @@ COPY . .
 RUN npm run build:internal && npm run build:web
 
 # ---------- STAGE 2: PRODUCTION ----------
-FROM public.ecr.aws/docker/library/nginx:alpine
+FROM ghcr.io/julianogdc/base-nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
 
 # Remove config padrão do nginx
 RUN rm -f /etc/nginx/conf.d/default.conf

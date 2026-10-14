@@ -97,7 +97,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: public.ecr.aws/docker/library/postgres:16
+        image: ghcr.io/julianogdc/base-postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -570,9 +570,9 @@ jobs:
 
           echo "Baixando imagem do PostgreSQL (com novas tentativas se o registro limitar requisições)..."
           for i in 1 2 3 4 5; do
-            docker pull public.ecr.aws/docker/library/postgres:16 && break
+            docker pull ghcr.io/julianogdc/base-postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d && break
             if [ "$i" = "5" ]; then
-              echo "FALHA: não foi possível baixar public.ecr.aws/docker/library/postgres:16 após 5 tentativas"
+              echo "FALHA: não foi possível baixar ghcr.io/julianogdc/base-postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d após 5 tentativas"
               exit 1
             fi
             echo "Tentativa $i falhou; aguardando $((i * 20))s..."
@@ -586,7 +586,7 @@ jobs:
             -e POSTGRES_USER=postgres_hml \
             -e POSTGRES_PASSWORD=hml_staging_dummy_pass_123 \
             -e POSTGRES_DB=zafira_hub_21_staging \
-            public.ecr.aws/docker/library/postgres:16
+            ghcr.io/julianogdc/base-postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
 
           echo "Aguardando PostgreSQL ficar pronto (pg_isready)..."
           for i in $(seq 1 30); do

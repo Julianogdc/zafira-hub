@@ -1,4 +1,4 @@
-FROM public.ecr.aws/docker/library/node:24.12.0-bookworm-slim
+FROM ghcr.io/julianogdc/base-node:24.12.0-bookworm-slim@sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99
 
 WORKDIR /app
 
