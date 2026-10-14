@@ -36,6 +36,22 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-F8-032 — Aceite técnico definitivo da F8-5p e correção da prontidão do PostgreSQL no CI (P40) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar tecnicamente a F8-5p e eliminar a intermitência do passo de preparação do banco do ensaio de homologação (P40).
+- Decisão: (1) **Aceite técnico definitivo da F8-5p** (DEC-F8-031): código `72ae027`; CI run 38594989571, tentativa 2, 5/5; Browser Gate F8 125/0; P35, P37, P38 e P39 resolvidas. (2) Autorizada **uma microetapa isolada** em `.github/workflows/foundation-ci.yml`: prontidão do PostgreSQL por conexão TCP, espera limitada e consulta efetiva à base definitiva; preservar os demais jobs e os mecanismos de segurança; testar e executar o CI oficial completo; registrar evidências e preparar o handoff. (3) Proibido: alterar funcionalidades do Hub, VPS, produção, credenciais ou ambientes reais; F8-5e; F9. Em caso de falha, interromper e apresentar o diagnóstico antes de nova tentativa.
+- Alternativas consideradas: reexecutar o job sempre que ocorrer (rejeitada: mantém a intermitência).
+- Impacto: workflow do CI (um passo); nenhum código do Hub.
+- Revisão: no aceite técnico da correção do P40.
+
+### 2026-10-14 — Aceite da F8-5p registrado (DEC-F8-032) — Claude
+- ACEITE: F8-5p aceita definitivamente (DEC-F8-031; código `72ae027`; CI 5/5 run 38594989571, tentativa 2; Browser Gate F8 125/0). P35, P37, P38 e P39 resolvidas; P33, P34 e RS1–RS7 mantidas; **P40 em correção**. A Fase 8 **não** está encerrada: depende do Portão F8.
+- BASELINE DE CÓDIGO: `72ae027` no público (espelho `7faa39f`).
+- STATUS: F8-5p **aceita**; correção do CI **em execução** (entrada de handoff própria ao final).
+- PRÓXIMA MICROETAPA AUTORIZADA: somente a correção do P40 no workflow.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-5e, publicação, despachante ou coletor reais, VPS, produção, credenciais e F9.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE (interno e público).
+
 ### 2026-10-14 — F8-5p implementada: correções pré-piloto P35, P38, P39 e P37 (DEC-F8-031) — Claude
 - AUTORIZAÇÃO: DEC-F8-031 (D-PF8-1 a D-PF8-7 com ajustes), microetapas em sequência; F8-5e proibida.
 - F8-5p.1 P35 (`4990e5b`, complementos `cf82a48` e `0e795d6`): leitura de largura/altura de JPEG (SOF), PNG (IHDR) e WebP (VP8/VP8L/VP8X) no domínio, nula se truncada ou ilegível; **migration `20261014020000_f8_5p_media_dimensions`** (colunas `widthPx`/`heightPx`, CHECK positivo, gatilho: só nulo → valor); gravação no upload; arquivos antigos calculados uma vez; nova versão copia as dimensões; aviso já no upload (um por tipo); agendamento recusado acima de 30 MP (`MEDIA_TOO_MANY_PIXELS`) ou ilegível (`MEDIA_DIMENSIONS_UNKNOWN`); 30 MP exatos aceitos.
