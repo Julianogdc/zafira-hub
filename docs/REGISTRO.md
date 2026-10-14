@@ -36,6 +36,27 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b R2/T30: Story publicada na conta de testes, sem falha e sem duplicidade (DEC-F8-018) — Claude
+- AUTORIZAÇÃO: DEC-F8-018 — somente o T30.
+- PORTÃO: após 35 s, 3× `/me/` com `create_posts`, `publish_directly`, `view_analytics`; só a conta de testes; conta sem pendências; D6 Story rascunho com 1 mídia.
+- RESULTADO: uma única escrita (`schedule` 200, `-03:00` → UTC, mesmo instante). `scheduled` → `publishing` (16 s após o horário) → **`published`** (~26 s após o horário), com `published_at`, `platform_post_id` e permalink; sem `publish_error`; **sem retentativa automática**. **Duplicidade ausente:** 1 publicado na conta (o D6), 0 agendados/`publishing`/`failed`. Métricas do post 200, `analytics_available` true, 7 indicadores com 0 e `captured_at` nulo (coleta pendente). Commit de documentação com `[skip ci]`.
+- ACHADO: antes da coleta o BrightBean devolve 0 nas métricas; a F8-5 deve tratar `captured_at` nulo como sem dado.
+- MATRIZ F8-0: §9 acrescentada (#1, #26, #32, #33, #36, #18/#19).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: T30 **executado com sucesso; aceite pendente da Direção**. T31–T34 não autorizados.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PENDÊNCIAS: conferência visual do perfil; retirar `publish_directly`; leitura das métricas após a sincronização (opcional, só GET); limpeza dos rascunhos/arquivos de teste; remover e revogar a chave ao fim da F8-0b.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial novas publicações sem autorização, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b / matriz F8-0 (interno e público).
+
+### DEC-F8-018 — Execução do T30 da F8-0b: primeira publicação real (Story imagem D6) na conta de testes (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: validar a publicação real pelo BrightBean antes da F8-4.
+- Decisão: (1) Chave com **`create_posts`, `publish_directly` e `view_analytics`** (conta de testes e workspace no repositório interno). (2) **Autorizado exclusivamente o T30**: publicação real de uma Story de imagem (rascunho D6) na conta Instagram de testes. (3) Antes: aguardar ≥ 30 s; 3× `/me/` com as três permissões exatas e só a conta de testes; D6 em rascunho sem horário; sem pendências; divergência → parar sem escrever. (4) Execução: só o executor preparado; agendar D6 para ~3 min com fuso explícito; **uma única** operação, sem repetição; acompanhar `scheduled` → `publishing` → `published`/`failed`; consultar identificador, permalink, horário e métricas; verificar duplicidade. (5) Falha ou resposta ambígua → não repetir; agendado além da janela → informar para decisão; registrar retentativas do servidor; permalink só no interno. (6) Sem T31–T34, R2 adicional, F8-4, VPS, produção ou configuração do BrightBean; aguardar novo aceite.
+- Alternativas consideradas: —
+- Impacto: uma publicação real (Story) na conta de testes; documentação.
+- Revisão: no aceite do T30.
+
 ### 2026-10-13 — F8-0b: preparação da R2/T30 (DEC-F8-017) — Claude
 - AUTORIZAÇÃO: DEC-F8-017 — somente leitura e preparação.
 - LEITURAS: `/me/` × 3 → só `create_posts` (`publish_directly` removida); conta de teste conectada. D6: Story rascunho, 1 mídia, sem horário. Código do fork (`4e5bef9`): sem "publicar agora"; publicação = agendar e o publicador dispara em ~15 s; retentativas 60 s/5 min/30 min (máx. 3); o servidor nunca republica sem confirmação (prefere `failed` a duplicar). Commit de documentação com `[skip ci]`.

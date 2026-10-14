@@ -171,3 +171,14 @@ Continuam **não verificadas**: #8 (Facebook Feed), #18 (horário passado dispar
 | 20 | Reagendar | **Confirmada** | [V] `PATCH` com `scheduled_at` → 200, post e filho atualizados |
 | 23 | Idempotência de agendar/reagendar/cancelar | **Confirmada (pelo estado)** | [V] cancelar repetido → 409; sem `Idempotency-Key` nessas rotas |
 | 30 | Cancelar agendado | **Confirmada** | [V] → `draft`, horário removido; nenhum agendado restante após 3 min |
+
+## 9. Atualização pela F8-0b R2/T30 (2026-10-13, DEC-F8-018)
+
+| # | Capacidade | Nova classe | Evidência |
+|---|---|---|---|
+| 1 | Instagram Story imagem | **Confirmada (instância atual)** | [V] publicada na conta de testes |
+| 26 | Consultar post com status e permalink | **Confirmada** | [V] `GET /posts/{id}` com `status`, `published_at`, `platform_post_id`, `permalink_url`, `publish_error` |
+| 32 | Vocabulário de status | **Confirmada (fluxo feliz)** | [V] `draft` → `scheduled` → `publishing` → `published`; `failed` ainda não observado |
+| 33 | Permalink | **Confirmada** | [V] presente logo após `published` |
+| 36 | Métricas de post | **Parcialmente confirmada** | [V] HTTP 200 e `analytics_available` true; **antes da coleta os indicadores vêm 0 com `captured_at` nulo** — tratar como sem dado |
+| 18/19 | Antecedência do agendamento | **Confirmada (caso de 3 min)** | [V] publicado ~26 s após o horário |

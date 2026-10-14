@@ -390,3 +390,24 @@ Falha (`failed`) também é resultado válido: registrar `publish_error` e não 
 
 ### 13.6 Roteiro
 Direção adiciona `publish_directly` e `view_analytics` à chave → autorização expressa do T30 → executor (portão, uma escrita, acompanhamento, leitura final) → relatório → Direção confere o perfil e retira `publish_directly` → aceite. T31–T34 continuam teste a teste.
+
+## 14. Execução do T30 — primeira publicação real (2026-10-13, DEC-F8-018)
+
+Executor da §13 com a espera de 35 s acrescentada antes do portão (sem outra alteração). **Uma única escrita.**
+
+**Portão:** 3× `/me/` com permissões exatas `create_posts`, `publish_directly`, `view_analytics`; 1 conta de teste `instagram_login` conectada; conta com `scheduled`/`publishing`/`published`/`failed` = 0; D6 = Story rascunho com 1 mídia, sem horário.
+
+| Momento (UTC) | Evento | Estado de D6 | Totais da conta |
+|---|---|---|---|
+| — | `POST /posts/{D6}/schedule` enviando `2026-10-13T21:25:00-03:00` → **200** | `scheduled`, `2026-10-14T00:25:00Z` (mesmo instante) | — |
+| 00:22:08 | leitura | `scheduled` | scheduled 1 |
+| 00:25:16 | publicador assumiu (16 s após o horário) | `publishing` | publishing 1 |
+| 00:25:32 | concluído | **`published`**, `published_at` = 00:25:26 UTC, `platform_post_id` e `permalink_url` presentes, `publish_error` vazio | **published 1**, demais 0 |
+
+**Resultado:** Story publicada na conta de testes **em ~26 s após o horário agendado**, sem falha e **sem retentativa automática** (nenhum retorno a `scheduled` na linha do tempo). Permalink e identificadores registrados só no repositório interno.
+
+**Duplicidade:** **ausente** — a conta tem exatamente **1** post publicado, e ele é o D6; zero agendados, zero `publishing`, zero `failed` (leitura final e releitura posterior). Conferência visual do perfil pela Direção pendente.
+
+**Métricas do post** (`GET /analytics/posts/{D6}`, 200): `analytics_available` = true, 7 indicadores (`reach`, `views`, `likes`, `comments`, `saves`, `shares`, `engagement`) **todos com valor 0**, porém `captured_at` = **nulo** e `next_sync_eta` ≈ 6 min depois da publicação. **Achado:** antes da primeira coleta o BrightBean devolve **0 em vez de "indisponível"**; a F8-5 deve tratar `captured_at` nulo como **sem dado** (ausência ≠ zero), nunca como engajamento zero.
+
+**Pendências:** conferência visual do perfil (um único Story); **retirar `publish_directly`** da chave; leitura das métricas depois da sincronização (só GET, se a Direção quiser); T31–T34 teste a teste; o Story expira em 24 h no Instagram, e o registro no BrightBean permanece `published`.
