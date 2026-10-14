@@ -5,11 +5,10 @@ import { PrismaClient } from '@prisma/client';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 import { resolveAuthorizationContext } from '../modules/authorization/resolver.js';
 import { applyRbacSync, computeRbacSyncPlan, loadRbacState, reportIndividualExceptions, type RbacDefaults } from '../modules/authorization/rbac-sync.js';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANÇA ---
-if (process.env.NODE_ENV === 'production') throw new Error('NÃO É PERMITIDO EXECUTAR TESTES DE INTEGRAÇÃO EM PRODUÇÃO');
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatório para testes de integração');
-if (!(process.env.DATABASE_URL || '').includes('/zafira_hub_ci')) throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 const prisma = new PrismaClient();
 const defaults: RbacDefaults = { ADMIN: ADMIN_DEFAULTS, MANAGER: MANAGER_DEFAULTS, MEMBER: MEMBER_DEFAULTS };

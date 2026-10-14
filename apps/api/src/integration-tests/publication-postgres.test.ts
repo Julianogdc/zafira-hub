@@ -10,11 +10,10 @@ import { prisma } from '../lib/prisma.js';
 import { resolveFileStorage } from '../modules/content/file-storage.js';
 import { PublicationDispatcher, publicationDispatcher } from '../modules/content/publication/publication-dispatcher.js';
 import { PublicationSimulator } from '../modules/content/publication/publication-simulator.js';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANCA ---
-if (process.env.NODE_ENV === 'production') throw new Error('NAO E PERMITIDO EXECUTAR TESTES DE INTEGRACAO EM PRODUCAO');
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatorio para testes de integracao');
-if (!(process.env.DATABASE_URL || '').includes('/zafira_hub_ci')) throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 /**
  * F8-4a (DEC-F8-023) - Publicacao pela versao aprovada, caixa de saida e despachante, contra PostgreSQL real

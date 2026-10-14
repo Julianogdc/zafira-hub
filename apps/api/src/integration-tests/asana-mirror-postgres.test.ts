@@ -6,17 +6,10 @@ import { buildApp } from '../app.js';
 import { prisma } from '../lib/prisma.js';
 import { AsanaMirrorService, MirrorDependencies } from '../modules/integrations/asana/mirror/asana-mirror.service.js';
 import { acquireLease, releaseLease } from '../lib/scheduler-lease.js';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANÇA (mesmo padrão de rbac-postgres.test.ts) ---
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('NÃO É PERMITIDO EXECUTAR TESTES DE INTEGRAÇÃO EM PRODUÇÃO');
-}
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') {
-  throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatório para testes de integração');
-}
-if (!(process.env.DATABASE_URL || '').includes('/zafira_hub_ci')) {
-  throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
-}
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 // Nenhuma chamada real ao Asana: sem token de desenvolvimento, a rota de atualização só registra a falha.
 delete process.env.ASANA_DEV_PAT;
 delete process.env.ASANA_ACCESS_TOKEN;

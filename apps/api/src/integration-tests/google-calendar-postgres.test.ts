@@ -10,11 +10,10 @@ import { GoogleCalendarClient } from '../modules/integrations/google-calendar/go
 import { googleCalendarService } from '../modules/integrations/google-calendar/google-calendar.service.js';
 // @ts-ignore - simulador em .mjs (sem tipos)
 import { createGoogleCalendarMock } from '../../../../scripts/homologation/google-calendar-mock.mjs';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANCA ---
-if (process.env.NODE_ENV === 'production') throw new Error('NAO E PERMITIDO EXECUTAR TESTES DE INTEGRACAO EM PRODUCAO');
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatorio para testes de integracao');
-if (!(process.env.DATABASE_URL || '').includes('/zafira_hub_ci')) throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 /**
  * F7-3a - Agenda Google Calendar (DEC-F7-012) contra PostgreSQL real e SIMULADOR do Google.

@@ -5,17 +5,10 @@ import { FastifyInstance } from 'fastify';
 import { Prisma } from '@prisma/client';
 import { buildApp } from '../app.js';
 import { prisma } from '../lib/prisma.js';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANÇA (mesmo padrão de rbac-postgres.test.ts) ---
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('NÃO É PERMITIDO EXECUTAR TESTES DE INTEGRAÇÃO EM PRODUÇÃO');
-}
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') {
-  throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatório para testes de integração');
-}
-if (!(process.env.DATABASE_URL || '').includes('/zafira_hub_ci')) {
-  throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
-}
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 /**
  * F6-IMP.7A — GET /clients/:id/deliverables contra PostgreSQL descartável real.

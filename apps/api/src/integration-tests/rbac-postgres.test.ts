@@ -11,24 +11,50 @@ import { TeamService, TeamError, teamService } from '../modules/teams/team.servi
 import argon2 from 'argon2';
 import { hashInvitationToken } from '../modules/users/invitation-token.js';
 import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
+import { assertDisposableTestData, assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANÇA (ETAPA F) ---
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('NÃO É PERMITIDO EXECUTAR TESTES DE INTEGRAÇÃO EM PRODUÇÃO');
-}
-
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') {
-  throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatório para testes de integração');
-}
-
-const dbUrl = process.env.DATABASE_URL || '';
-if (!dbUrl.includes('/zafira_hub_ci')) {
-  throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
-}
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 const prisma = new PrismaClient();
 
+/**
+ * HM-1/H3 (P18): devolve ao estado-base (o que `ci:prepare-rbac-organizations` + `rbac:bootstrap` criam) tudo o que este
+ * arquivo altera nas organizacoes fixas ci-org-a/ci-org-b, para que `test:integration:db` rode varias vezes no mesmo banco.
+ * Destrutivo: so executa depois de assertTestDatabase() (banco, nome exato e host) e de confirmar que o banco so tem
+ * organizacoes "ci-*". Escopo restrito as duas organizacoes fixas e aos registros que os testes criam.
+ */
+const TRANSIENT_EMAILS = [
+  'ci_existing_active_t@zafira.test',
+  'ci_expiration_t@zafira.test',
+  'ci_multi_org_t@zafira.test',
+  'ci_new_user_t@zafira.test',
+  'ci_rotation_t@zafira.test',
+  'inactive_real_db@zafira.test',
+  'multi_active_user@zafira.test',
+  'multi_lifecycle@zafira.test',
+  'real_db_invited@zafira.test',
+];
+const TRANSIENT_CLIENT_NAMES = ['Client Manager Dedicated N', 'Client Manager Unassigned N', 'New Client A'];
+
+async function resetMutableCiFixtures() {
+  assertTestDatabase();
+  await assertDisposableTestData(prisma);
+  const orgs = await prisma.organization.findMany({ where: { slug: { in: ['ci-org-a', 'ci-org-b'] } }, select: { id: true } });
+  const orgIds = orgs.map((o) => o.id);
+  if (orgIds.length === 0) return; // ainda nao preparado: o proprio teste falhara com mensagem clara
+  // usuarios transitorios (cascata: memberships, convites, atribuicoes, excecoes)
+  await prisma.user.deleteMany({ where: { email: { in: TRANSIENT_EMAILS } } });
+  await prisma.team.deleteMany({ where: { organizationId: { in: orgIds } } });
+  await prisma.client.deleteMany({ where: { organizationId: { in: orgIds }, name: { in: TRANSIENT_CLIENT_NAMES } } });
+  await prisma.organizationMemberPermission.deleteMany({ where: { organizationId: { in: orgIds } } });
+  await prisma.organizationFeatureFlag.deleteMany({ where: { organizationId: { in: orgIds } } });
+  await prisma.organizationConfig.deleteMany({ where: { organizationId: { in: orgIds } } });
+  await prisma.auditLog.deleteMany({ where: { organizationId: { in: orgIds } } });
+}
+
 test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t) => {
+  await resetMutableCiFixtures();
 
   await t.test('J - Testes Reais de Migration', async () => {
     const fs = await import('node:fs');
@@ -185,17 +211,18 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
       }
     });
 
-    const resRemoved = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
-    assert.strictEqual(resRemoved.allowed, false, 'Sem RolePermission no banco, o acesso DEVE ser negado (sem fallback estático)');
-    assert.strictEqual(resRemoved.reason, 'DENIED_BY_DEFAULT');
-
-    // RESTAURAÇÃO OBRIGATÓRIA da RolePermission
-    await prisma.rolePermission.create({
-      data: {
-        role: 'MANAGER',
-        permissionCode: 'clients.edit'
-      }
-    });
+    try {
+      const resRemoved = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
+      assert.strictEqual(resRemoved.allowed, false, 'Sem RolePermission no banco, o acesso DEVE ser negado (sem fallback estático)');
+      assert.strictEqual(resRemoved.reason, 'DENIED_BY_DEFAULT');
+    } finally {
+      // RESTAURAÇÃO OBRIGATÓRIA da RolePermission (mesmo se a asserção acima falhar)
+      await prisma.rolePermission.upsert({
+        where: { role_permissionCode: { role: 'MANAGER', permissionCode: 'clients.edit' } },
+        update: {},
+        create: { role: 'MANAGER', permissionCode: 'clients.edit' },
+      });
+    }
 
     // Confirmação de restauração
     const resRestored = await resolveAuthorizationContext({ userId: managerUser.id, activeOrganizationId: orgA.id, permissionCode: 'clients.edit' });
@@ -502,8 +529,10 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
         organizationId: orgA.id,
         action: 'user.suspended',
       });
-      assert.strictEqual(listAFiltered.items.length, 1);
-      assert.strictEqual(listAFiltered.items[0].id, logA2.id);
+      // escopado aos proprios registros: logs de outras execucoes ou testes nao interferem (P18)
+      assert.ok(listAFiltered.items.every((item: any) => item.action === 'user.suspended' && item.organizationId === orgA.id));
+      assert.strictEqual(listAFiltered.items.filter((item: any) => item.id === logA2.id).length, 1);
+      assert.strictEqual(listAFiltered.items.filter((item: any) => item.entityId === 'usr_ci_a2').length, 1);
 
       // 6. Ator e entidade persistem corretamente
       const fetchedA1 = listA.items.find((item: any) => item.id === logA1.id);
@@ -598,6 +627,10 @@ test('Integration Gate: PostgreSQL RBAC, Constraints e ClientService', async (t)
 
     // Cleanup
     await prisma.organizationFeatureFlag.deleteMany({
+      where: { organizationId: { in: [orgA.id, orgB.id] } },
+    });
+    // restaura a configuracao padrao (P18): getConfig recria os defaults na proxima leitura
+    await prisma.organizationConfig.deleteMany({
       where: { organizationId: { in: [orgA.id, orgB.id] } },
     });
   });

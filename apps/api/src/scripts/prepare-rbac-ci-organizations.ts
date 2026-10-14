@@ -1,18 +1,8 @@
 import { PrismaClient } from '@prisma/client';
+import { assertTestDatabase } from '../lib/test-database-guard.js';
 
-// --- GUARD DE SEGURANÇA (ETAPA F) ---
-if (process.env.NODE_ENV === 'production') {
-  throw new Error('NÃO É PERMITIDO EXECUTAR PREPARE CI EM PRODUÇÃO');
-}
-
-if (process.env.ZAFIRA_TEST_DATABASE !== '1') {
-  throw new Error('ZAFIRA_TEST_DATABASE=1 obrigatório para testes de integração');
-}
-
-const dbUrl = process.env.DATABASE_URL || '';
-if (!dbUrl.includes('/zafira_hub_ci')) {
-  throw new Error('O banco alvo deve se chamar "zafira_hub_ci". URL rejeitada.');
-}
+// --- GUARD DE SEGURANÇA (HM-1/H3): banco de testes dedicado, nome exato, host local; ver lib/test-database-guard.ts ---
+assertTestDatabase();
 
 const prisma = new PrismaClient();
 
