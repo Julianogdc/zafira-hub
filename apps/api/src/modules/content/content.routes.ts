@@ -93,6 +93,9 @@ export async function contentRoutes(app: FastifyInstance) {
   route('POST', '/content/items/:id/media', 'content.create', async (ctx, r) => {
     const file = await (r as any).file();
     if (!file) throw new ContentError(400, 'FILE_REQUIRED', 'Nenhum arquivo enviado.');
+    if (file.file?.truncated || file.truncated) {
+      throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
+    }
     const spooled = await spoolMultipartUpload(file, 100 * 1024 * 1024);
     try {
       return await service.uploadMediaFromSpool(ctx, params(r).id, spooled, {

@@ -51,6 +51,17 @@ export async function spoolMultipartUpload(
 
   const fileStream = multipartFile.file;
 
+  const isTruncated = () =>
+    Boolean(
+      (multipartFile as any)?.truncated ||
+      (multipartFile.file as any)?.truncated ||
+      (fileStream as any)?.truncated
+    );
+
+  if (isTruncated()) {
+    throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
+  }
+
   try {
     await new Promise<void>((resolve, reject) => {
       let aborted = false;
@@ -63,11 +74,15 @@ export async function spoolMultipartUpload(
         cleanup().finally(() => reject(err));
       };
 
+      fileStream.on('limit', () => {
+        abortWith(new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.'));
+      });
+
       fileStream.on('data', (chunk: Buffer) => {
         if (aborted) return;
 
         totalBytes += chunk.length;
-        if (totalBytes > maxBytes || (multipartFile as any).truncated) {
+        if (totalBytes > maxBytes || isTruncated()) {
           abortWith(new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.'));
           return;
         }
@@ -91,7 +106,7 @@ export async function spoolMultipartUpload(
 
       fileStream.on('end', () => {
         if (aborted) return;
-        if ((multipartFile as any).truncated) {
+        if (isTruncated() || totalBytes > maxBytes) {
           abortWith(new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.'));
           return;
         }
@@ -105,7 +120,11 @@ export async function spoolMultipartUpload(
       fileStream.on('close', () => {
         // Se fechou sem disparar 'end' e ainda nao terminou
         if (!writeStream.writableEnded && !aborted) {
-          abortWith(new ContentError(400, 'UPLOAD_INTERRUPTED', 'Upload interrompido pelo cliente.'));
+          if (isTruncated()) {
+            abortWith(new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.'));
+          } else {
+            abortWith(new ContentError(400, 'UPLOAD_INTERRUPTED', 'Upload interrompido pelo cliente.'));
+          }
         }
       });
 

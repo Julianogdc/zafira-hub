@@ -144,6 +144,28 @@ test('Streaming Upload & Memory Benchmark (HM-3) — arquivo acima de 100 MiB re
   );
 });
 
+test('Streaming Upload (HM-3) — stream truncado pelo busboy/fastify multipart rejeita com 413 FILE_TOO_LARGE', async () => {
+  const truncatedStream = new Readable({
+    read() {
+      this.push(Buffer.alloc(1024, 0x42));
+      this.push(null);
+    },
+  });
+  (truncatedStream as any).truncated = true;
+
+  const fakeMultipart: any = {
+    file: truncatedStream,
+    filename: 'truncado-pelo-fastify.mp4',
+    mimetype: 'video/mp4',
+    truncated: false,
+  };
+
+  await assert.rejects(
+    () => spoolMultipartUpload(fakeMultipart, 100 * 1024 * 1024),
+    (err: any) => err.status === 413 && err.code === 'FILE_TOO_LARGE'
+  );
+});
+
 test('Streaming Download & Integrity (HM-3) — leitura via stream não carrega arquivo inteiro na memória', async () => {
   const baseDir = tmpdir();
   const storage = new LocalFileStorage(baseDir);
