@@ -36,6 +36,28 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — F8-4b implementada: agendamento no Instagram pela versão aprovada (DEC-F8-027) — Claude
+- AUTORIZAÇÃO: DEC-F8-027 (D-F84B-1 a D-F84B-4), microetapas executadas em sequência.
+- F8-4b.1 (`fc9d744` + `ad44325`): leituras `GET /content/items/:id/publication-targets` (só contas Instagram vinculadas ao cliente, sem chamar o provedor) e `GET /content/publication-settings` (despachante, antecedência, piloto, teto); a visão da publicação passa a ter `versionNumber`, `sentToProvider` (registrado no Hub x enviado ao provedor) e `actions` (reagendar/cancelar, falsas com cancelamento pendente); **`PROVIDER_RETRY` passa a bloquear reagendar e cancelar**; `content.schedule` exposta em `/auth/capabilities` (faltava; achada pelo Browser Gate na 1ª rodada). Teste PostgreSQL `publication-ui-postgres.test.ts`: leituras, ações, estados que bloqueiam, cancelamento x novo pedido x unicidade (cancelamento pedido segue ocupando a vaga até o provedor confirmar: 409 `PUBLICATION_ALREADY_ACTIVE`; depois da confirmação, novo pedido 201) e **P36** (teto de 25 em 24 h).
+- F8-4b.2 (`3e37e96`): painel "Publicação no Instagram" no detalhe do conteúdo, abaixo de "Aprovação do cliente": aviso de envio desligado, orientação para conteúdo não aprovado, conta vinculada, data e hora no fuso da organização convertidas para ISO com deslocamento explícito (horário de verão e horário inexistente tratados), mínimo de 5 min antes do envio, confirmação em dois passos, selos "Registrado no Hub"/"Enviado ao provedor", ações só as liberadas pela API, link só https, membro só acompanha, componentes do DS e classes oficiais, 390 px. Utilitários puros em `lib/publication-view.ts` com 6 testes.
+- F8-4b.3 (`45ec56e`): "Conteúdos & Agenda" e a prévia legada ficam só leitura, com orientação para Conteúdo; compositor e edição de agendamento fora da tela (rotas já 410).
+- F8-4b.4 (`a48b8e9` + `ad44325`): Browser Gate F8, cenário **M** com despachante desligado (agendar, reagendar, cancelar, novo pedido, duplicidade 409, menos de 5 min e sem fuso 422, conta fora do piloto recusada, `AMBIGUOUS`/`PROVIDER_RETRY`/`PUBLISHING` sem ações e com 409 na API, não aprovado 409, membro 403, legado só leitura e 410, nenhum envio ao provedor), Org B 404 em leitura e escrita, painel a 390 px; capacidades `content.schedule` no cenário A.
+- CI: 1ª rodada run 38567373916 (https://github.com/Julianogdc/zafira-hub/actions/runs/38567373916) 4/5 — Browser Gate parou no cenário M (capacidade ausente), 61/0 até ali. Correção `ad44325`. 2ª rodada run 38570183115 (https://github.com/Julianogdc/zafira-hub/actions/runs/38570183115) **5/5**: domínio 103/103, API 825/825, web 94/94, PostgreSQL 165/165, Docker Build, Publish Images, Homologation (F6, F7-1b, F7-2b, F7-3b, F7-4b e **F8 104/0** PASS). Custo zero (repositório público, runners padrão).
+- BASELINE DE CÓDIGO: `ad44325` no público (espelho `2b6f5f0` + `51e1af0` no interno, paridade conferida).
+- STATUS: **pendente de aceite técnico** da Direção.
+- LIMITES/LACUNAS: despachante desligado; nenhuma publicação real; Browser Gate sem envio (D-F84B-3), complementado pelos testes do simulador; P35 (megapixels) aberta; P37 (modais legados sem uso e texto de compatibilidade) registrada; RS1–RS7 mantidas.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial ligar o despachante, publicar, Facebook, F8-5, VPS e produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE (interno e público).
+
+### DEC-F8-027 — Implementação da F8-4b: agendamento no conteúdo aprovado (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: levar o agendamento da F8-4a para a tela, no fluxo do conteúdo aprovado, sem publicação real.
+- Decisão: **D-F84B-1** painel "Publicação no Instagram" no detalhe de `/conteudo/`, abaixo de "Aprovação do cliente"; **D-F84B-2** telas legadas continuam para leitura, sem ações de escrita, orientando para o fluxo de conteúdo aprovado; **D-F84B-3** Browser Gate com despachante desligado, complementado pelos testes do simulador BrightBean, sem publicação real; **D-F84B-4** P36 incluída na F8-4b.1. Execução sequencial F8-4b.1 a F8-4b.4 com uma rodada final do CI. Cuidados: distinguir registrado no Hub de enviado ao Instagram; bloquear ações em estado ambíguo, depois de iniciada a publicação ou com retentativa automática não resolvida; verificar cancelamento x novo agendamento x unicidade; só a versão atual aprovada; só contas Instagram vinculadas ao cliente; DS e 390 px; despachante desligado. Ajustes registrados na execução: `PROVIDER_RETRY` bloqueia reagendar/cancelar; cancelamento pedido ocupa a vaga até a confirmação do provedor; `content.schedule` exposta nas capacidades. Proibido: publicação real, ligar o despachante, VPS/produção, credenciais reais nos testes, Facebook, F8-5, workflows privados.
+- Alternativas consideradas: simulador HTTP no ensaio (D-F84B-3, não adotado nesta fatia).
+- Impacto: domínio, API (leituras e capacidades), web (painel, telas legadas), Browser Gate; sem migração nova.
+- Revisão: no aceite técnico da F8-4b.
+
 ### 2026-10-14 — Aceite da F8-4a registrado e plano da F8-4b (DEC-F8-026) — Claude
 - AUTORIZAÇÃO: DEC-F8-026 — somente análise e documentação.
 - ACEITE: F8-4a aceita definitivamente (código `b8bc5a5`, CI 5/5 run 38561948692). P35 e P36 abertas.
