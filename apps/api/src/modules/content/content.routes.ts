@@ -66,7 +66,7 @@ export async function contentRoutes(app: FastifyInstance) {
           if (!ctx) return reply;
           try {
             const out = await handler(ctx, request, reply);
-            if (reply.sent) return reply;
+            if (reply.sent || out === reply) return reply;
             return reply.status(successStatus).send(out);
           } catch (error) {
             return fail(error, reply);
