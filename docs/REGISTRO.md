@@ -36,6 +36,26 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-4a: nova tentativa do CI — 429 persistiu no Publish Images; proposta de origem das imagens-base (DEC-F8-024) — Claude
+- AUTORIZAÇÃO: DEC-F8-024 — uma única nova tentativa, só jobs com falha.
+- EXECUÇÃO: `gh run rerun --failed` no run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502). O primeiro pedido recebeu **HTTP 500 da API do GitHub** e não iniciou nada (o run continuou na tentativa 2); o pedido foi reenviado uma vez e iniciou a **tentativa 3**. Commit de documentação com `[skip ci]`.
+- RESULTADO (tentativa 3): **Docker Build ✔** (passou desta vez); Code Quality ✔ e PostgreSQL ✔ (159/159) mantidos da tentativa 1; **Publish Images ✘** — o mesmo limite externo (`429 Too Many Requests` / `Data limit exceeded`) ao baixar `node:24.12.0-bookworm-slim` do registro público da Amazon; **Homologation Rehearsal não executado** (depende do Publish Images). Runners `ubuntu-latest`, 0 ms faturáveis. **5/5 não atingido; nenhuma nova tentativa**, conforme a DEC.
+- PROPOSTA: `docs/propostas/CI_ORIGEM_IMAGEM_BASE_PROPOSTA.md` — recomendada a **opção A**: espelho próprio no GHCR das quatro imagens-base (`node` da API e da web, `nginx`, `postgres`), fixadas por digest e copiadas por workflow manual; sem segredo novo, sem custo, mesmo conteúdo byte a byte. Alternativas: Docker Hub com conta (segredo novo), ECR autenticado (AWS, segredo e possível custo), só reexecutar (falhas continuam).
+- PENDÊNCIAS NOVAS: **P35** validação no Hub de imagens com mais de 30 megapixels (hoje só o provedor recusa; exige guardar as dimensões da mídia); **P36** teste PostgreSQL do limite de 25 publicações por dia (hoje coberto só no domínio).
+- BASELINE DE CÓDIGO: inalterada — `44619b3` no público (espelho `eb2836c`).
+- STATUS: F8-4a **implementada; código 100% verde no CI; CI 5/5 bloqueado por limite externo; aceite técnico pendente**. F8-4b não iniciada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda decisão sobre a origem das imagens-base).
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial alterar a infraestrutura do CI sem autorização, ligar o despachante, F8-4b, VPS, produção e credenciais.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / proposta de origem das imagens-base (interno e público).
+
+### DEC-F8-024 — Nova tentativa única do CI da F8-4a e proposta de origem alternativa das imagens-base (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: o Docker Build do run 38496406502 falhou duas vezes por limite externo (429) do registro público da Amazon.
+- Decisão: (1) F8-4a segue implementada e **pendente de aceite técnico**. (2) **Autorizada uma única nova tentativa** do CI oficial, sem mudança de código ou infraestrutura, preferindo reexecutar só os jobs que falharam ou foram pulados. (3) **Se o 429 persistir: nenhuma nova tentativa**; apresentar proposta de origem alternativa da imagem-base com impacto técnico, segurança e custos. (4) Registrar como pendências: validação no Hub de imagens com mais de 30 megapixels; teste PostgreSQL do limite de 25 publicações por dia. (5) Sem despachante real, F8-4b, VPS, produção, credenciais, runners pagos ou workflows privados.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/CI_ORIGEM_IMAGEM_BASE_PROPOSTA.md`).
+- Revisão: na decisão sobre a origem das imagens-base.
+
 ### 2026-10-13 — F8-4a implementada; CI bloqueado por limite externo no Docker Build (DEC-F8-023) — Claude
 - AUTORIZAÇÃO: DEC-F8-023 — somente a F8-4a.
 - CÓDIGO (público `44619b3`; espelho no interno `eb2836c`, conferido arquivo a arquivo):
