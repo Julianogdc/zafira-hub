@@ -23,6 +23,7 @@ Cenarios:
   L  Contador de Entregas por estagio (F8-3): sem duplicidade, publicados indisponivel, meta intacta
   M  Agendamento no Instagram (F8-4b): despachante desligado, versao aprovada, conta vinculada, estados que bloqueiam, legado so leitura
   N  Desempenho (F8-5): dados sinteticos, aguardando coleta sem zeros, coletado com datas, historico sem duplicar, Publicados indisponivel
+  O  Correcoes pre-piloto (F8-5p): dimensoes e aviso acima de 30 MP, aviso de publicacao, politica do piloto em modo de simulacao
 """
 
 import json
@@ -670,6 +671,32 @@ class ContentGate:
         counts = st.get("counts") or {}
         self.check("N", "Publicados indisponivel (null, nunca 0) com o envio desligado",
                    counts.get("published") is None and counts.get("publishedSource") == "NOT_INTEGRATED", str(counts))
+
+        # O ---------------------------------------------------------------
+        # F8-5p (DEC-F8-031): correcoes pre-piloto. Positivos e negativos com dados sinteticos; nada e enviado.
+        self.scenarios.append("O - Correcoes pre-piloto (F8-5p: P35, P37, P39)")
+        self.goto(admin, f"/conteudo/{item_id}")
+        dim = admin.get_by_test_id("media-dimensions").first
+        dim.wait_for(timeout=15000)
+        self.check("O", "P35: dimensoes lidas do arquivo exibidas (positivo)", "1×1" in dim.inner_text(), dim.inner_text())
+        note = admin.get_by_test_id("publish-note").inner_text()
+        self.check("O", "P37: aviso com limites tecnicos e formatos ainda sem publicacao real",
+                   "30 megapixels" in note and "Nem todos os formatos foram homologados" in note, note[:200])
+        big_id = self.new_content(admin, f"Gate F8 P35 {self.seed}", "Legenda imagem grande")
+        big = (b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + (6000).to_bytes(4, "big") + (6000).to_bytes(4, "big")
+               + bytes([8, 6, 0, 0, 0]) + (b"zafira-gate-big-%d" % self.seed))
+        admin.set_input_files('[data-testid="file-input"]', files=[{"name": "grande.png", "mimeType": "image/png", "buffer": big}])
+        probs = admin.get_by_test_id("media-problems")
+        probs.wait_for(timeout=15000)
+        self.check("O", "P35: aviso ja no upload para imagem acima de 30 MP (negativo)", "30 megapixels" in probs.inner_text(), probs.inner_text()[:200])
+        bd = self.api(admin, f"/content/items/{big_id}").get("body") or {}
+        self.check("O", "P35: API sinaliza MEDIA_TOO_MANY_PIXELS antes da aprovacao",
+                   any(p.get("code") == "MEDIA_TOO_MANY_PIXELS" for p in bd.get("problems", [])), str(bd.get("problems"))[:200])
+        pol = (self.api(admin, "/content/publication-settings").get("body") or {}).get("pilotPolicy") or {}
+        self.check("O", "P39: ensaio em modo de simulacao (politica nao exigida no pedido; envio seguiria bloqueado)",
+                   pol.get("enforced") is False and pol.get("valid") is False and pol.get("organizationAuthorized") is False, str(pol))
+        self.check("O", "P39: politica nao expoe outras organizacoes", "organizationIds" not in pol, str(pol))
+        self.shot(admin, "f8-o-imagem-acima-de-30mp.png")
 
         # J ---------------------------------------------------------------
         self.scenarios.append("J - Isolamento Org B")

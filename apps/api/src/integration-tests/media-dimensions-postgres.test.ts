@@ -92,6 +92,16 @@ test('Integration Gate: Dimensoes de imagem e limite de 30 MP (F8-5p.1) em Postg
     assert.deepStrictEqual(codes(r.json()), []);
   });
 
+  await t.test('1b. Nova versao leva as dimensoes do mesmo arquivo', async () => {
+    const id = await newItem('Versao');
+    assert.strictEqual((await upload(id, jpeg(1200, 1500))).statusCode, 201);
+    assert.strictEqual((await A('POST', `/content/items/${id}/approval-links`, {})).statusCode, 201);
+    const v2 = await A('POST', `/content/items/${id}/versions`, {});
+    assert.strictEqual(v2.statusCode, 201, v2.body);
+    const m = v2.json().versions[1].media[0];
+    assert.deepStrictEqual([m.widthPx, m.heightPx], [1200, 1500]);
+  });
+
   await t.test('2. Acima de 30 MP: arquivo aceito, aviso ja no upload, agendamento recusado (422)', async () => {
     const id = await newItem('Grande');
     const r = await upload(id, png(6000, 6000));

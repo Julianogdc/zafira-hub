@@ -567,6 +567,9 @@ export class ContentService {
             storageKey: m.storageKey,
             originalFilename: m.originalFilename,
             uploadedByUserId: ctx.userId,
+            // F8-5p.1 (P35): o mesmo arquivo leva as mesmas dimensoes para a nova versao
+            widthPx: m.widthPx ?? null,
+            heightPx: m.heightPx ?? null,
           },
         });
       }

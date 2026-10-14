@@ -173,9 +173,13 @@ export function canChangeFormat(
   return null;
 }
 
-/** Texto de status de publicabilidade (nunca "homologado" nesta fatia). */
+/**
+ * F8-5p.4 (DEC-F8-031, P37, D-PF8-4): limites tecnicos verificados para publicar e aviso explicito de que nem todos
+ * os formatos foram homologados com publicacao real (o Hub valida tudo de novo no agendamento).
+ */
 export const PUBLISH_COMPATIBILITY_NOTE =
-  'Aceito pelo Hub. A compatibilidade de publicação deste arquivo no BrightBean ainda não foi verificada.';
+  'Aceito pelo Hub. Para publicar no Instagram: JPG, PNG, WebP ou MP4; imagem até 20 MB e 30 megapixels; vídeo até 1 GB (MOV ainda não verificado). ' +
+  'Nem todos os formatos foram homologados com publicação real: até o piloto, só o Story foi publicado em teste no provedor; Feed, Reel e carrossel seguem sem publicação real verificada.';
 
 /** Versao editavel = ainda nao enviada para aprovacao do cliente (F8-2). */
 export function isVersionEditable(version: { sentForApprovalAt: Date | string | null }): boolean {

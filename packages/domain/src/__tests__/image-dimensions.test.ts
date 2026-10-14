@@ -72,3 +72,12 @@ test('agendamento: imagem acima do limite ou sem dimensoes bloqueia; video nao e
   const reel = validatePublicationContent({ format: 'REEL', caption: 'x', media: [{ kind: 'VIDEO', mimeType: 'video/mp4', sizeBytes: 1000 }] });
   assert.deepEqual(reel, []);
 });
+
+// F8-5p.4 (DEC-F8-031, P37): o aviso reflete os limites e nao sugere homologacao que nao houve.
+import { PUBLISH_COMPATIBILITY_NOTE } from '../content/content-model.js';
+test('aviso de publicacao: limites tecnicos e formatos ainda sem publicacao real', () => {
+  for (const t of ['JPG, PNG, WebP ou MP4', '20 MB', '30 megapixels', '1 GB', 'MOV ainda não verificado', 'Nem todos os formatos foram homologados']) {
+    assert.ok(PUBLISH_COMPATIBILITY_NOTE.includes(t), t);
+  }
+  assert.ok(!/homologad[oa] para publica/i.test(PUBLISH_COMPATIBILITY_NOTE));
+});

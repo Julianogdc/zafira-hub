@@ -334,52 +334,8 @@ export const socialPublisherService = {
     return api.get<SocialPost>(`/api/v1/clients/${clientId}/social/content/${postId}`);
   },
 
-  /**
-   * Realiza upload multipart de um arquivo de mídia para uso em publicações sociais.
-   * Exige Idempotency-Key para proteger contra timeouts e uploads duplicados.
-   */
-  async uploadMedia(file: File, idempotencyKey: string): Promise<SocialMediaUploadResult> {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    return api.post<SocialMediaUploadResult>('/api/v1/social/upload', formData, {
-      headers: {
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-  },
-
-  /**
-   * Cria uma nova publicação social canônica para um cliente.
-   * Exige Idempotency-Key para idempotência estrita da operação.
-   */
-  async createPost(
-    clientId: string,
-    payload: Omit<CreateSocialPostInput, 'idempotencyKey'>,
-    idempotencyKey: string
-  ): Promise<SocialPost> {
-    return api.post<SocialPost>(`/api/v1/clients/${clientId}/social/content`, payload, {
-      headers: {
-        'Idempotency-Key': idempotencyKey,
-      },
-    });
-  },
-
-  /**
-   * Agenda ou retemporiza uma publicação social existente.
-   */
-  async schedulePost(clientId: string, postId: string, scheduledAt: string): Promise<SocialPost> {
-    return api.patch<SocialPost>(`/api/v1/clients/${clientId}/social/content/${postId}/schedule`, {
-      scheduledAt,
-    });
-  },
-
-  /**
-   * Cancela o agendamento de uma publicação social.
-   */
-  async cancelPost(clientId: string, postId: string): Promise<{ success: boolean }> {
-    return api.post<{ success: boolean }>(`/api/v1/clients/${clientId}/social/content/${postId}/cancel`);
-  },
+  // F8-5p.4 (DEC-F8-031, P37): escritas legadas (upload, criar, agendar, cancelar) removidas: as rotas respondem 410
+  // e o agendamento e feito pelo conteudo aprovado. Leitura e vinculo/desvinculo de contas continuam acima.
 
   /**
    * Obtém métricas de engajamento de uma publicação específica.
