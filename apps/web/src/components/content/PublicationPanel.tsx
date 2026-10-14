@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Badge, Button } from '@/components/ui/ds';
 import { Banner } from '@/components/onboarding/OnboardingShell';
 import styles from '@/pages/Onboarding.module.css';
+import { PublicationMetrics } from './PublicationMetrics';
 import {
   contentErrorInfo,
   contentService,
@@ -22,6 +23,7 @@ import {
 
 /**
  * F8-4b (DEC-F8-027, D-F84B-1) - Publicação no Instagram pela versão atual aprovada pelo cliente.
+ * F8-5c (DEC-F8-029): publicações confirmadas mostram o desempenho (somente leitura).
  * O Hub só registra o pedido; o envio real é do despachante (desligado por padrão). As ações
  * exibidas vêm da API (estado + cancelamento pendente) e o servidor valida tudo de novo.
  */
@@ -213,6 +215,9 @@ export function PublicationPanel({ itemId, approvalStatus, currentVersionNumber,
                 {p.state === 'FAILED' && p.failureMessage ? <span className={styles.eventMeta}>Motivo: {p.failureMessage}</span> : null}
                 {link ? (
                   <a href={link} target="_blank" rel="noopener noreferrer" data-testid="publication-permalink">Ver no Instagram</a>
+                ) : null}
+                {p.state === 'PUBLISHED' ? (
+                  <PublicationMetrics publicationId={p.id} timeZone={timeZone} refreshKey={p.metrics?.lastCheckedAt ?? undefined} />
                 ) : null}
                 {canSchedule && (p.actions.reschedule || p.actions.cancel) ? (
                   editing === p.id ? (

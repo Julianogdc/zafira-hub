@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PUBLICATION_STATE_META, deliveryNote, formatInZone, safeHttpsUrl, scheduleProblem, suggestedSchedule, toOffsetIso } from '../publication-view';
+import { METRICS_STATUS_META, METRIC_FIELDS, PUBLICATION_STATE_META, deliveryNote, formatMetric, metricsHaveNumbers, formatInZone, safeHttpsUrl, scheduleProblem, suggestedSchedule, toOffsetIso } from '../publication-view';
 
 // F8-4b (DEC-F8-027): apresentação do agendamento no Instagram.
 
@@ -52,4 +52,27 @@ test('formatação e sugestão no fuso da organização', () => {
   assert.equal(formatInZone('2026-10-20T17:00:00Z', 'America/Sao_Paulo'), '20/10/2026, 14:00');
   assert.equal(formatInZone(null, 'UTC'), '—');
   assert.deepEqual(suggestedSchedule('America/Sao_Paulo', new Date('2026-10-20T02:00:00Z')), { date: '2026-10-20', time: '10:00' });
+});
+
+// F8-5c (DEC-F8-029): desempenho com ausencia != zero.
+test('metrica ausente nunca vira zero; zero coletado continua zero; engajamento em %', () => {
+  assert.equal(formatMetric('reach', null), '—');
+  assert.equal(formatMetric('reach', undefined), '—');
+  assert.equal(formatMetric('reach', 0), '0');
+  assert.equal(formatMetric('reach', 12345), '12.345');
+  assert.equal(formatMetric('engagementPct', 3.25), '3,25%');
+  assert.equal(formatMetric('engagementPct', null), '—');
+});
+
+test('numeros so com coleta registrada (capturedAt)', () => {
+  assert.equal(metricsHaveNumbers(null), false);
+  assert.equal(metricsHaveNumbers({ latest: null }), false);
+  const snap = { capturedAt: '2026-10-14T03:00:00Z', fetchedAt: '2026-10-14T04:00:00Z', reach: 0, views: 0, likes: 0, comments: 0, saves: 0, shares: 0, engagementPct: 0 };
+  assert.equal(metricsHaveNumbers({ latest: snap }), true);
+});
+
+test('situacoes de metricas: aguardando explica que nao ha zero; todas com texto', () => {
+  for (const [k, m] of Object.entries(METRICS_STATUS_META)) assert.ok(m.label && m.help, k);
+  assert.match(METRICS_STATUS_META.AWAITING_COLLECTION.help, /nenhum zero/);
+  assert.equal(METRIC_FIELDS.length, 7);
 });

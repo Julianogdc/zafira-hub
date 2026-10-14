@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { capabilitiesService } from '@/services/capabilities';
-import type { PublicationView } from '@/lib/publication-view';
+import type { PublicationMetricsView, PublicationView } from '@/lib/publication-view';
 
 /**
  * F8-1 (DEC-F8-003) - Cliente da API de conteudo (arquivos finais versionados).
@@ -188,6 +188,7 @@ export const contentService = {
     api.post<PublicationView>(`/content/items/${enc(id)}/publications`, body),
   reschedulePublication: (publicationId: string, scheduledAt: string) =>
     api.post<PublicationView>(`/content/publications/${enc(publicationId)}/reschedule`, { scheduledAt }),
+  publicationMetrics: (publicationId: string) => api.get<PublicationMetricsView>(`/content/publications/${enc(publicationId)}/metrics`),
   cancelPublication: (publicationId: string) => api.post<PublicationView>(`/content/publications/${enc(publicationId)}/cancel`, {}),
   newVersion: (id: string) => api.post<ContentDetail>(`/content/items/${enc(id)}/versions`, {}),
   /** Arquivo autorizado por sessao/carteira, devolvido como blob para pre-visualizacao. */

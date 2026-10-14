@@ -41,6 +41,66 @@ export interface PublicationView {
   publishedAt: string | null;
   failureMessage: string | null;
   cancelRequestedAt: string | null;
+  /** F8-5b: resumo das metricas (os numeros vem de GET /content/publications/:id/metrics). */
+  metrics?: { status: MetricsStatus; lastCapturedAt: string | null; lastCheckedAt: string | null; windowEndsAt: string | null };
+}
+
+/* ----------------------------- F8-5c (DEC-F8-029): desempenho ----------------------------- */
+
+export type MetricsStatus = 'NOT_PUBLISHED' | 'AWAITING_COLLECTION' | 'COLLECTED' | 'UNAVAILABLE' | 'ERROR' | 'STOPPED';
+
+export interface MetricsSnapshot {
+  capturedAt: string;
+  fetchedAt: string;
+  reach: number | null;
+  views: number | null;
+  likes: number | null;
+  comments: number | null;
+  saves: number | null;
+  shares: number | null;
+  engagementPct: number | null;
+}
+
+export interface PublicationMetricsView {
+  publicationId: string;
+  status: MetricsStatus;
+  lastCapturedAt: string | null;
+  lastCheckedAt: string | null;
+  windowEndsAt: string | null;
+  lastOutcome: string | null;
+  latest: MetricsSnapshot | null;
+  history: MetricsSnapshot[];
+}
+
+export const METRICS_STATUS_META: Record<MetricsStatus, { label: string; tone: Tone; help: string }> = {
+  NOT_PUBLISHED: { label: 'Sem publicação', tone: 'neutral', help: 'O desempenho aparece depois que a publicação for confirmada.' },
+  AWAITING_COLLECTION: { label: 'Aguardando coleta', tone: 'neutral', help: 'O Instagram ainda não entregou métricas deste post. Sem coleta não há número (nenhum zero é exibido).' },
+  COLLECTED: { label: 'Métricas coletadas', tone: 'success', help: 'Valores da última coleta do provedor.' },
+  UNAVAILABLE: { label: 'Métricas indisponíveis', tone: 'warning', help: 'O provedor não oferece métricas para este post.' },
+  ERROR: { label: 'Falha na consulta', tone: 'danger', help: 'A última consulta ao provedor falhou. O Hub tenta de novo no próximo horário previsto.' },
+  STOPPED: { label: 'Coleta encerrada', tone: 'neutral', help: 'A janela de acompanhamento terminou.' },
+};
+
+export const METRIC_FIELDS: { key: Exclude<keyof MetricsSnapshot, 'capturedAt' | 'fetchedAt'>; label: string }[] = [
+  { key: 'reach', label: 'Alcance' },
+  { key: 'views', label: 'Visualizações' },
+  { key: 'likes', label: 'Curtidas' },
+  { key: 'comments', label: 'Comentários' },
+  { key: 'saves', label: 'Salvamentos' },
+  { key: 'shares', label: 'Compartilhamentos' },
+  { key: 'engagementPct', label: 'Engajamento' },
+];
+
+/** Ausente nunca vira 0: null aparece como travessão. Engajamento em %. */
+export function formatMetric(key: string, value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  if (key === 'engagementPct') return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+  return Math.round(value).toLocaleString('pt-BR');
+}
+
+/** Quando há números para mostrar: só com coleta registrada (capturedAt). */
+export function metricsHaveNumbers(m: Pick<PublicationMetricsView, 'latest'> | null | undefined): boolean {
+  return Boolean(m?.latest?.capturedAt);
 }
 
 /** Selo do envio: o que foi só registrado no Hub x o que já está no Instagram. */
