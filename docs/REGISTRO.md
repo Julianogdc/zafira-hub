@@ -36,6 +36,19 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — P40 resolvido: prontidão do PostgreSQL do ensaio de homologação no CI (DEC-F8-032) — Claude
+- AUTORIZAÇÃO: DEC-F8-032 — microetapa isolada em `.github/workflows/foundation-ci.yml`; sem alteração de código do Hub, VPS, produção, credenciais ou ambientes reais.
+- CAUSA (run 38594989571, tentativa 1): a imagem oficial do PostgreSQL sobe um servidor provisório só por socket Unix para criar a base e o desliga antes do definitivo; `pg_isready` pelo socket respondia nele e a checagem final, única, caiu no desligamento.
+- CORREÇÃO: passo "Setup CI Staging Network and PostgreSQL": laço de até 90 s; confere antes que o container segue em execução; consulta `SELECT current_database()` por TCP (`-h 127.0.0.1`) com a senha efêmera de ensaio já existente; só vale com a base `zafira_hub_21_staging` e 3 respostas seguidas; em falha imprime os logs e encerra com erro. Imagem fixada por digest, rede dedicada, validação de segurança do banco e demais passos preservados.
+- COMMITS: público `d69bcc2`, interno `ab3344b`. Os workflows dos dois repositórios têm 2 diferenças intencionais (passo "Public Guard" só no público; checagem do domínio legado só no interno); a correção foi aplicada em cada arquivo preservando-as, e a comparação confirmou que só elas restam.
+- TESTES: YAML dos dois arquivos válido (5 jobs), sintaxe do script conferida com `bash -n` (sem Docker local); CI oficial completo run 38600735586 **5/5**: domínio 123/123, API 829/829, web 99/99, PostgreSQL 195/195, Docker Build, Publish Images, Homologation (F6, F7-1b, F7-2b, F7-3b, F7-4b, F8 125/0). O log mostra "PostgreSQL Staging está pronto (TCP, base zafira_hub_21_staging, 3 respostas seguidas)". Primeira execução da correção; não há prova estatística de ausência da intermitência.
+- BASELINE DE CÓDIGO: `d69bcc2` no público (espelho `ab3344b`).
+- STATUS: **pendente de aceite técnico** da Direção.
+- LIMITES/LACUNAS: o passo só é exercitado no CI (sem Docker local); a senha de ensaio já estava no workflow (valor efêmero e não sensível); a intermitência será confirmada pela ausência de recorrência nos próximos runs.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-5e, publicação, despachante ou coletor reais, VPS, produção, credenciais e F9.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO (MAPA_MESTRE sem alteração: sem mudança de escopo, sequência ou portão).
+
 ### DEC-F8-032 — Aceite técnico definitivo da F8-5p e correção da prontidão do PostgreSQL no CI (P40) (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
 - Problema: encerrar tecnicamente a F8-5p e eliminar a intermitência do passo de preparação do banco do ensaio de homologação (P40).

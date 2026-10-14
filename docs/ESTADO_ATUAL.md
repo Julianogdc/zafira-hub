@@ -6,11 +6,11 @@
 
 | Campo | Valor |
 |---|---|
-| Última atualização | 2026-10-14 — Claude — **F8-5p aceita definitivamente (DEC-F8-032)**; correção do CI (P40) autorizada, em execução. **Fase 8 não encerrada** |
+| Última atualização | 2026-10-14 — Claude — **P40 resolvido** (prontidão do PostgreSQL do ensaio no CI), CI 5/5; **pendente de aceite técnico da Direção**. F8-5p aceita (DEC-F8-032). Fase 8 não encerrada |
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
-| **Baseline de código** | `72ae027` no público `Julianogdc/zafira-hub` — F8-5p (correções pré-piloto) (espelho no interno: `7faa39f`) |
-| Situação da baseline | **CI oficial 5/5** no run 38594989571, tentativa 2 (https://github.com/Julianogdc/zafira-hub/actions/runs/38594989571): domínio 123/123, API 829/829, web 99/99, PostgreSQL 195/195, Docker Build, Publish Images e Homologation (Browser Gates F6–F8 PASS, **F8 125/0**, cenário O 6/6); 0 ms faturáveis. Rodadas anteriores: 38590932776 (fixture PNG/WebP do teste antigo) e 38591999820 (espera do cenário O) corrigidas; tentativa 1 do run 38594989571 caiu na corrida do PostgreSQL do CI (P40). **F8-5p aceita tecnicamente (DEC-F8-032).** |
+| **Baseline de código** | `d69bcc2` no público `Julianogdc/zafira-hub` — correção P40 do `foundation-ci.yml` sobre `72ae027` (F8-5p) (espelho no interno: `ab3344b`; workflows com 2 diferenças intencionais entre os repositórios) |
+| Situação da baseline | **CI oficial 5/5** no run 38600735586 (https://github.com/Julianogdc/zafira-hub/actions/runs/38600735586): domínio 123/123, API 829/829, web 99/99, PostgreSQL 195/195, Docker Build, Publish Images e Homologation (Browser Gates F6–F8 PASS, F8 125/0); o log do ensaio registra "PostgreSQL Staging está pronto (TCP, base zafira_hub_21_staging, 3 respostas seguidas)"; 0 ms faturáveis. **F8-5p aceita (DEC-F8-032); correção P40 aguardando aceite.** |
 
 "Baseline de código" é o último commit que alterou código. Commits posteriores que só mudam `docs/`, `AGENTS.md`, `CLAUDE.md` ou `GEMINI.md` são esperados. A verificação está em `AGENTS.md`.
 
@@ -38,7 +38,7 @@
 ## Próximo passo concreto
 
 0. **Imediato:** itens de segurança/infraestrutura sob controle do proprietário (ver repositório interno, INT-001).
-1. **P40 (CI):** correção da prontidão do PostgreSQL do ensaio autorizada pela DEC-F8-032, microetapa isolada em `foundation-ci.yml`; resultado e handoff no REGISTRO. **Depois, Direção:** pré-requisitos do piloto (homologação H1–H9, chave do piloto, autorização específica) conforme `docs/propostas/PORTAO_F8_PLANO.md`. Despachante e coletor **desligados**; nenhuma publicação. Nenhuma outra microetapa autorizada até nova DEC.
+1. **Direção: aceite técnico da correção do P40** (`d69bcc2`, CI 5/5 run 38600735586). **Depois:** pré-requisitos do piloto (homologação H1–H9, chave do piloto, autorização específica) conforme `docs/propostas/PORTAO_F8_PLANO.md`. Despachante e coletor **desligados**; nenhuma publicação. Nenhuma microetapa autorizada até nova DEC.
 2. **Direção decide as recomendações de economia do CI R1–R7** (`docs/REGISTRO.md`, entrada de 2026-10-12): estimativa de consumo de 2.276 min nos últimos 100 runs; 59% dos runs foram de documentação. **Conferir o saldo no painel de cobrança antes de qualquer run completo.**
 3. **Antes de qualquer ambiente real:** `rbac:bootstrap` (**P22**); `N8N_ALLOWED_HOSTS`/`N8N_CALLBACK_BASE_URL`; despachante n8n, agendador do Calendar e do espelho do Asana **desligados** até medir capacidade e haver autorização.
 4. **P28 — exclusão de cliente, retenção e privacidade:** avaliar proposta `docs/propostas/F7-2_RETENCAO_EXCLUSAO_CLIENTE_PROPOSTA.md` antes de dados reais.
@@ -79,7 +79,7 @@
 | P37 | ~~Resíduos legados da F8-4b~~ **resolvida (F8-5p.4):** 2 modais e 4 métodos de escrita legada removidos após auditoria de referências (vínculo/desvínculo, leitura e rotas 410 preservados); aviso de publicação com limites técnicos e formatos ainda sem publicação real | — |
 | P38 | ~~Erro de consulta consome o ponto da janela~~ **resolvida (F8-5p.2):** repetições em 15, 30 e 60 min sem consumir o ponto; 429 espera o retry_after (piso 60 s); reserva contra consulta simultânea | — |
 | P39 | ~~Controles do piloto ausentes~~ **resolvida (F8-5p.3):** política `PUBLICATION_PILOT_ORGANIZATION_IDS`/`PUBLICATION_PILOT_FORMATS` (fail closed antes do envio; no pedido com política ou envio ligado), vínculo reconferido antes do envio, cancelamento sempre permitido, bloqueios auditados; controles em `docs/operations/publication-pilot-controls.md`. **Limite:** retirar da política não recolhe posts já agendados no provedor (cancelar pela tela) | — |
-| P40 | **Corrida na inicialização do PostgreSQL do ensaio no CI** (run 38594989571, tentativa 1): o `pg_isready` pelo socket responde durante o servidor provisório da imagem e a checagem final, única, caiu no desligamento dele. **Proposta:** no passo "Setup CI Staging Network and PostgreSQL" de `foundation-ci.yml`, conferir por TCP (`pg_isready -h 127.0.0.1`, que o servidor provisório não atende) e repetir também a checagem final (laço com limite, ex.: 60 × 1 s), com `psql -h 127.0.0.1 -c "select 1"` na base alvo. Mudança de workflow: exige autorização | próxima mudança autorizada no CI |
+| P40 | ~~Corrida na inicialização do PostgreSQL do ensaio no CI~~ **resolvida (2026-10-14, DEC-F8-032):** prontidão por TCP em `127.0.0.1` (o servidor provisório da imagem atende só por socket), consulta `current_database()` na base definitiva, 3 respostas seguidas, espera de até 90 s, falha explícita se o container cair; demais jobs e validações de segurança intactos; CI run 38600735586 | — |
 
 ## Proibições atuais
 
