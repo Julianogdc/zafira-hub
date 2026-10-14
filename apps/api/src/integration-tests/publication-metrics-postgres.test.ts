@@ -159,30 +159,44 @@ test('Integration Gate: Metricas de publicacao (F8-5a/F8-5b) em PostgreSQL', { c
     assert.deepStrictEqual([rows[0].reach, rows[0].views, rows[0].shares, rows[0].engagementPct], [120, 300, 0, 3.25]);
   });
 
-  await t.test('a6. Consultar de novo sem coleta nova nao duplica', async () => {
-    const r = await collector.collectDue({ now: H(6) });
-    assert.deepStrictEqual([r.inserted, r.outcomes], [0, { NO_NEW_COLLECTION: 1 }]);
+  await t.test('a6. Consultar de novo sem coleta nova nao duplica; consultas concorrentes viram uma so (reserva)', async () => {
+    const before = sim.count('getPostMetrics');
+    const [r1, r2] = await Promise.all([collector.collectDue({ now: H(6) }), collector.collectDue({ now: H(6) })]);
+    assert.strictEqual(sim.count('getPostMetrics') - before, 1, 'a mesma publicacao nunca e consultada duas vezes ao mesmo tempo');
+    assert.strictEqual(r1.checked + r2.checked, 1);
+    assert.deepStrictEqual({ ...r1.outcomes, ...r2.outcomes }, { NO_NEW_COLLECTION: 1 });
     assert.strictEqual((await metricsOf(P1.pubId)).length, 1);
   });
 
-  await t.test('a7. Erro do provedor e preservado sem fabricar valor', async () => {
+  await t.test('a7. P38: erro transitorio nao consome o ponto; repete em 15 min e entao registra', async () => {
     sim.metricsErrorNext = 1;
     const r = await collector.collectDue({ now: H(24) });
-    assert.deepStrictEqual(r.outcomes, { ERROR: 1 });
-    const p = await pubRow(P1.pubId);
-    assert.strictEqual(p.metricsLastOutcome, 'ERROR');
+    assert.deepStrictEqual(r.outcomes, { ERROR_RETRY_SCHEDULED: 1 });
+    let p = await pubRow(P1.pubId);
+    assert.strictEqual(p.metricsCheckedAt?.toISOString(), H(6).toISOString(), 'o ponto de 24 h continua descoberto');
+    assert.strictEqual(p.metricsRetryAt?.toISOString(), new Date(H(24).getTime() + 15 * 60_000).toISOString());
+    assert.deepStrictEqual([p.metricsErrorCount, p.metricsLastOutcome], [1, 'ERROR']);
     assert.match(p.metricsLastReason ?? '', /SERVER/);
-    assert.strictEqual((await metricsOf(P1.pubId)).length, 1);
+    assert.strictEqual((await collector.collectDue({ now: new Date(H(24).getTime() + 10 * 60_000) })).checked, 0, 'antes dos 15 min nao repete');
+    const ok = await collector.collectDue({ now: new Date(H(24).getTime() + 15 * 60_000) });
+    assert.deepStrictEqual(ok.outcomes, { NO_NEW_COLLECTION: 1 });
+    p = await pubRow(P1.pubId);
+    assert.deepStrictEqual([p.metricsRetryAt, p.metricsErrorCount, p.metricsLastOutcome], [null, 0, 'NO_NEW_COLLECTION']);
+    assert.strictEqual((await metricsOf(P1.pubId)).length, 1, 'nenhum valor fabricado');
   });
 
-  await t.test('a8. Limite do provedor (429): para o lote sem consumir o ponto', async () => {
+  await t.test('a8. Limite do provedor (429): espera o retry_after (piso 60 s) sem consumir o ponto nem contar erro', async () => {
     sim.rateLimitNext = 30;
     const r = await collector.collectDue({ now: H(72) });
     assert.strictEqual(r.stoppedByRateLimit, true);
     assert.strictEqual(r.checked, 0);
-    assert.strictEqual((await pubRow(P1.pubId)).metricsCheckedAt?.toISOString(), H(24).toISOString());
+    const p = await pubRow(P1.pubId);
+    assert.strictEqual(p.metricsCheckedAt?.toISOString(), new Date(H(24).getTime() + 15 * 60_000).toISOString());
+    assert.strictEqual(p.metricsRetryAt?.toISOString(), new Date(H(72).getTime() + 60_000).toISOString());
+    assert.strictEqual(p.metricsErrorCount, 0);
+    assert.strictEqual((await collector.collectDue({ now: new Date(H(72).getTime() + 30_000) })).checked, 0, 'respeita a espera do 429');
     sim.collectMetrics(P1.remoteId, H(70), { reach: 150, views: 340, likes: 11, comments: 2, saves: 1, shares: 1, engagement: 3.5 });
-    const r2 = await collector.collectDue({ now: H(72) });
+    const r2 = await collector.collectDue({ now: new Date(H(72).getTime() + 2 * 60_000) });
     assert.deepStrictEqual(r2.outcomes, { COLLECTED: 1 });
     assert.strictEqual((await metricsOf(P1.pubId)).length, 2);
   });
@@ -205,8 +219,15 @@ test('Integration Gate: Metricas de publicacao (F8-5a/F8-5b) em PostgreSQL', { c
     );
   });
 
-  await t.test('a10. Janela encerrada (7 dias): nao consulta mais', async () => {
-    await collector.collectDue({ now: H(168) });
+  await t.test('a10. P38: esgotadas as repeticoes (15, 30, 60 min) o ultimo ponto e consumido com o erro; depois nao consulta mais', async () => {
+    const at = (min: number) => new Date(H(168).getTime() + min * 60_000);
+    sim.metricsErrorNext = 4;
+    const outcomes: string[] = [];
+    for (const min of [0, 15, 45, 105]) outcomes.push(...Object.keys((await collector.collectDue({ now: at(min) })).outcomes));
+    assert.deepStrictEqual(outcomes, ['ERROR_RETRY_SCHEDULED', 'ERROR_RETRY_SCHEDULED', 'ERROR_RETRY_SCHEDULED', 'ERROR']);
+    const p = await pubRow(P1.pubId);
+    assert.deepStrictEqual([p.metricsCheckedAt?.toISOString(), p.metricsRetryAt, p.metricsErrorCount, p.metricsLastOutcome], [at(105).toISOString(), null, 0, 'ERROR']);
+    assert.strictEqual((await metricsOf(P1.pubId)).length, 2, 'coletas anteriores preservadas');
     const calls = sim.count('getPostMetrics');
     const r = await collector.collectDue({ now: H(500) });
     assert.strictEqual(r.checked, 0);
@@ -222,7 +243,7 @@ test('Integration Gate: Metricas de publicacao (F8-5a/F8-5b) em PostgreSQL', { c
     const m = r.json();
     assert.strictEqual(m.status, 'STOPPED', 'janela de 7 dias encerrada, ultima coleta preservada');
     assert.strictEqual(m.latest.capturedAt, H(70).toISOString());
-    assert.strictEqual(m.latest.fetchedAt, H(72).toISOString());
+    assert.strictEqual(m.latest.fetchedAt, new Date(H(72).getTime() + 2 * 60_000).toISOString());
     assert.deepStrictEqual(m.history.map((h: any) => h.capturedAt), [H(70).toISOString(), H(2).toISOString()]);
     assert.strictEqual(m.latest.reach, 150);
     assert.ok(!r.body.includes('next_sync') && !r.body.includes('nextSync'), 'estimativa movel do provedor nunca exposta');
@@ -252,7 +273,8 @@ test('Integration Gate: Metricas de publicacao (F8-5a/F8-5b) em PostgreSQL', { c
     sim.metricsErrorNext = 1;
     await collector.collectDue({ now: H(3) });
     m = (await A(memberA, 'GET', `/content/publications/${P2.pubId}/metrics`)).json();
-    assert.deepStrictEqual([m.status, m.latest, m.lastCheckedAt], ['ERROR', null, H(3).toISOString()]);
+    // P38: o erro nao consome o ponto de 3 h (lastCheckedAt continua o de 1 h); a situacao mostra a falha sem valor
+    assert.deepStrictEqual([m.status, m.latest, m.lastCheckedAt], ['ERROR', null, H(1).toISOString()]);
   });
 
   let P4 = '';

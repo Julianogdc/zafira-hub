@@ -2041,6 +2041,9 @@ model ContentPublication {
   metricsCheckedAt  DateTime?
   metricsLastOutcome String?
   metricsLastReason String?
+  // F8-5p.2 (DEC-F8-031, P38): repeticao pendente apos erro transitorio (o ponto da janela continua descoberto)
+  metricsRetryAt    DateTime?
+  metricsErrorCount Int              @default(0)
   createdByUserId   String?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt

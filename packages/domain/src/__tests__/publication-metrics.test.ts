@@ -95,3 +95,24 @@ test('situacao exibida preserva aguardando, indisponivel, erro e encerrado sem v
   assert.equal(s({ hasSnapshot: true, lastOutcome: 'ERROR' }), 'COLLECTED');
   assert.equal(s({ hasSnapshot: true, windowClosed: true }), 'STOPPED');
 });
+
+// F8-5p.2 (DEC-F8-031, P38): repeticoes controladas
+import { isMetricsConsultDue, metricsRateLimitDelaySeconds, metricsRetryDelayMinutes } from '../content/publication-metrics.js';
+
+test('repeticoes em 15, 30 e 60 min; a quarta falha consome o ponto', () => {
+  assert.deepEqual([1, 2, 3, 4, 0].map(metricsRetryDelayMinutes), [15, 30, 60, null, null]);
+});
+
+test('429: espera do provedor com piso de 60 s e teto de 1 h', () => {
+  assert.deepEqual([metricsRateLimitDelaySeconds(5), metricsRateLimitDelaySeconds(120), metricsRateLimitDelaySeconds(99999), metricsRateLimitDelaySeconds(null)], [60, 120, 3600, 60]);
+});
+
+test('repeticao pendente: so quando vence, mesmo com a janela ja no ultimo ponto', () => {
+  const pub = new Date('2026-10-14T00:00:00Z');
+  const at = (h: number) => new Date(pub.getTime() + h * 3600_000);
+  const base = { publishedAt: pub, format: 'STORY' as const, lastCheckedAt: at(24) };
+  assert.equal(isMetricsConsultDue({ ...base, retryAt: at(26.25), now: at(26.1) }), false);
+  assert.equal(isMetricsConsultDue({ ...base, retryAt: at(26.25), now: at(26.25) }), true, 'o ultimo ponto nao se perde por um erro');
+  assert.equal(isMetricsConsultDue({ ...base, retryAt: null, now: at(26) }), true);
+  assert.equal(isMetricsConsultDue({ ...base, lastCheckedAt: at(26), retryAt: null, now: at(40) }), false);
+});

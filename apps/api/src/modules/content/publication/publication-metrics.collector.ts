@@ -1,8 +1,9 @@
 import { Prisma } from '@prisma/client';
 import {
-  isMetricsCheckDue,
-  isMetricsWindowClosed,
+  isMetricsConsultDue,
   METRICS_CHECKPOINT_HOURS,
+  metricsRateLimitDelaySeconds,
+  metricsRetryDelayMinutes,
   normalizePostMetrics,
   type ContentFormat,
   type MetricsCheckOutcome,
@@ -16,7 +17,12 @@ import { GatewayError, resolveBrightBeanGateway, type PublicationGateway } from 
  * DESLIGADO por padrao: exige PUBLICATION_METRICS_ENABLED=true E o despachante ligado (sem publicacao nao ha o que medir).
  * Consulta so nos pontos da janela (D-F85-3); consultar nao significa coleta nova: so grava quando ha captured_at,
  * e a mesma coleta (publicacao + capturedAt) nunca duplica. fetchedAt (consulta do Hub) != capturedAt (coleta do provedor).
+ * F8-5p.2 (DEC-F8-031, P38): erro transitorio NAO consome o ponto; repete em 15, 30 e 60 min e so entao consome com o erro
+ * preservado. 429 espera o retry_after (sem contar como erro). Cada consulta reserva a publicacao (metricsRetryAt curto,
+ * troca condicional), entao duas instancias nunca consultam a mesma publicacao ao mesmo tempo.
  */
+
+const CLAIM_MS = 5 * 60_000;
 
 export const publicationMetricsEnabled = (env: NodeJS.ProcessEnv = process.env) =>
   env.PUBLICATION_METRICS_ENABLED === 'true' && publicationDispatchEnabled(env);
@@ -49,18 +55,26 @@ export class PublicationMetricsCollector {
       // janela maxima (7 dias) + margem: publicacoes antigas nunca ocupam o lote
       where: { state: 'PUBLISHED', publishedAt: { not: null, gte: new Date(now.getTime() - (METRICS_CHECKPOINT_HOURS.at(-1)! + 24) * 3600_000) }, externalPostId: { not: null } },
       orderBy: { metricsCheckedAt: { sort: 'asc', nulls: 'first' } },
-      select: { id: true, organizationId: true, externalPostId: true, publishedAt: true, metricsCheckedAt: true, item: { select: { format: true } } },
+      select: {
+        id: true, organizationId: true, externalPostId: true, publishedAt: true, metricsCheckedAt: true,
+        metricsRetryAt: true, metricsErrorCount: true, item: { select: { format: true } },
+      },
       take: 500,
     });
     const due = candidates
-      .filter((p) => {
-        const input = { publishedAt: p.publishedAt!, format: p.item.format as ContentFormat, lastCheckedAt: p.metricsCheckedAt };
-        return !isMetricsWindowClosed(input) && isMetricsCheckDue({ ...input, now });
-      })
+      .filter((p) =>
+        isMetricsConsultDue({ publishedAt: p.publishedAt!, format: p.item.format as ContentFormat, lastCheckedAt: p.metricsCheckedAt, retryAt: p.metricsRetryAt, now })
+      )
       .slice(0, limit);
 
     const result: MetricsCollectResult = { enabled: true, checked: 0, inserted: 0, outcomes: {} };
     for (const p of due) {
+      // reserva: so quem trocar o estado lido consulta (outra instancia ou ciclo concorrente pula)
+      const claim = await prisma.contentPublication.updateMany({
+        where: { id: p.id, metricsCheckedAt: p.metricsCheckedAt, metricsRetryAt: p.metricsRetryAt, metricsErrorCount: p.metricsErrorCount },
+        data: { metricsRetryAt: new Date(now.getTime() + CLAIM_MS) },
+      });
+      if (claim.count !== 1) continue;
       let outcome: MetricsCheckOutcome;
       let reason: string | null = null;
       try {
@@ -95,17 +109,35 @@ export class PublicationMetricsCollector {
         }
       } catch (error) {
         if (error instanceof GatewayError && error.kind === 'RATE_LIMIT') {
-          // limite do provedor: para o lote sem consumir o ponto; tenta no proximo ciclo
+          // limite do provedor: nao consome o ponto nem conta como erro; espera o retry_after e para o lote
+          await prisma.contentPublication.update({
+            where: { id: p.id },
+            data: { metricsRetryAt: new Date(now.getTime() + metricsRateLimitDelaySeconds(error.retryAfterSeconds) * 1000) },
+          });
           result.stoppedByRateLimit = true;
           break;
         }
         outcome = 'ERROR';
         reason = error instanceof GatewayError ? `${error.kind}: ${error.message}`.slice(0, 200) : 'Falha ao consultar as métricas.';
       }
-      // a consulta cobre o ponto atual (fetchedAt); nunca altera coletas ja gravadas
+      if (outcome === 'ERROR') {
+        const errors = p.metricsErrorCount + 1;
+        const delay = metricsRetryDelayMinutes(errors);
+        if (delay !== null) {
+          // erro transitorio: o ponto continua descoberto; nova tentativa no intervalo previsto
+          await prisma.contentPublication.update({
+            where: { id: p.id },
+            data: { metricsRetryAt: new Date(now.getTime() + delay * 60_000), metricsErrorCount: errors, metricsLastOutcome: outcome, metricsLastReason: reason },
+          });
+          result.checked += 1;
+          result.outcomes.ERROR_RETRY_SCHEDULED = (result.outcomes.ERROR_RETRY_SCHEDULED ?? 0) + 1;
+          continue;
+        }
+      }
+      // a consulta cobre o ponto atual (fetchedAt); esgotadas as repeticoes, o ponto e consumido com o erro preservado
       await prisma.contentPublication.update({
         where: { id: p.id },
-        data: { metricsCheckedAt: now, metricsLastOutcome: outcome, metricsLastReason: reason },
+        data: { metricsCheckedAt: now, metricsLastOutcome: outcome, metricsLastReason: reason, metricsRetryAt: null, metricsErrorCount: 0 },
       });
       result.checked += 1;
       result.outcomes[outcome] = (result.outcomes[outcome] ?? 0) + 1;

@@ -110,6 +110,33 @@ export function isMetricsWindowClosed(input: { publishedAt: Date; format: Conten
   return input.lastCheckedAt !== null && input.lastCheckedAt.getTime() >= metricsWindowEnd(input.publishedAt, input.format).getTime();
 }
 
+/**
+ * F8-5p.2 (DEC-F8-031, P38): depois de um erro transitorio a consulta e repetida em 15, 30 e 60 min sem consumir
+ * o ponto da janela; esgotadas as repeticoes, o ponto e consumido com o erro preservado.
+ */
+export const METRICS_RETRY_DELAYS_MINUTES = [15, 30, 60] as const;
+
+/** Atraso da proxima repeticao apos `errorCount` erros seguidos no mesmo ponto; null = esgotou (consome o ponto). */
+export function metricsRetryDelayMinutes(errorCount: number): number | null {
+  if (!Number.isInteger(errorCount) || errorCount < 1) return null;
+  return METRICS_RETRY_DELAYS_MINUTES[errorCount - 1] ?? null;
+}
+
+/** Limite do provedor (429): espera o retry_after informado, com piso de 60 s e teto de 1 h; nao conta como erro. */
+export function metricsRateLimitDelaySeconds(retryAfterSeconds: number | null | undefined): number {
+  const s = typeof retryAfterSeconds === 'number' && Number.isFinite(retryAfterSeconds) ? Math.ceil(retryAfterSeconds) : 60;
+  return Math.min(3600, Math.max(60, s));
+}
+
+/**
+ * Ha consulta devida considerando repeticao pendente: com `retryAt` definido, so quando ele vence
+ * (o ponto continua descoberto); sem ele, a regra dos pontos da janela.
+ */
+export function isMetricsConsultDue(input: { publishedAt: Date; format: ContentFormat; lastCheckedAt: Date | null; retryAt: Date | null; now: Date }): boolean {
+  if (input.retryAt) return input.retryAt.getTime() <= input.now.getTime();
+  return !isMetricsWindowClosed(input) && isMetricsCheckDue(input);
+}
+
 export const METRICS_CHECK_OUTCOMES = ['AWAITING_COLLECTION', 'COLLECTED', 'NO_NEW_COLLECTION', 'UNAVAILABLE', 'NOT_FOUND', 'ERROR'] as const;
 export type MetricsCheckOutcome = (typeof METRICS_CHECK_OUTCOMES)[number];
 
