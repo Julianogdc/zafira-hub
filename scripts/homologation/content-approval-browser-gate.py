@@ -5,7 +5,8 @@ Chromium autenticado (Playwright) contra as imagens publicadas e o banco de ensa
 cliente real; arquivos sao bytes de teste com assinatura valida; pessoas e clientes ficticios.
 Cobre a F8-1 (cadastro e upload), a F8-2 (link seguro, pagina publica, decisao, nova versao, revogacao)
 e a F8-3 (contador de Entregas por estagio, somente leitura, publicados indisponivel)
-e a F8-4b (agendamento pela versao aprovada, sem envio real: despachante desligado).
+e a F8-4b (agendamento pela versao aprovada, sem envio real: despachante desligado)
+e a F8-5 (desempenho com dados sinteticos: coletor desligado).
 
 Cenarios:
   A  Capacidades e menu
@@ -21,6 +22,7 @@ Cenarios:
   K  Responsividade 390 px
   L  Contador de Entregas por estagio (F8-3): sem duplicidade, publicados indisponivel, meta intacta
   M  Agendamento no Instagram (F8-4b): despachante desligado, versao aprovada, conta vinculada, estados que bloqueiam, legado so leitura
+  N  Desempenho (F8-5): dados sinteticos, aguardando coleta sem zeros, coletado com datas, historico sem duplicar, Publicados indisponivel
 """
 
 import json
@@ -605,6 +607,70 @@ class ContentGate:
         self.check("M", "nenhuma publicacao foi enviada ao provedor", sent == "0", sent)
         self.shot(admin, "f8-m-legado-leitura.png")
 
+        # N ---------------------------------------------------------------
+        # F8-5d (DEC-F8-029): desempenho com dados SINTETICOS no banco de ensaio. Nenhum provedor, nenhum coletor:
+        # a publicacao confirmada e a coleta sao gravadas aqui como o coletor gravaria (despachante e coletor desligados).
+        self.scenarios.append("N - Desempenho da publicacao (F8-5, dados sinteticos)")
+        self.db_exec(
+            f"return await p.contentPublication.update({{where:{{id:'{p2_id}'}},data:{{state:'PUBLISHED',externalPostId:'gate-sim-post-{self.seed}',"
+            f"platformPostId:'gate-sim-{self.seed}',permalink:'https://simulador.invalid/p/{self.seed}',publishedAt:new Date(Date.now()-2*3600000)}}}}).then(()=>true);"
+        )
+        m0 = self.api(admin, f"/content/publications/{p2_id}/metrics")
+        b0 = m0.get("body") or {}
+        self.check("N", "publicado sem coleta: aguardando, sem numero", m0["status"] == 200 and b0.get("status") == "AWAITING_COLLECTION" and b0.get("latest") is None and b0.get("history") == [], m0["text"][:200])
+        self.goto(admin, f"/conteudo/{item_id}")
+        blk = admin.get_by_test_id("publication-metrics")
+        blk.wait_for(timeout=15000)
+        btxt = blk.inner_text()
+        self.check("N", "tela: Aguardando coleta, nenhum valor e nenhum zero exibido",
+                   "Aguardando coleta" in btxt and blk.get_by_test_id("publication-metrics-values").count() == 0 and re.search(r"\d", btxt) is None, btxt[:200])
+        self.shot(admin, "f8-n-aguardando-coleta.png")
+
+        # coleta sintetica: capturedAt (provedor) uma hora antes de fetchedAt (consulta do Hub)
+        ins = self.db_exec(
+            f"const pub=await p.contentPublication.findUniqueOrThrow({{where:{{id:'{p2_id}'}}}});"
+            f"const cap=new Date(Date.now()-90*60000);const fet=new Date(Date.now()-30*60000);"
+            f"await p.contentPublicationMetric.create({{data:{{organizationId:pub.organizationId,publicationId:pub.id,capturedAt:cap,fetchedAt:fet,"
+            f"reach:1234,views:2500,likes:87,comments:9,saves:null,shares:4,engagementPct:3.25,metricKinds:{{engagement:'percent'}}}}}});"
+            f"await p.contentPublication.update({{where:{{id:pub.id}},data:{{metricsCheckedAt:fet,metricsLastOutcome:'COLLECTED'}}}});return cap.toISOString();"
+        )
+        cap_iso = ins.strip('"')
+        m1 = (self.api(admin, f"/content/publications/{p2_id}/metrics").get("body") or {})
+        latest = m1.get("latest") or {}
+        self.check("N", "API: coletado, com capturedAt do provedor distinto de fetchedAt do Hub",
+                   m1.get("status") == "COLLECTED" and latest.get("capturedAt") == cap_iso and latest.get("fetchedAt") not in (None, cap_iso), str(m1)[:300])
+        self.check("N", "API: indicador ausente segue nulo (nunca 0)", "saves" in latest and latest.get("saves") is None, str(latest))
+        dup = self.db_exec(
+            f"const pub=await p.contentPublication.findUniqueOrThrow({{where:{{id:'{p2_id}'}}}});"
+            f"return await p.contentPublicationMetric.create({{data:{{organizationId:pub.organizationId,publicationId:pub.id,capturedAt:new Date('{cap_iso}'),fetchedAt:new Date(),reach:1}}}}).then(()=>'gravou');"
+        )
+        self.check("N", "mesma coleta nao duplica (unico por publicacao + capturedAt)", dup != '"gravou"', dup)
+        upd = self.db_exec(f"return await p.contentPublicationMetric.updateMany({{where:{{publicationId:'{p2_id}'}},data:{{reach:1}}}}).then(()=>'alterou');")
+        self.check("N", "historico de coletas nao e reescrito (UPDATE bloqueado)", upd != '"alterou"', upd)
+
+        self.goto(admin, f"/conteudo/{item_id}")
+        vals = admin.get_by_test_id("publication-metrics-values")
+        vals.wait_for(timeout=15000)
+        vtxt = vals.inner_text()
+        self.check("N", "tela: valores coletados (alcance, engajamento em %)", "1.234" in vtxt and "3,25%" in vtxt, vtxt[:200])
+        self.check("N", "tela: indicador ausente aparece como travessao", vals.locator('[data-metric="saves"]').inner_text().strip().startswith("—"))
+        self.check("N", "tela: data da coleta do Instagram e da consulta do Hub", "Coletado pelo Instagram em" in admin.get_by_test_id("publication-metrics-captured").inner_text()
+                   and "última consulta do Hub" in admin.get_by_test_id("publication-metrics-captured").inner_text())
+        self.check("N", "publicado: nenhuma acao de reagendar ou cancelar", admin.locator('[data-testid="publication-item"][data-publication-state="PUBLISHED"] button').count() == 0)
+        self.shot(admin, "f8-n-metricas-coletadas.png")
+
+        # permissoes e isolamento
+        self.goto(member, f"/conteudo/{item_id}")
+        member.get_by_test_id("publication-metrics-values").wait_for(timeout=15000)
+        self.check("N", "membro le o desempenho sem botoes de acao", member.get_by_test_id("publication-panel").locator("button").count() == 0)
+        self.check("N", "membro: API de metricas 200 (somente leitura)", self.api(member, f"/content/publications/{p2_id}/metrics")["status"] == 200)
+
+        # contador Publicados: com o envio desligado no ensaio continua indisponivel, mesmo com publicacao confirmada (D-F85-2)
+        st = self.api(admin, f"/clients/{CLIENT_1}/deliverables/content-stages?period={after['period']}").get("body") or {}
+        counts = st.get("counts") or {}
+        self.check("N", "Publicados indisponivel (null, nunca 0) com o envio desligado",
+                   counts.get("published") is None and counts.get("publishedSource") == "NOT_INTEGRATED", str(counts))
+
         # J ---------------------------------------------------------------
         self.scenarios.append("J - Isolamento Org B")
         pb = self.login(browser, self.email_b, self.password_b, "J")
@@ -622,6 +688,7 @@ class ContentGate:
             self.api(pb, f"/content/publications/{p2_id}/cancel", "POST", {})["status"],
         ]
         self.check("J", "Org B: nao agenda, reagenda nem cancela na Org A (404)", rb == [404, 404, 404], str(rb))
+        self.check("J", "Org B: metricas da publicacao da Org A recusadas (404)", self.api(pb, f"/content/publications/{p2_id}/metrics")["status"] == 404)
         self.goto(pb, "/conteudo")
         pb.get_by_text("Nenhum conteúdo cadastrado").first.wait_for(timeout=15000)
         self.ok("J", "Org B: tela vazia, sem dados da Org A")
@@ -636,6 +703,8 @@ class ContentGate:
             self.check("K", f"390 px: {label} sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
         box = admin.get_by_test_id("publication-panel").bounding_box()
         self.check("K", "390 px: painel de publicacao dentro da largura", bool(box and box["x"] >= 0 and box["x"] + box["width"] <= 391), str(box))
+        mbox = admin.get_by_test_id("publication-metrics").bounding_box()
+        self.check("K", "390 px: desempenho dentro da largura", bool(mbox and mbox["x"] >= 0 and mbox["x"] + mbox["width"] <= 391), str(mbox))
         self.shot(admin, "f8-k-publicacao-390.png")
         # Entregas com o contador: mesmo caminho do cenario L (aba "Entregas" quando o cliente tem projeto Asana)
         self.goto(admin, f"/projetos?clientId={CLIENT_1}")
