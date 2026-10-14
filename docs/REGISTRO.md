@@ -36,6 +36,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-F8-033 — Aceite técnico definitivo da correção do P40 (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar tecnicamente a correção da prontidão do PostgreSQL do ensaio de homologação no CI.
+- Decisão: **Aceite técnico definitivo da correção do P40**, com evidências: baseline `d69bcc2` (espelho `ab3344b`); CI run 38600735586, 5/5; Browser Gate F8 125/0; handoff `5256a83`; sessão liberada. **Ressalva de acompanhamento:** observar o passo nos próximos runs; recorrência reabre a pendência. Alterações restritas a documentos, com `[skip ci]`; código e workflow inalterados. A Fase 8 permanece aberta, aguardando o Portão F8. Proibido: F8-5e, F9 e alterações de infraestrutura.
+- Alternativas consideradas: —
+- Impacto: documentação (ESTADO e REGISTRO); MAPA_MESTRE sem alteração (sem mudança de escopo, sequência ou portão).
+- Revisão: ao primeiro run futuro em que o passo falhar, ou quando o Portão F8 for decidido.
+
+### 2026-10-14 — Aceite da correção do P40 registrado (DEC-F8-033) — Claude
+- ACEITE: correção do P40 aceita definitivamente (código `d69bcc2`; CI 5/5 run 38600735586; Browser Gate F8 125/0).
+- DOCUMENTOS: ESTADO_ATUAL (P40 aceita, com ressalva de acompanhamento nos próximos runs; próximo passo) e este REGISTRO; MAPA_MESTRE inalterado. Código e workflow inalterados; commits com `[skip ci]`.
+- BASELINE DE CÓDIGO: inalterada — `d69bcc2` no público (espelho `ab3344b`).
+- STATUS: P40 **aceita**; **Fase 8 não encerrada** (Portão F8 aberto); F8-5e não autorizada. Sessão mantida liberada a pedido da Direção (sem marca de sessão ativa, por tratar-se de commit documental único).
+- PENDÊNCIAS: P33, P34 e RS1–RS7 mantidas; homologação H1–H9 aguardando decisão.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-5e, publicação, despachante ou coletor reais, VPS, produção, credenciais, F9 e alterações de infraestrutura.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
 ### 2026-10-14 — P40 resolvido: prontidão do PostgreSQL do ensaio de homologação no CI (DEC-F8-032) — Claude
 - AUTORIZAÇÃO: DEC-F8-032 — microetapa isolada em `.github/workflows/foundation-ci.yml`; sem alteração de código do Hub, VPS, produção, credenciais ou ambientes reais.
 - CAUSA (run 38594989571, tentativa 1): a imagem oficial do PostgreSQL sobe um servidor provisório só por socket Unix para criar a base e o desliga antes do definitivo; `pg_isready` pelo socket respondia nele e a checagem final, única, caiu no desligamento.
