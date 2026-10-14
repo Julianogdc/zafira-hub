@@ -131,9 +131,12 @@ export function checkDailyCap(activeInWindow: number, cap = INSTAGRAM_DAILY_CAP)
   return activeInWindow >= cap ? { code: 'DAILY_CAP_REACHED', message: `A conta já tem ${cap} publicações nas 24 horas em torno deste horário.` } : null;
 }
 
-/** D-F84-3: depois de PUBLISHING so acompanhamento. AMBIGUOUS exige reconciliacao antes de qualquer acao. */
+/**
+ * D-F84-3: depois de PUBLISHING so acompanhamento. AMBIGUOUS exige reconciliacao antes de qualquer acao.
+ * F8-4b (DEC-F8-027): PROVIDER_RETRY (retentativa automatica do provedor ainda nao resolvida) tambem bloqueia.
+ */
 export function canReschedulePublication(state: PublicationState): boolean {
-  return state === 'PENDING' || state === 'DRAFTED' || state === 'SCHEDULED' || state === 'PROVIDER_RETRY';
+  return state === 'PENDING' || state === 'DRAFTED' || state === 'SCHEDULED';
 }
 export function canCancelPublication(state: PublicationState): boolean {
   return canReschedulePublication(state);

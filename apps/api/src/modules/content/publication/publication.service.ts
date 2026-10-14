@@ -6,6 +6,8 @@ import {
   canReschedulePublication,
   checkDailyCap,
   checkScheduleLead,
+  INSTAGRAM_DAILY_CAP,
+  PUBLICATION_MIN_LEAD_MINUTES,
   isPilotPlatform,
   parseScheduledAt,
   validatePublicationContent,
@@ -17,6 +19,7 @@ import { prisma } from '../../../lib/prisma.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { buildClientResourceScopeWhere } from '../../authorization/client-resource-scope.js';
 import { ContentContext, ContentError } from '../content.service.js';
+import { publicationDispatchEnabled } from './publication-dispatcher.js';
 
 /**
  * F8-4a (DEC-F8-023) - Pedidos de publicacao pela versao APROVADA. Nenhuma chamada externa aqui:
@@ -36,14 +39,21 @@ export function publicationView(p: {
   id: string; itemId: string; versionId: string; socialAccountId: string; platform: string; state: string; scheduledAt: Date;
   externalPostId: string | null; platformPostId: string | null; permalink: string | null; publishedAt: Date | null;
   failureCode: string | null; failureMessage: string | null; cancelRequestedAt: Date | null; lastSyncedAt: Date | null; createdAt: Date; updatedAt: Date;
+  version?: { number: number } | null;
 }) {
+  const state = p.state as PublicationState;
+  const open = !p.cancelRequestedAt;
   return {
     id: p.id,
     itemId: p.itemId,
     versionId: p.versionId,
     socialAccountId: p.socialAccountId,
     platform: p.platform,
-    state: p.state as PublicationState,
+    state,
+    versionNumber: p.version?.number ?? null,
+    // Registrado no Hub x enviado ao Instagram: so ha post no provedor depois do envio pelo despachante
+    sentToProvider: Boolean(p.externalPostId),
+    actions: { reschedule: open && canReschedulePublication(state), cancel: open && canCancelPublication(state) },
     scheduledAt: p.scheduledAt.toISOString(),
     hasExternalPost: Boolean(p.externalPostId),
     platformPostId: p.platformPostId,
@@ -85,8 +95,37 @@ export class PublicationService {
       select: { id: true },
     });
     if (!item) throw new ContentError(404, 'NOT_FOUND', 'Conteúdo não encontrado.');
-    const rows = await prisma.contentPublication.findMany({ where: { organizationId: ctx.organizationId, itemId }, orderBy: { createdAt: 'desc' } });
+    const rows = await prisma.contentPublication.findMany({
+      where: { organizationId: ctx.organizationId, itemId },
+      orderBy: { createdAt: 'desc' },
+      include: { version: { select: { number: true } } },
+    });
     return rows.map(publicationView);
+  }
+
+  /** Contas elegiveis: Instagram vinculadas ao cliente do conteudo (ClientIntegration). Nao chama o provedor. */
+  async targets(ctx: ContentContext, itemId: string) {
+    const item = await prisma.contentItem.findFirst({
+      where: { id: itemId, organizationId: ctx.organizationId, client: buildClientResourceScopeWhere(scopeOf(ctx)) },
+      select: { clientId: true },
+    });
+    if (!item) throw new ContentError(404, 'NOT_FOUND', 'Conteúdo não encontrado.');
+    const links = await prisma.clientIntegration.findMany({
+      where: { clientId: item.clientId, provider: 'BRIGHTBEAN', client: { organizationId: ctx.organizationId } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return links.flatMap((l) => {
+      const meta = (l.metadata ?? {}) as Record<string, unknown>;
+      const platform = typeof meta.platform === 'string' ? meta.platform : '';
+      if (!isPilotPlatform(platform)) return [];
+      const name = [meta.accountName, meta.account_name, meta.accountHandle, meta.handle].find((v) => typeof v === 'string' && v.trim());
+      return [{ socialAccountId: l.externalId, platform, label: (name as string | undefined)?.slice(0, 80) ?? 'Conta Instagram', charLimit: Number(meta.charLimit ?? meta.char_limit) || null }];
+    });
+  }
+
+  /** Situacao do envio para a tela (aviso honesto quando o despachante esta desligado). */
+  settings() {
+    return { dispatchEnabled: publicationDispatchEnabled(), minLeadMinutes: PUBLICATION_MIN_LEAD_MINUTES, pilot: 'instagram' as const, dailyCap: INSTAGRAM_DAILY_CAP };
   }
 
   async request(ctx: ContentContext, itemId: string, input: RequestPublication, now: Date = new Date()) {
@@ -171,7 +210,7 @@ export class PublicationService {
       }
       throw error;
     }
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id }, include: { version: { select: { number: true } } } }));
   }
 
   async reschedule(ctx: ContentContext, publicationId: string, input: ReschedulePublication, now: Date = new Date()) {
@@ -194,7 +233,7 @@ export class PublicationService {
       }
       await this.event(tx, ctx, p.itemId, p.versionId, 'PUBLICATION_RESCHEDULE_REQUESTED', { publicationId: p.id, scheduledAt: parsed.at.toISOString() });
     });
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: { version: { select: { number: true } } } }));
   }
 
   async cancel(ctx: ContentContext, publicationId: string, now: Date = new Date()) {
@@ -220,7 +259,7 @@ export class PublicationService {
       }
       await this.event(tx, ctx, p.itemId, p.versionId, 'PUBLICATION_CANCEL_REQUESTED', { publicationId: p.id });
     });
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: { version: { select: { number: true } } } }));
   }
 }
 

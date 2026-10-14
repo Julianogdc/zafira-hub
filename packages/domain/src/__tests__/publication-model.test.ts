@@ -69,9 +69,9 @@ test('teto diario do Instagram', () => {
   assert.equal(checkDailyCap(INSTAGRAM_DAILY_CAP)?.code, 'DAILY_CAP_REACHED');
 });
 
-test('depois de PUBLISHING: sem reagendar nem cancelar (D-F84-3); AMBIGUOUS so reconcilia', () => {
-  for (const s of ['PENDING', 'DRAFTED', 'SCHEDULED', 'PROVIDER_RETRY'] as const) assert.ok(canReschedulePublication(s) && canCancelPublication(s));
-  for (const s of ['PUBLISHING', 'PUBLISHED', 'FAILED', 'CANCELLED', 'AMBIGUOUS'] as const) {
+test('depois de PUBLISHING: sem reagendar nem cancelar (D-F84-3); AMBIGUOUS e retentativa do provedor bloqueiam (DEC-F8-027)', () => {
+  for (const s of ['PENDING', 'DRAFTED', 'SCHEDULED'] as const) assert.ok(canReschedulePublication(s) && canCancelPublication(s));
+  for (const s of ['PROVIDER_RETRY', 'PUBLISHING', 'PUBLISHED', 'FAILED', 'CANCELLED', 'AMBIGUOUS'] as const) {
     assert.equal(canReschedulePublication(s), false);
     assert.equal(canCancelPublication(s), false);
   }

@@ -115,6 +115,8 @@ export async function contentRoutes(app: FastifyInstance) {
   // F8-4a: agendamento pela versao aprovada (piloto Instagram). So grava publicacao + caixa de saida;
   // o despachante (desligado por padrao) e quem fala com o provedor.
   route('GET', '/content/items/:id/publications', 'content.view', (ctx, r) => publicationService.list(ctx, params(r).id));
+  route('GET', '/content/items/:id/publication-targets', 'content.view', (ctx, r) => publicationService.targets(ctx, params(r).id));
+  route('GET', '/content/publication-settings', 'content.view', async () => publicationService.settings());
   route('POST', '/content/items/:id/publications', 'content.schedule', (ctx, r) =>
     publicationService.request(ctx, params(r).id, RequestPublicationSchema.parse(r.body ?? {})), 201);
   route('POST', '/content/publications/:publicationId/reschedule', 'content.schedule', (ctx, r) =>
