@@ -5,6 +5,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Badge, Button, ErrorState, LoadingState, PermissionState } from '@/components/ui/ds';
 import { Banner } from '@/components/onboarding/OnboardingShell';
 import { ContentPreview } from '@/components/content/ContentPreview';
+import { PublicationPanel } from '@/components/content/PublicationPanel';
+import { resolveTimeZone } from '@/lib/organization-time';
 import {
   ApprovalOverview,
   CreatedApprovalLink,
@@ -536,6 +538,14 @@ export default function ConteudoDetalhe() {
           </ul>
         ) : null}
       </section>
+
+      <PublicationPanel
+        itemId={detail.id}
+        approvalStatus={approval?.status ?? null}
+        currentVersionNumber={current.number}
+        canSchedule={caps.schedule}
+        timeZone={resolveTimeZone(currentOrganization?.timezone)}
+      />
 
       <section className={styles.panel} aria-labelledby="versions-title" data-testid="versions-panel">
         <h2 id="versions-title" className={styles.panelTitle}>Versões</h2>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '@/lib/api';
 import { capabilitiesService } from '@/services/capabilities';
+import type { PublicationView } from '@/lib/publication-view';
 
 /**
  * F8-1 (DEC-F8-003) - Cliente da API de conteudo (arquivos finais versionados).
@@ -143,6 +144,20 @@ export interface UpdateContentInput {
   expectedUpdatedAt?: string;
 }
 
+export interface PublicationTarget {
+  socialAccountId: string;
+  platform: string;
+  label: string;
+  charLimit: number | null;
+}
+
+export interface PublicationSettings {
+  dispatchEnabled: boolean;
+  minLeadMinutes: number;
+  pilot: 'instagram';
+  dailyCap: number;
+}
+
 const enc = encodeURIComponent;
 const apiBase = () => (import.meta.env.DEV ? '/api' : '/hub-api');
 
@@ -165,6 +180,15 @@ export const contentService = {
     api.post<CreatedApprovalLink>(`/content/items/${enc(id)}/approval-links`, body),
   revokeApprovalLink: (id: string, linkId: string, reason?: string) =>
     api.post<ApprovalOverview>(`/content/items/${enc(id)}/approval-links/${enc(linkId)}/revoke`, { reason: reason || null }),
+  // F8-4b (DEC-F8-027): agendamento no Instagram pela versao aprovada; o envio real e do despachante.
+  publications: (id: string) => api.get<PublicationView[]>(`/content/items/${enc(id)}/publications`),
+  publicationTargets: (id: string) => api.get<PublicationTarget[]>(`/content/items/${enc(id)}/publication-targets`),
+  publicationSettings: () => api.get<PublicationSettings>('/content/publication-settings'),
+  requestPublication: (id: string, body: { socialAccountId: string; scheduledAt: string }) =>
+    api.post<PublicationView>(`/content/items/${enc(id)}/publications`, body),
+  reschedulePublication: (publicationId: string, scheduledAt: string) =>
+    api.post<PublicationView>(`/content/publications/${enc(publicationId)}/reschedule`, { scheduledAt }),
+  cancelPublication: (publicationId: string) => api.post<PublicationView>(`/content/publications/${enc(publicationId)}/cancel`, {}),
   newVersion: (id: string) => api.post<ContentDetail>(`/content/items/${enc(id)}/versions`, {}),
   /** Arquivo autorizado por sessao/carteira, devolvido como blob para pre-visualizacao. */
   async fileBlobUrl(id: string, mediaId: string): Promise<string> {
@@ -180,10 +204,11 @@ export interface ContentCapabilities {
   view: boolean;
   create: boolean;
   send: boolean;
+  schedule: boolean;
 }
 
 export function useContentCapabilities(organizationId?: string | null): ContentCapabilities {
-  const [state, setState] = useState<ContentCapabilities>({ loading: true, error: false, view: false, create: false, send: false });
+  const [state, setState] = useState<ContentCapabilities>({ loading: true, error: false, view: false, create: false, send: false, schedule: false });
   useEffect(() => {
     let alive = true;
     capabilitiesService
@@ -191,10 +216,10 @@ export function useContentCapabilities(organizationId?: string | null): ContentC
       .then((c) => {
         if (!alive) return;
         const p = c.permissions as Record<string, boolean>;
-        setState({ loading: false, error: false, view: Boolean(p['content.view']), create: Boolean(p['content.create']), send: Boolean(p['content.send_to_client']) });
+        setState({ loading: false, error: false, view: Boolean(p['content.view']), create: Boolean(p['content.create']), send: Boolean(p['content.send_to_client']), schedule: Boolean(p['content.schedule']) });
       })
       .catch(() => {
-        if (alive) setState({ loading: false, error: true, view: false, create: false, send: false });
+        if (alive) setState({ loading: false, error: true, view: false, create: false, send: false, schedule: false });
       });
     return () => {
       alive = false;
