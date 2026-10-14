@@ -36,6 +36,34 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — Espelho das imagens-base no GHCR e CI oficial 5/5 da F8-4a (DEC-F8-025) — Claude
+- AUTORIZAÇÃO: DEC-F8-025.
+- DIGESTS DE ORIGEM: obtidos por `HEAD` (sem baixar imagem) no Docker Hub e no registro público da Amazon — **idênticos** nos dois.
+- ESPELHO: workflow manual `mirror-base-images.yml` (público `fd9d08d`, `[skip ci]` para não consumir a rodada única do CI) executado uma vez — run 38503699296 (https://github.com/Julianogdc/zafira-hub/actions/runs/38503699296): 4 imagens copiadas do Docker Hub, **sem 429**, com todas as arquiteturas e digests preservados; equivalência verificada no índice e em cada manifesto de plataforma (sem conversão de manifesto); pacotes `base-node`, `base-nginx` e `base-postgres` **públicos** (acesso anônimo HTTP 200 no workflow e de fora do GitHub, digests conferidos).
+| Imagem oficial | Espelho (pacote público) | Digest (índice multi-arquitetura) | Uso |
+|---|---|---|---|
+| `node:24.12.0-bookworm-slim` | `ghcr.io/julianogdc/base-node:24.12.0-bookworm-slim` | `sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99` | `apps/api/Dockerfile` |
+| `node:24.12.0-alpine` | `ghcr.io/julianogdc/base-node:24.12.0-alpine` | `sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8` | `apps/web/Dockerfile` (build) |
+| `nginx:alpine` | `ghcr.io/julianogdc/base-nginx:alpine` | `sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2` | `apps/web/Dockerfile` (servidor) |
+| `postgres:16` | `ghcr.io/julianogdc/base-postgres:16` | `sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d` | serviço do PostgreSQL Integration Gate e ensaio de homologação |
+- REFERÊNCIAS: público `b8bc5a5` — 7 trocas (`apps/api/Dockerfile` 1, `apps/web/Dockerfile` 2, `foundation-ci.yml` 4: serviço PostgreSQL e ensaio de homologação), mesmas versões, `imagem:tag@digest`. Interno `fc4973d` (espelho conferido). Nenhum código funcional alterado. Commit de documentação com `[skip ci]`.
+- CI OFICIAL (rodada única): run 38561948692 (https://github.com/Julianogdc/zafira-hub/actions/runs/38561948692) — **5/5 verdes**: Code Quality (domínio 103/103, API 825/825, web 88/88), PostgreSQL 159/159, Docker Build ✔, Publish Images ✔, Homologation Rehearsal ✔ (Browser Gates F6, F7-1b, F7-2b, F7-3b, F7-4b e **F8 70/0** PASS). **Nenhum 429**; logs mostram o PostgreSQL vindo de `ghcr.io/julianogdc/base-postgres@sha256:ca0bd484…`.
+- CUSTO: zero — pacotes públicos no GHCR, runners `ubuntu-latest`, 0 ms faturáveis, nenhuma credencial nova.
+- PUBLICAÇÃO REAL: impossível na configuração padrão (despachante desligado; inalterado).
+- BASELINE DE CÓDIGO: `b8bc5a5` no público (espelho `fc4973d`).
+- STATUS: **F8-4a com CI oficial 5/5; aceite técnico pendente da Direção.** F8-4b não iniciada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial ligar o despachante, F8-4b, VPS, produção e credenciais.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / proposta de origem das imagens-base (interno e público).
+
+### DEC-F8-025 — Espelho das imagens-base Docker no GHCR (opção A) e rodada única do CI da F8-4a (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: o limite externo (429) do registro público da Amazon impedia o CI 5/5 da F8-4a (DEC-F8-024).
+- Decisão: (1) **Aprovada a opção A**: workflow manual de espelhamento no repositório público; copiar só as imagens-base Node, Nginx e PostgreSQL já usadas; fixar por digest, preservando arquitetura e conteúdo e verificando a equivalência de cada cópia, sem presumir digest idêntico se houver conversão de manifesto; pacotes públicos com permissões mínimas; considerar que imagens de serviço do Actions são baixadas antes dos passos (sem depender de login posterior); atualizar só as referências necessárias; preservar versões, build e configuração; confirmar ausência de custo e de runners pagos; validar as imagens e executar **uma única** rodada do CI oficial; registrar implementação, digests, evidências e resultado nos dois repositórios. (2) Restrições: sem alterar código funcional, sem atualizar versões, sem VPS/produção, sem serviços pagos ou credenciais externas novas, sem `PUBLICATION_DISPATCH_ENABLED`, sem F8-4b, sem repetir indefinidamente downloads com 429. (3) Bloqueio de permissão, custo imprevisto ou equivalência impossível → interromper e apresentar. (4) F8-4a segue pendente de aceite até a validação.
+- Alternativas consideradas: Docker Hub com conta, ECR autenticado, só reexecutar (DEC-F8-024).
+- Impacto: `.github/workflows/mirror-base-images.yml` (novo), `.github/workflows/foundation-ci.yml`, `apps/api/Dockerfile`, `apps/web/Dockerfile`.
+- Revisão: no aceite técnico da F8-4a.
+
 ### 2026-10-13 — F8-4a: nova tentativa do CI — 429 persistiu no Publish Images; proposta de origem das imagens-base (DEC-F8-024) — Claude
 - AUTORIZAÇÃO: DEC-F8-024 — uma única nova tentativa, só jobs com falha.
 - EXECUÇÃO: `gh run rerun --failed` no run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502). O primeiro pedido recebeu **HTTP 500 da API do GitHub** e não iniciou nada (o run continuou na tentativa 2); o pedido foi reenviado uma vez e iniciou a **tentativa 3**. Commit de documentação com `[skip ci]`.

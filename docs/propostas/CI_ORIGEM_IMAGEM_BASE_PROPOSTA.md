@@ -1,6 +1,6 @@
 # Proposta: origem alternativa das imagens-base do CI (2026-10-13, DEC-F8-024)
 
-> **Situação:** proposta para decisão da Direção. **Nenhuma alteração feita.** Mudança de infraestrutura do CI: só com autorização.
+> **Situação:** **opção A aprovada (DEC-F8-025) e implementada** — ver §5.
 
 ## 1. Problema
 O CI baixa as imagens-base do **registro público da Amazon (ECR Public)** sem autenticação. Em 2026-10-13 o download falhou por limite de uso (**`429 Too Many Requests` / `Data limit exceeded`**) em três momentos: PostgreSQL de serviço (run 38443270005), Docker Build da API (run 38496406502, tentativas 1 e 2) e Publish Images (mesmo run, tentativa 3, em que o Docker Build passou). O limite anônimo do ECR Public é contado por endereço de origem, e os runners padrão do GitHub compartilham endereços — por isso a falha é intermitente e não depende do código.
@@ -34,3 +34,18 @@ Imagens afetadas (todas de `public.ecr.aws/docker/library/…`, espelho das imag
 
 ## 4. O que fica fora
 Runners pagos, VPS, produção e credenciais novas. A F8-4a só é aceita depois de um CI 5/5.
+
+## 5. Implementação (2026-10-14, DEC-F8-025)
+
+Opção A implementada. Workflow manual `.github/workflows/mirror-base-images.yml` (`workflow_dispatch`, permissões `contents: read` + `packages: write`, token do próprio workflow; no máximo 2 origens × 2 tentativas, sem repetição indefinida) executado uma vez: run 38503699296 (https://github.com/Julianogdc/zafira-hub/actions/runs/38503699296), origem Docker Hub, **sem 429**. Cópia com `skopeo copy --all --preserve-digests` (todas as arquiteturas, inclusive atestados); equivalência verificada no índice **e** em cada manifesto de plataforma (digest do destino = digest da origem; **não houve conversão de manifesto**); acesso **anônimo** aos três pacotes confirmado no workflow e de fora do GitHub.
+
+| Imagem oficial | Espelho (pacote público) | Digest (índice multi-arquitetura) | Uso |
+|---|---|---|---|
+| `node:24.12.0-bookworm-slim` | `ghcr.io/julianogdc/base-node:24.12.0-bookworm-slim` | `sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99` | `apps/api/Dockerfile` |
+| `node:24.12.0-alpine` | `ghcr.io/julianogdc/base-node:24.12.0-alpine` | `sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8` | `apps/web/Dockerfile` (build) |
+| `nginx:alpine` | `ghcr.io/julianogdc/base-nginx:alpine` | `sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2` | `apps/web/Dockerfile` (servidor) |
+| `postgres:16` | `ghcr.io/julianogdc/base-postgres:16` | `sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d` | serviço do PostgreSQL Integration Gate e ensaio de homologação |
+
+Os digests são os mesmos no Docker Hub e no registro público da Amazon (versões preservadas). A tag `nginx:alpine` era móvel: passa a ficar fixada no digest acima (atualização = rodar o workflow de cópia e trocar o digest em commit revisável). As referências usam `imagem:tag@digest` (o digest prevalece). O serviço PostgreSQL do Actions é baixado antes dos passos e funciona **sem login** porque o pacote é público. `deploy/homologation/docker-compose.reference.yml` (referência de implantação, fora do CI) não foi alterado.
+
+**Resultado:** CI oficial **5/5** no run 38561948692 (https://github.com/Julianogdc/zafira-hub/actions/runs/38561948692), sem 429. **Custo:** zero (pacotes públicos no GHCR, runners padrão `ubuntu-latest`, 0 ms faturáveis, nenhuma credencial nova).
