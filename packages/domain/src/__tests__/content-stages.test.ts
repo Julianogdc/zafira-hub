@@ -75,3 +75,16 @@ test('formato da competencia', () => {
   assert.ok(CONTENT_PERIOD_PATTERN.test('2026-10'));
   for (const bad of ['2026-13', '2026-1', '26-10', '2026-10-01', '']) assert.ok(!CONTENT_PERIOD_PATTERN.test(bad));
 });
+
+test('F8-5b (D-F85-2): publicados so com publicacao ativa; conta so confirmada e aprovada', () => {
+  const stages = ['APPROVED', 'APPROVED', 'SENT', 'RECEIVED'] as const;
+  const off = countContentStages(stages);
+  assert.equal(off.published, null);
+  assert.equal(off.publishedSource, 'NOT_INTEGRATED');
+  const on = countContentStages(stages, [true, false, true, false]);
+  assert.equal(on.published, 1, 'peca nao aprovada nunca conta como publicada');
+  assert.equal(on.publishedSource, 'CONFIRMED_PUBLICATION');
+  const zero = countContentStages(stages, [false, false, false, false]);
+  assert.equal(zero.published, 0, 'com publicacao ativa e nada confirmado, zero e dado real');
+  assert.equal(publishedRatio(on), 0.25);
+});

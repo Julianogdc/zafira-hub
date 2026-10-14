@@ -117,6 +117,8 @@ export async function contentRoutes(app: FastifyInstance) {
   route('GET', '/content/items/:id/publications', 'content.view', (ctx, r) => publicationService.list(ctx, params(r).id));
   route('GET', '/content/items/:id/publication-targets', 'content.view', (ctx, r) => publicationService.targets(ctx, params(r).id));
   route('GET', '/content/publication-settings', 'content.view', async () => publicationService.settings());
+  // F8-5b (DEC-F8-029): metricas organicas, somente leitura (permissao de ver conteudo + carteira do cliente)
+  route('GET', '/content/publications/:publicationId/metrics', 'content.view', (ctx, r) => publicationService.metrics(ctx, params(r).publicationId));
   route('POST', '/content/items/:id/publications', 'content.schedule', (ctx, r) =>
     publicationService.request(ctx, params(r).id, RequestPublicationSchema.parse(r.body ?? {})), 201);
   route('POST', '/content/publications/:publicationId/reschedule', 'content.schedule', (ctx, r) =>

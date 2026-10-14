@@ -8,8 +8,12 @@ import {
   checkScheduleLead,
   INSTAGRAM_DAILY_CAP,
   PUBLICATION_MIN_LEAD_MINUTES,
+  isMetricsWindowClosed,
   isPilotPlatform,
+  metricsStatusOf,
+  metricsWindowEnd,
   parseScheduledAt,
+  type MetricsCheckOutcome,
   validatePublicationContent,
   type ContentFormat,
   type ContentMediaKind,
@@ -31,6 +35,35 @@ type Tx = Prisma.TransactionClient;
 
 const DAY_MS = 24 * 3600_000;
 
+/** Relacoes que a visao precisa: numero da versao, formato (janela de metricas) e a ultima coleta. */
+const VIEW_INCLUDE = {
+  version: { select: { number: true } },
+  item: { select: { format: true } },
+  metrics: { orderBy: { capturedAt: 'desc' as const }, take: 1, select: { capturedAt: true } },
+} satisfies Prisma.ContentPublicationInclude;
+
+const METRICS_HISTORY_LIMIT = 50;
+
+function metricsSummary(p: {
+  state: string; publishedAt: Date | null; metricsCheckedAt?: Date | null; metricsLastOutcome?: string | null;
+  item?: { format: string } | null; metrics?: { capturedAt: Date }[];
+}) {
+  const published = p.state === 'PUBLISHED' && Boolean(p.publishedAt);
+  const format = (p.item?.format ?? 'FEED_IMAGE') as ContentFormat;
+  const windowClosed = published ? isMetricsWindowClosed({ publishedAt: p.publishedAt!, format, lastCheckedAt: p.metricsCheckedAt ?? null }) : false;
+  return {
+    status: metricsStatusOf({
+      published,
+      hasSnapshot: (p.metrics?.length ?? 0) > 0,
+      lastOutcome: (p.metricsLastOutcome ?? null) as MetricsCheckOutcome | null,
+      windowClosed,
+    }),
+    lastCapturedAt: p.metrics?.[0]?.capturedAt.toISOString() ?? null,
+    lastCheckedAt: p.metricsCheckedAt?.toISOString() ?? null,
+    windowEndsAt: published ? metricsWindowEnd(p.publishedAt!, format).toISOString() : null,
+  };
+}
+
 function scopeOf(ctx: ContentContext) {
   return { organizationId: ctx.organizationId, membershipId: ctx.membershipId, role: ctx.role };
 }
@@ -40,6 +73,8 @@ export function publicationView(p: {
   externalPostId: string | null; platformPostId: string | null; permalink: string | null; publishedAt: Date | null;
   failureCode: string | null; failureMessage: string | null; cancelRequestedAt: Date | null; lastSyncedAt: Date | null; createdAt: Date; updatedAt: Date;
   version?: { number: number } | null;
+  metricsCheckedAt?: Date | null; metricsLastOutcome?: string | null;
+  item?: { format: string } | null; metrics?: { capturedAt: Date }[];
 }) {
   const state = p.state as PublicationState;
   const open = !p.cancelRequestedAt;
@@ -63,6 +98,8 @@ export function publicationView(p: {
     failureMessage: p.failureMessage,
     cancelRequestedAt: p.cancelRequestedAt?.toISOString() ?? null,
     lastSyncedAt: p.lastSyncedAt?.toISOString() ?? null,
+    // F8-5b (DEC-F8-029): resumo das metricas; numeros so via GET /content/publications/:id/metrics
+    metrics: metricsSummary(p),
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
@@ -98,7 +135,7 @@ export class PublicationService {
     const rows = await prisma.contentPublication.findMany({
       where: { organizationId: ctx.organizationId, itemId },
       orderBy: { createdAt: 'desc' },
-      include: { version: { select: { number: true } } },
+      include: VIEW_INCLUDE,
     });
     return rows.map(publicationView);
   }
@@ -210,7 +247,7 @@ export class PublicationService {
       }
       throw error;
     }
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id }, include: { version: { select: { number: true } } } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id }, include: VIEW_INCLUDE }));
   }
 
   async reschedule(ctx: ContentContext, publicationId: string, input: ReschedulePublication, now: Date = new Date()) {
@@ -233,7 +270,7 @@ export class PublicationService {
       }
       await this.event(tx, ctx, p.itemId, p.versionId, 'PUBLICATION_RESCHEDULE_REQUESTED', { publicationId: p.id, scheduledAt: parsed.at.toISOString() });
     });
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: { version: { select: { number: true } } } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: VIEW_INCLUDE }));
   }
 
   async cancel(ctx: ContentContext, publicationId: string, now: Date = new Date()) {
@@ -259,7 +296,44 @@ export class PublicationService {
       }
       await this.event(tx, ctx, p.itemId, p.versionId, 'PUBLICATION_CANCEL_REQUESTED', { publicationId: p.id });
     });
-    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: { version: { select: { number: true } } } }));
+    return publicationView(await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId }, include: VIEW_INCLUDE }));
+  }
+
+  /**
+   * F8-5b (DEC-F8-029): metricas organicas da publicacao, somente leitura. Sem coleta registrada nao ha numero:
+   * a situacao (aguardando, indisponivel, erro, encerrado) e devolvida no lugar. capturedAt = coleta do provedor;
+   * fetchedAt = consulta do Hub. next_sync_eta do provedor nunca e exposto.
+   */
+  async metrics(ctx: ContentContext, publicationId: string) {
+    const base = await this.loadPublication(prisma, ctx, publicationId);
+    const p = await prisma.contentPublication.findUniqueOrThrow({
+      where: { id: base.id },
+      include: {
+        item: { select: { format: true } },
+        metrics: { orderBy: { capturedAt: 'desc' }, take: METRICS_HISTORY_LIMIT },
+      },
+    });
+    const snapshot = (m: (typeof p.metrics)[number]) => ({
+      capturedAt: m.capturedAt.toISOString(),
+      fetchedAt: m.fetchedAt.toISOString(),
+      reach: m.reach,
+      views: m.views,
+      likes: m.likes,
+      comments: m.comments,
+      saves: m.saves,
+      shares: m.shares,
+      engagementPct: m.engagementPct,
+    });
+    const summary = metricsSummary(p);
+    return {
+      publicationId: p.id,
+      state: p.state,
+      publishedAt: p.publishedAt?.toISOString() ?? null,
+      ...summary,
+      lastOutcome: p.metricsLastOutcome ?? null,
+      latest: p.metrics[0] ? snapshot(p.metrics[0]) : null,
+      history: p.metrics.map(snapshot),
+    };
   }
 }
 

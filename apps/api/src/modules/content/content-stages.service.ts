@@ -10,13 +10,15 @@ import { prisma } from '../../lib/prisma.js';
 import { findClientInResourceScope } from '../authorization/client-resource-scope.js';
 import { getOrganizationTimeZone } from '../organization-config/organization-config.service.js';
 import { approvalService } from './approval.service.js';
+import { publicationDispatchEnabled } from './publication/publication-dispatcher.js';
 import { ContentContext, ContentError } from './content.service.js';
 
 /**
  * F8-3 (DEC-F8-007) - Contador de Entregas por estagio. SOMENTE LEITURA.
  * Derivado dos registros reais da F8-1/F8-2 (arquivos, envio da versao, decisao do cliente).
  * Nao grava nada: meta contratual, pecas e etapas manuais de Entregas ficam intactas.
- * Publicados: sem confirmacao confiavel nesta fatia -> null (NOT_INTEGRATED), nunca 0.
+ * Publicados (F8-5b, DEC-F8-029, D-F85-2): so publicacao CONFIRMADA (PUBLISHED com publishedAt e platformPostId);
+ * com o envio desligado no ambiente -> null (NOT_INTEGRATED), nunca 0. A etapa manual "Postada" nao e tocada (D-F85-5).
  */
 export class ContentStagesService {
   async forClientPeriod(ctx: ContentContext, clientId: string, period: string): Promise<ContentStagesResponse> {
@@ -39,7 +41,8 @@ export class ContentStagesService {
     const itemIds = items.map((i) => i.id);
     const pieceIds = [...new Set(items.map((i) => i.deliverablePieceId).filter((p): p is string => Boolean(p)))];
 
-    const [pieces, firstMedia, firstSent, firstApproved] = await Promise.all([
+    const integrated = publicationDispatchEnabled();
+    const [pieces, firstMedia, firstSent, firstApproved, firstPublished] = await Promise.all([
       pieceIds.length
         ? prisma.deliverablePiece.findMany({
             // so pecas da mesma organizacao e do mesmo cliente valem para a competencia
@@ -68,12 +71,20 @@ export class ContentStagesService {
             _min: { createdAt: true },
           })
         : Promise.resolve([]),
+      integrated && itemIds.length
+        ? prisma.contentPublication.groupBy({
+            by: ['itemId'],
+            where: { organizationId: orgId, itemId: { in: itemIds }, state: 'PUBLISHED', publishedAt: { not: null }, platformPostId: { not: null } },
+            _min: { publishedAt: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const planPeriodByPiece = new Map(pieces.map((p) => [p.id, p.item.plan.period]));
     const receivedBy = new Map(firstMedia.map((r) => [r.itemId, r._min.createdAt]));
     const sentBy = new Map(firstSent.map((r) => [r.itemId, r._min.sentForApprovalAt]));
     const approvedBy = new Map(firstApproved.map((r) => [r.itemId, r._min.createdAt]));
+    const publishedBy = new Map(firstPublished.map((r) => [r.itemId, r._min.publishedAt]));
 
     const inPeriod = items.flatMap((item) => {
       const dates = {
@@ -95,7 +106,10 @@ export class ContentStagesService {
       clientId,
       period,
       timeZone,
-      counts: countContentStages(inPeriod.map((r) => r.stage)),
+      counts: countContentStages(
+        inPeriod.map((r) => r.stage),
+        integrated ? inPeriod.map((r) => publishedBy.has(r.item.id)) : null
+      ),
       items: inPeriod.map(({ item, dates, stage, periodSource }) => ({
         id: item.id,
         title: item.title,
@@ -105,6 +119,7 @@ export class ContentStagesService {
         receivedAt: iso(dates.receivedAt),
         sentAt: iso(dates.sentAt),
         approvedAt: iso(dates.approvedAt),
+        publishedAt: integrated ? iso(publishedBy.get(item.id) ?? null) : null,
         currentStatus: status.get(item.id) ?? 'NOT_SENT',
       })),
     };

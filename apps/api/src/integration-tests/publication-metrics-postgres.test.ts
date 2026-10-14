@@ -5,8 +5,10 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { FastifyInstance } from 'fastify';
+import { dateInTimeZone } from '@zafira/domain';
 import { buildApp } from '../app.js';
 import { prisma } from '../lib/prisma.js';
+import { getOrganizationTimeZone } from '../modules/organization-config/organization-config.service.js';
 import { PublicationMetricsCollector } from '../modules/content/publication/publication-metrics.collector.js';
 import { PublicationSimulator } from '../modules/content/publication/publication-simulator.js';
 
@@ -211,5 +213,77 @@ test('Integration Gate: Metricas de publicacao (F8-5a/F8-5b) em PostgreSQL', { c
     assert.strictEqual(sim.count('getPostMetrics'), calls);
   });
 
-  /* F8-5B */
+  /* ------------------------------ F8-5b ------------------------------ */
+  const periodNow = dateInTimeZone(new Date(), await getOrganizationTimeZone(orgA.id))!.slice(0, 7);
+
+  await t.test('b1. API de metricas: historico com capturedAt x fetchedAt, sem next_sync_eta', async () => {
+    const r = await A(memberA, 'GET', `/content/publications/${P1.pubId}/metrics`);
+    assert.strictEqual(r.statusCode, 200, r.body);
+    const m = r.json();
+    assert.strictEqual(m.status, 'STOPPED', 'janela de 7 dias encerrada, ultima coleta preservada');
+    assert.strictEqual(m.latest.capturedAt, H(70).toISOString());
+    assert.strictEqual(m.latest.fetchedAt, H(72).toISOString());
+    assert.deepStrictEqual(m.history.map((h: any) => h.capturedAt), [H(70).toISOString(), H(2).toISOString()]);
+    assert.strictEqual(m.latest.reach, 150);
+    assert.ok(!r.body.includes('next_sync') && !r.body.includes('nextSync'), 'estimativa movel do provedor nunca exposta');
+    const list = (await A(memberA, 'GET', `/content/items/${P1.itemId}/publications`)).json();
+    assert.strictEqual(list[0].metrics.status, 'STOPPED');
+    assert.strictEqual(list[0].metrics.lastCapturedAt, H(70).toISOString());
+  });
+
+  await t.test('b2. Acesso: carteira, organizacao e permissao (Org B e fora da carteira: 404)', async () => {
+    assert.strictEqual((await A(outsiderA, 'GET', `/content/publications/${P1.pubId}/metrics`)).statusCode, 404);
+    assert.strictEqual((await call(adminB, orgB.id, 'GET', `/content/publications/${P1.pubId}/metrics`)).statusCode, 404);
+    assert.strictEqual((await A(memberA, 'GET', `/content/publications/${randomUUID()}/metrics`)).statusCode, 404);
+    assert.strictEqual((await app.inject({ method: 'GET', url: `/content/publications/${P1.pubId}/metrics` })).statusCode, 401);
+  });
+
+  let P2 = { itemId: '', pubId: '', remoteId: '' };
+  await t.test('b3. Publicado sem coleta: aguardando, sem numero; depois indisponivel e erro preservados', async () => {
+    P2 = await publishedPublication('Segunda');
+    await markPublished(P2.pubId, P2.remoteId, T0);
+    let m = (await A(memberA, 'GET', `/content/publications/${P2.pubId}/metrics`)).json();
+    assert.deepStrictEqual([m.status, m.latest, m.history, m.lastCheckedAt], ['AWAITING_COLLECTION', null, [], null]);
+    sim.metricsUnavailable = 'not_supported';
+    await collector.collectDue({ now: H(1) });
+    m = (await A(memberA, 'GET', `/content/publications/${P2.pubId}/metrics`)).json();
+    assert.deepStrictEqual([m.status, m.latest, m.lastOutcome], ['UNAVAILABLE', null, 'UNAVAILABLE']);
+    sim.metricsUnavailable = null;
+    sim.metricsErrorNext = 1;
+    await collector.collectDue({ now: H(3) });
+    m = (await A(memberA, 'GET', `/content/publications/${P2.pubId}/metrics`)).json();
+    assert.deepStrictEqual([m.status, m.latest, m.lastCheckedAt], ['ERROR', null, H(3).toISOString()]);
+  });
+
+  let P4 = '';
+  await t.test('b4. Publicacao nao confirmada: sem metricas', async () => {
+    const itemId = await approvedItem('Pendente');
+    const r = await A(managerA, 'POST', `/content/items/${itemId}/publications`, { socialAccountId: IG, scheduledAt: at(40) });
+    assert.strictEqual(r.statusCode, 201, r.body);
+    P4 = r.json().id;
+    assert.strictEqual(r.json().metrics.status, 'NOT_PUBLISHED');
+    assert.strictEqual((await A(memberA, 'GET', `/content/publications/${P4}/metrics`)).json().status, 'NOT_PUBLISHED');
+  });
+
+  await t.test('b5. Contador Publicados: indisponivel com o envio desligado; com envio ativo, so confirmadas', async () => {
+    const url = `/clients/${c1.id}/deliverables/content-stages?period=${periodNow}`;
+    const off = await A(memberA, 'GET', url);
+    assert.strictEqual(off.statusCode, 200, off.body);
+    assert.strictEqual(off.json().counts.published, null);
+    assert.strictEqual(off.json().counts.publishedSource, 'NOT_INTEGRATED');
+    assert.ok(off.json().items.every((i: any) => i.publishedAt === null));
+    assert.strictEqual(off.json().counts.approved, 3);
+    process.env.PUBLICATION_DISPATCH_ENABLED = 'true'; // so a leitura do contador; o agendador nao roda em testes
+    try {
+      const on = (await A(memberA, 'GET', url)).json();
+      assert.strictEqual(on.counts.publishedSource, 'CONFIRMED_PUBLICATION');
+      assert.strictEqual(on.counts.published, 2, 'duas confirmadas; a pendente nao conta');
+      assert.strictEqual(on.items.find((i: any) => i.id === P1.itemId).publishedAt, T0.toISOString());
+      await prisma.contentPublication.update({ where: { id: P4 }, data: { state: 'AMBIGUOUS' } });
+      assert.strictEqual((await A(memberA, 'GET', url)).json().counts.published, 2, 'AMBIGUOUS nunca conta como publicado');
+    } finally {
+      delete process.env.PUBLICATION_DISPATCH_ENABLED;
+    }
+    assert.strictEqual((await call(adminB, orgB.id, 'GET', url)).statusCode, 404);
+  });
 });

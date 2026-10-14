@@ -93,6 +93,8 @@ export interface ContentStageItem {
   receivedAt: string | null;
   sentAt: string | null;
   approvedAt: string | null;
+  /** F8-5b: primeira publicacao confirmada (null sem publicacao ou com o envio desligado). */
+  publishedAt: string | null;
   /** Situacao da versao atual (ex.: nova versao em preparacao depois de aprovada). */
   currentStatus: 'NOT_SENT' | 'AWAITING_CLIENT' | 'APPROVED' | 'CHANGES_REQUESTED' | 'LINK_EXPIRED' | 'LINK_REVOKED';
 }
@@ -105,8 +107,9 @@ export interface ContentStagesResponse {
     received: number;
     sent: number;
     approved: number;
-    published: null;
-    publishedSource: 'NOT_INTEGRATED';
+    /** F8-5b (D-F85-2): so publicacao confirmada; null (nunca 0) com o envio desligado no ambiente. */
+    published: number | null;
+    publishedSource: 'NOT_INTEGRATED' | 'CONFIRMED_PUBLICATION';
   };
   items: ContentStageItem[];
 }

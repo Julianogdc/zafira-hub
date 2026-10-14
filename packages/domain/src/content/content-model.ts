@@ -247,7 +247,7 @@ export function validateApprovalInput(input: {
 /* ==========================================================================
    F8-3 (DEC-F8-007) - Contador de Entregas por estagio, derivado dos registros reais.
    Unidade: o conteudo (uma peca), independentemente de versoes, links ou reenvios.
-   Publicacao: sem fonte confiavel nesta fatia -> sempre indisponivel (null), nunca zero.
+   Publicacao: F8-5b (DEC-F8-029) conta so publicacao confirmada; sem publicacao ativa no ambiente -> null, nunca zero.
    ========================================================================== */
 
 export const CONTENT_STAGES = ['RECEIVED', 'SENT', 'APPROVED'] as const;
@@ -286,24 +286,34 @@ export function contentPeriodOf(
   return day ? { period: day.slice(0, 7), source: 'FIRST_FILE' } : null;
 }
 
+export type PublishedSource = 'NOT_INTEGRATED' | 'CONFIRMED_PUBLICATION';
+
 export interface ContentStageCounts {
   received: number;
   sent: number;
   approved: number;
-  /** Sem confirmacao confiavel de publicacao (F8-4/F8-5): sempre null, nunca 0. */
-  published: null;
-  publishedSource: 'NOT_INTEGRATED';
+  /**
+   * F8-5b (DEC-F8-029, D-F85-2): conteudos com publicacao CONFIRMADA (publishedAt + platformPostId).
+   * Sem publicacao ativa no ambiente (envio desligado): null, nunca 0.
+   */
+  published: number | null;
+  publishedSource: PublishedSource;
 }
 
-/** Contagem cumulativa por estagio alcancado: recebidos >= enviados >= aprovados. */
-export function countContentStages(stages: readonly (ContentStage | null)[]): ContentStageCounts {
+/**
+ * Contagem cumulativa por estagio alcancado: recebidos >= enviados >= aprovados.
+ * `publishedFlags` (um por conteudo, na mesma ordem) so e informado quando a publicacao esta ativa no ambiente;
+ * sem ele, publicados fica indisponivel. Publicado so conta conteudo aprovado (uma peca por conteudo).
+ */
+export function countContentStages(stages: readonly (ContentStage | null)[], publishedFlags?: readonly boolean[] | null): ContentStageCounts {
   const rank = (s: ContentStage | null) => (s ? CONTENT_STAGES.indexOf(s) + 1 : 0);
+  const integrated = Array.isArray(publishedFlags);
   return {
     received: stages.filter((s) => rank(s) >= 1).length,
     sent: stages.filter((s) => rank(s) >= 2).length,
     approved: stages.filter((s) => rank(s) >= 3).length,
-    published: null,
-    publishedSource: 'NOT_INTEGRATED',
+    published: integrated ? stages.filter((s, i) => rank(s) >= 3 && publishedFlags![i] === true).length : null,
+    publishedSource: integrated ? 'CONFIRMED_PUBLICATION' : 'NOT_INTEGRATED',
   };
 }
 
