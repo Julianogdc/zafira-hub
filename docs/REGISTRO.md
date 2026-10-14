@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — Aceite da F8-4a registrado e plano da F8-4b (DEC-F8-026) — Claude
+- AUTORIZAÇÃO: DEC-F8-026 — somente análise e documentação.
+- ACEITE: F8-4a aceita definitivamente (código `b8bc5a5`, CI 5/5 run 38561948692). P35 e P36 abertas.
+- ANÁLISE: detalhe do conteúdo (`ConteudoDetalhe.tsx`: painéis Dados, Arquivos, Prévia, Aprovação, Versões, Histórico; componentes do DS e `Banner`); `useContentCapabilities` sem `content.schedule`; fuso da organização disponível; API da F8-4a pronta, faltando leitura de contas elegíveis e da situação do envio; listagem de contas do cliente atual chama o BrightBean (inadequada); **telas legadas** `/conteudos` e `/clientes/:id/conteudo/:postId` com modais que chamam rotas já bloqueadas (410). Commit de documentação com `[skip ci]`.
+- PLANO (`docs/propostas/F8-4b_PLANO_EXECUCAO.md`): painel "Publicação no Instagram" no detalhe do conteúdo, abaixo da aprovação; conta Instagram vinculada; data e hora no fuso da organização com deslocamento explícito e mínimo de 5 min; acompanhamento com rótulos por estado e ações só antes de `PUBLISHING`; aviso honesto de envio desligado; MEMBER só acompanha; 390 px. API só de leitura (`publication-targets`, `publication-settings`) e capacidade `content.schedule`; telas legadas só leitura com orientação. Microetapas F8-4b.1 a F8-4b.4 com uma rodada de CI. Decisões D-F84B-1 a D-F84B-4.
+- BASELINE DE CÓDIGO: inalterada — `b8bc5a5` no público (espelho `fc4973d`).
+- STATUS: **F8-4a aceita**; F8-4b **planejada, não autorizada**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial implementar a F8-4b sem DEC, ligar o despachante, publicar, Facebook, VPS e produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / plano da F8-4b (interno e público).
+
+### DEC-F8-026 — Aceite técnico definitivo da F8-4a e preparação da F8-4b (somente análise) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar a F8-4a e preparar a fatia de telas da F8-4.
+- Decisão: (1) **Aceite técnico definitivo da F8-4a**, com evidências: baseline de código `b8bc5a5`; governança `d8c69d6` (DEC-F8-025); CI oficial run 38561948692 (https://github.com/Julianogdc/zafira-hub/actions/runs/38561948692), 5/5. **P35 e P36 permanecem abertas.** (2) **Autorizada somente a preparação da F8-4b:** registrar o aceite; atualizar ESTADO, REGISTRO e MAPA; analisar telas, componentes, permissões e fluxos existentes; definir como o agendamento aparece no fluxo do conteúdo aprovado; preservar a identidade visual e os componentes oficiais; apresentar as microetapas antes de implementar. (3) Proibido: implementar telas, ligar o despachante real, publicar, VPS/produção, Facebook; P35 e P36 seguem abertas.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/F8-4b_PLANO_EXECUCAO.md`).
+- Revisão: na autorização da F8-4b.
+
 ### 2026-10-14 — Espelho das imagens-base no GHCR e CI oficial 5/5 da F8-4a (DEC-F8-025) — Claude
 - AUTORIZAÇÃO: DEC-F8-025.
 - DIGESTS DE ORIGEM: obtidos por `HEAD` (sem baixar imagem) no Docker Hub e no registro público da Amazon — **idênticos** nos dois.
