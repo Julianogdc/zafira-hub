@@ -1,5 +1,6 @@
 import { acquireLease, releaseLease } from '../../../lib/scheduler-lease.js';
 import { PublicationDispatcher, publicationDispatcher } from './publication-dispatcher.js';
+import { PublicationMetricsCollector, publicationMetricsCollector } from './publication-metrics.collector.js';
 
 /**
  * F8-4a (DEC-F8-023) - Ciclo do despachante de publicacoes. DESLIGADO por padrao:
@@ -19,7 +20,8 @@ export class PublicationScheduler {
   constructor(
     private readonly dispatcher: PublicationDispatcher = publicationDispatcher,
     private readonly env: NodeJS.ProcessEnv = process.env,
-    private logger: Logger = console as unknown as Logger
+    private logger: Logger = console as unknown as Logger,
+    private readonly metrics: PublicationMetricsCollector = publicationMetricsCollector
   ) {}
 
   start(logger?: Logger) {
@@ -31,7 +33,7 @@ export class PublicationScheduler {
     const everyMs = publicationDispatchIntervalSeconds(this.env) * 1000;
     this.timer = setInterval(() => void this.tick(), everyMs);
     this.timer.unref?.();
-    this.logger.info({ enabled: true, everyMs }, '[Publication] despachante iniciado');
+    this.logger.info({ enabled: true, everyMs, metrics: this.metrics.isEnabled() }, '[Publication] despachante iniciado');
   }
 
   stop() {
@@ -46,6 +48,8 @@ export class PublicationScheduler {
     try {
       await this.dispatcher.dispatchDue({ limit: 20 });
       await this.dispatcher.reconcileDue({ limit: 50 });
+      // F8-5a: coletor de metricas, desligado por padrao (PUBLICATION_METRICS_ENABLED); somente leitura
+      if (this.metrics.isEnabled()) await this.metrics.collectDue({ limit: 20 });
     } catch (error) {
       this.logger.error({ error: (error as Error).message }, '[Publication] falha no ciclo de despacho');
     } finally {

@@ -19,6 +19,14 @@ export interface RemotePost {
   publishError: string | null;
 }
 
+/** F8-5a (DEC-F8-029): resposta bruta normalizada so no dominio (normalizePostMetrics). next_sync_eta e descartado. */
+export interface RemotePostMetrics {
+  analyticsAvailable: boolean;
+  unavailableReason: string | null;
+  capturedAt: string | null;
+  tiles: { key: string; kind: string | null; value: unknown }[];
+}
+
 export interface RemoteAccount {
   id: string;
   platform: string;
@@ -35,6 +43,8 @@ export interface PublicationGateway {
   schedule(id: string, scheduledAtIso: string): Promise<RemotePost>;
   reschedule(id: string, scheduledAtIso: string): Promise<RemotePost>;
   cancel(id: string): Promise<void>;
+  /** F8-5a: metricas do post; null quando o provedor nao encontra o post. Somente leitura. */
+  getPostMetrics(id: string): Promise<RemotePostMetrics | null>;
 }
 
 export type GatewayErrorKind = 'TIMEOUT' | 'CONFLICT' | 'INVALID' | 'RATE_LIMIT' | 'AUTH' | 'NOT_FOUND' | 'SERVER';
@@ -85,6 +95,26 @@ export function mapRawPost(raw: RawPost): RemotePost {
     platformPostId: child.platform_post_id || null,
     permalink: child.permalink_url || null,
     publishError: child.publish_error ? String(child.publish_error).slice(0, 300) : null,
+  };
+}
+
+type RawMetrics = {
+  platform_posts?: {
+    analytics_available?: boolean;
+    unavailable_reason?: string | null;
+    captured_at?: string | null;
+    metric_tiles?: { key?: string; kind?: string | null; value?: unknown }[];
+  }[];
+};
+
+export function mapRawMetrics(raw: RawMetrics): RemotePostMetrics {
+  const child = raw.platform_posts?.[0];
+  if (!child) return { analyticsAvailable: false, unavailableReason: 'no_platform_post', capturedAt: null, tiles: [] };
+  return {
+    analyticsAvailable: child.analytics_available === true,
+    unavailableReason: child.unavailable_reason ? String(child.unavailable_reason).slice(0, 200) : null,
+    capturedAt: child.captured_at ?? null,
+    tiles: (child.metric_tiles ?? []).filter((t) => typeof t.key === 'string').map((t) => ({ key: String(t.key), kind: t.kind ?? null, value: t.value })),
   };
 }
 
@@ -140,6 +170,10 @@ export class BrightBeanPublicationGateway implements PublicationGateway {
   }
   async cancel(id: string) {
     await this.call(() => this.client.cancelPost(id));
+  }
+  async getPostMetrics(id: string) {
+    const raw = await this.call(() => this.client.getPostAnalytics(id));
+    return raw ? mapRawMetrics(raw as unknown as RawMetrics) : null;
   }
 }
 

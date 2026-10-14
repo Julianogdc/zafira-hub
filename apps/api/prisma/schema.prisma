@@ -2034,6 +2034,10 @@ model ContentPublication {
   failureMessage    String?
   cancelRequestedAt DateTime?
   lastSyncedAt      DateTime?
+  // F8-5a (DEC-F8-029): ultima consulta de metricas pelo Hub (fetchedAt) e o resultado dela; a coleta do provedor fica em content_publication_metrics
+  metricsCheckedAt  DateTime?
+  metricsLastOutcome String?
+  metricsLastReason String?
   createdByUserId   String?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -2043,11 +2047,37 @@ model ContentPublication {
   item         ContentItem         @relation(fields: [itemId], references: [id], onDelete: Cascade)
   version      ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
   outbox       PublicationOutbox[]
+  metrics      ContentPublicationMetric[]
 
   @@unique([organizationId, id])
   @@index([organizationId, itemId])
   @@index([state])
   @@map("content_publications")
+}
+
+/// F8-5a (DEC-F8-029, D-F85-1): uma linha por COLETA do provedor (capturedAt), somente acrescentar.
+/// Consulta sem captured_at nao grava nada; a mesma coleta nao duplica (unico por publicacao + capturedAt).
+model ContentPublicationMetric {
+  id             String   @id @default(uuid())
+  organizationId String
+  publicationId  String
+  capturedAt     DateTime // quando o provedor coletou
+  fetchedAt      DateTime // quando o Hub consultou
+  reach          Int?
+  views          Int?
+  likes          Int?
+  comments       Int?
+  saves          Int?
+  shares         Int?
+  engagementPct  Float?
+  metricKinds    Json?
+  createdAt      DateTime @default(now())
+
+  publication ContentPublication @relation(fields: [organizationId, publicationId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([publicationId, capturedAt])
+  @@index([organizationId, publicationId])
+  @@map("content_publication_metrics")
 }
 
 model PublicationOutbox {

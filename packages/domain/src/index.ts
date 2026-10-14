@@ -8,3 +8,4 @@ export * from './calendar/calendar-model.js';
 export * from './automation/automation-model.js';
 export * from './content/content-model.js';
 export * from './content/publication-model.js';
+export * from './content/publication-metrics.js';

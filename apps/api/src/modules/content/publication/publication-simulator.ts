@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { GatewayError, type PublicationGateway, type RemoteAccount, type RemotePost } from './publication-gateway.js';
+import { GatewayError, type PublicationGateway, type RemoteAccount, type RemotePost, type RemotePostMetrics } from './publication-gateway.js';
 
 /**
  * F8-4a (DEC-F8-023) - Simulador do BrightBean para testes (sem rede, sem conta real).
@@ -44,6 +44,10 @@ export class PublicationSimulator implements PublicationGateway {
   transientPublishFailures = 0; // falhas transitorias antes de publicar (retentativas do provedor, max. 3)
   permanentPublishFailure = false;
   holdInPublishing = false;
+  // F8-5a: metricas. Sem coleta registrada o provedor devolve zeros com captured_at nulo (T30).
+  readonly metricsCollections = new Map<string, { capturedAt: string; values: Record<string, number> }[]>();
+  metricsUnavailable: string | null = null; // analytics_available false com este motivo
+  metricsErrorNext = 0; // erros temporarios na leitura de metricas
 
   constructor(opts: SimulatorOptions = {}) {
     this.permissions = opts.permissions ?? ['create_posts', 'upload_media', 'publish_directly', 'view_analytics'];
@@ -161,6 +165,31 @@ export class PublicationSimulator implements PublicationGateway {
     if (p.status !== 'scheduled') throw new GatewayError('CONFLICT', 'No scheduled platform posts to cancel.');
     p.status = 'draft';
     p.scheduledAt = null;
+  }
+
+  /** F8-5a: registra uma coleta do provedor para o post (o que a rotina horaria do BrightBean faria). */
+  collectMetrics(postId: string, capturedAt: Date, values: Record<string, number>) {
+    const list = this.metricsCollections.get(postId) ?? [];
+    list.push({ capturedAt: capturedAt.toISOString(), values });
+    this.metricsCollections.set(postId, list);
+  }
+
+  async getPostMetrics(id: string): Promise<RemotePostMetrics | null> {
+    this.gate('getPostMetrics', { id });
+    if (this.metricsErrorNext > 0) {
+      this.metricsErrorNext -= 1;
+      throw new GatewayError('SERVER', 'Provedor respondeu 503.');
+    }
+    const p = this.posts.get(id);
+    if (!p) return null;
+    if (this.metricsUnavailable) return { analyticsAvailable: false, unavailableReason: this.metricsUnavailable, capturedAt: null, tiles: [] };
+    const last = this.metricsCollections.get(id)?.at(-1);
+    const keys = ['reach', 'views', 'likes', 'comments', 'saves', 'shares'];
+    const tiles = [
+      ...keys.map((key) => ({ key, kind: 'count', value: last?.values[key] ?? 0 })),
+      { key: 'engagement', kind: 'percent', value: last?.values.engagement ?? 0 },
+    ];
+    return { analyticsAvailable: true, unavailableReason: null, capturedAt: last?.capturedAt ?? null, tiles };
   }
 
   /** Avanca o "publicador" do provedor ate `now` (equivale aos ciclos de ~15 s); opcionalmente so um post. */
