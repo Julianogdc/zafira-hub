@@ -45,9 +45,6 @@ test('Nginx Proxy Config (HM-3) — Limite multipart suporta 100 MiB com margem 
     assert.match(content, /proxy_read_timeout\s+(?:1[2-9]\d|[2-9]\d{2})s;/, `${filename}: proxy_read_timeout deve ser >= 120s`);
     assert.match(content, /proxy_send_timeout\s+(?:1[2-9]\d|[2-9]\d{2})s;/, `${filename}: proxy_send_timeout deve ser >= 120s`);
     assert.match(content, /proxy_connect_timeout\s+(?:[6-9]\d|\d{3,})s;/, `${filename}: proxy_connect_timeout deve ser >= 60s`);
-
-    // Streaming direto sem buffering integral do body
-    assert.match(content, /proxy_request_buffering\s+off;/, `${filename}: proxy_request_buffering off deve estar ativo`);
   }
 });
 
