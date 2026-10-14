@@ -36,6 +36,30 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — F8-5p implementada: correções pré-piloto P35, P38, P39 e P37 (DEC-F8-031) — Claude
+- AUTORIZAÇÃO: DEC-F8-031 (D-PF8-1 a D-PF8-7 com ajustes), microetapas em sequência; F8-5e proibida.
+- F8-5p.1 P35 (`4990e5b`, complementos `cf82a48` e `0e795d6`): leitura de largura/altura de JPEG (SOF), PNG (IHDR) e WebP (VP8/VP8L/VP8X) no domínio, nula se truncada ou ilegível; **migration `20261014020000_f8_5p_media_dimensions`** (colunas `widthPx`/`heightPx`, CHECK positivo, gatilho: só nulo → valor); gravação no upload; arquivos antigos calculados uma vez; nova versão copia as dimensões; aviso já no upload (um por tipo); agendamento recusado acima de 30 MP (`MEDIA_TOO_MANY_PIXELS`) ou ilegível (`MEDIA_DIMENSIONS_UNKNOWN`); 30 MP exatos aceitos.
+- F8-5p.2 P38 (`24bca00`): **migration `20261014030000_f8_5p_metrics_retry`** (`metricsRetryAt`, `metricsErrorCount`); erro transitório repete em 15, 30 e 60 min sem consumir o ponto, depois consome com o erro preservado; 429 espera o retry_after (piso 60 s, teto 1 h) sem contar erro; reserva por troca condicional (consulta simultânea vira uma só); coletas continuam sem duplicar.
+- F8-5p.3 P39 (`2e6d4d0`): política do piloto (`PUBLICATION_PILOT_ORGANIZATION_IDS`, `PUBLICATION_PILOT_FORMATS`) no domínio; barreira **antes de montar o gateway** sempre estrita (ausente, vazia ou inválida bloqueia); barreira no pedido e no reagendamento quando há política ou envio ligado (modo de simulação e Browser Gates preservados); vínculo cliente + conta + organização reconferido antes do envio (`ACCOUNT_UNLINKED`); cancelar sempre permitido; evento `PUBLICATION_BLOCKED`; configurações mostram só a situação da própria organização; `docs/operations/publication-pilot-controls.md` (homologação x produção).
+- F8-5p.4 P37 (`cf82a48`): auditoria de referências; removidos `CompositorZafiraModal`, `EditarAgendamentoModal` e 4 métodos de escrita (1.302 linhas); preservados vínculo/desvínculo, leitura e rotas 410; novo aviso de publicação (limites técnicos; nem todos os formatos homologados com publicação real); teste que impede chamadas às escritas legadas; rótulos da trilha de publicação no histórico.
+- BROWSER GATE: cenário **O** (dimensões exibidas; aviso acima de 30 MP no upload; API `MEDIA_TOO_MANY_PIXELS`; novo aviso; política em modo de simulação sem expor outras organizações); espera do aviso específico corrigida em `72ae027`.
+- TESTES: domínio 123/123; API 829/829; web 99/99; PostgreSQL 195/195 (novos `media-dimensions-postgres`, `publication-pilot-postgres`; `publication-metrics-postgres` revisto).
+- CI: 38590932776 falhou (fixture PNG/WebP falsa do teste antigo `content-postgres`, corrigida em `0e795d6`); 38591999820 falhou (cenário O leu a lista de avisos antes do upload terminar, corrigido em `72ae027`); 38594989571 tentativa 1 falhou antes dos gates (corrida do PostgreSQL do CI, P40); **tentativa 2 (reexecução só do job, autorizada) 5/5** (https://github.com/Julianogdc/zafira-hub/actions/runs/38594989571): F8 125/0, cenário O 6/6.
+- BASELINE DE CÓDIGO: `72ae027` no público (espelhos `5cbb2a0`, `e5ac0da`, `e9e822a`, `973cc28`, `655dcd3`, `7faa39f` no interno, paridade conferida).
+- STATUS: **pendente de aceite técnico** da Direção. Fase 8 não encerrada.
+- PENDÊNCIAS: P35, P37, P38 e P39 resolvidas; **P40 nova** (corrida do PostgreSQL no CI, com proposta); P33, P34 e RS1–RS7 mantidas.
+- LIMITES: retirar da política não recolhe posts já agendados no provedor (só o cancelamento); o Browser Gate testa o modo de simulação (bloqueio real coberto em PostgreSQL); 30 MP exatos não verificados no provedor.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / controles de publicação (interno e público).
+
+### DEC-F8-031 — F8-5p: correções pré-piloto (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: corrigir P35, P38, P39 e P37 antes do piloto real, conforme `docs/propostas/PORTAO_F8_PLANO.md`.
+- Decisão: D-PF8-1 a D-PF8-7 aprovadas, com ajustes: P35 com extração JPEG/PNG/WebP, persistência protegida, limite de 30 MP, arquivos antigos, bloqueio de ilegível e aviso no upload; P38 com repetições 15/30/60 min sem perder a janela, 429 preservado, sem consultas simultâneas nem duplicações; P39 com barreiras no pedido e antes do envio (vínculo, organizações e formatos autorizados; configuração ausente, inválida ou vazia bloqueia; idempotência, isolamento e auditoria; compatível com simulação e Browser Gates; controles de homologação e produção documentados separadamente); P37 com auditoria antes de remover, preservando vínculo, leitura e rotas 410, e aviso explícito de formatos sem publicação real. Autorizações posteriores: correção pontual do cenário O com nova rodada; uma reexecução só do job de homologação no run 38594989571 e registro da corrida do PostgreSQL como pendência de CI. Proibido: F8-5e, publicação, despachante ou coletor reais, contas reais, chaves, VPS, EasyPanel, DNS, produção, H1–H9 e Fase 9.
+- Alternativas consideradas: chave de emergência no banco (D-PF8-3, adiada); política só no envio (rejeitada: o pedido também é barrado quando há política).
+- Impacto: domínio, banco (2 migrations), API, web, Browser Gate, documentação operacional.
+- Revisão: no aceite técnico da F8-5p.
+
 ### 2026-10-14 — Aceite da F8-5a a F8-5d e plano do Portão F8 / F8-5e (DEC-F8-030) — Claude
 - AUTORIZAÇÃO: DEC-F8-030 — somente análise e documentação.
 - ACEITE: F8-5a a F8-5d aceitas definitivamente (DEC-F8-029; código `ba0d5e7`; CI 5/5 run 38583200208). **Não encerra a Fase 8**: falta o Portão F8.
