@@ -36,6 +36,32 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — Aceite da F8-5a a F8-5d e plano do Portão F8 / F8-5e (DEC-F8-030) — Claude
+- AUTORIZAÇÃO: DEC-F8-030 — somente análise e documentação.
+- ACEITE: F8-5a a F8-5d aceitas definitivamente (DEC-F8-029; código `ba0d5e7`; CI 5/5 run 38583200208). **Não encerra a Fase 8**: falta o Portão F8.
+- AUDITORIA (`docs/propostas/PORTAO_F8_PLANO.md` §1–§2):
+  - **P35:** `content_media` sem largura/altura; uma imagem de 36 MP aprovada falharia só no despachante. Proposta C-P35: leitura de dimensões (JPEG/PNG/WebP), colunas preenchidas só de nulo para valor, recusa acima de 30 MP e de dimensão ilegível. Bloqueia o piloto.
+  - **P38:** confirmado que o erro grava `metricsCheckedAt` e consome o ponto. Proposta C-P38: até 3 repetições (15/30/60 min) antes de consumir. Bloqueia ligar o coletor no piloto.
+  - **P37:** 2 modais e 4 métodos legados sem chamador; aviso de compatibilidade contraditório. Proposta C-P37: remoção e texto derivado das regras. Não bloqueia.
+  - **Achados novos (P39):** A1 sem nova conferência do vínculo da conta no envio; A2 sem lista de organizações do piloto; A3 sem restrição de formatos. Proposta C-CTL.
+  - A4: desligar exige reinício, aceito como procedimento.
+  - A5: credencial só pelo script de provisionamento, adequado.
+- REVISÃO (§3): **P33** bloqueia em parte (revogar a chave temporária e criar a do piloto; limpeza dos rascunhos recomendada). **P34** não bloqueia (leitura GET opcional antes ou logo após 15/10 00:25 UTC). RS1 e RS5 não bloqueiam com A3; RS2, RS4 e RS6 ficam como ressalvas; RS3 é objetivo do piloto (exige C-P38).
+- PLANO (§4–§7): pré-requisitos P1–P6 (homologação com H2 indispensável ao envio de arquivos, correções F8-5p, chave do piloto, dados sintéticos, conteúdo de teste, autorização específica); isolamento; teto de 2 publicações (Story, depois Feed); roteiro, evidências, critérios de interrupção e rollback; critério de fechamento do Portão F8; decisões D-PF8-1 a D-PF8-7.
+- BASELINE DE CÓDIGO: inalterada — `ba0d5e7` no público (espelho `25b3efc`).
+- STATUS: **F8-5a a F8-5d aceitas**; Portão F8 aberto; F8-5p e F8-5e **planejadas, não autorizadas**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial implementar correções, piloto, conectar contas, despachante ou coletor, VPS, credenciais e produção.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / plano do Portão F8 (interno e público).
+
+### DEC-F8-030 — Aceite técnico definitivo da F8-5a a F8-5d e planejamento do Portão F8 (somente análise) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar tecnicamente a F8-5a a F8-5d e preparar o Portão F8 sem confundir isso com o encerramento da Fase 8.
+- Decisão: (1) **Aceite técnico definitivo da F8-5a a F8-5d** (DEC-F8-029; CI 5/5 run 38583200208). (2) Autorizados somente análise e planejamento: registrar o aceite; auditar P35, P38 e P37 com propostas, testes e critérios de aceite; revisar P33, P34 e RS1–RS7 (o que bloqueia o piloto e o que fica como ressalva); plano detalhado do Portão F8 / F8-5e (pré-requisitos, isolamento, controle de publicação, evidências e rollback). (3) A conclusão técnica da F8-5a a F8-5d **não encerra a Fase 8**. (4) Proibido: implementar correções, iniciar o piloto, conectar contas, ativar despachantes ou coletores, alterar VPS, credenciais ou produção.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/PORTAO_F8_PLANO.md`).
+- Revisão: na decisão do plano do Portão F8.
+
 ### 2026-10-14 — F8-5a a F8-5d implementadas: métricas orgânicas, Publicados e desempenho (DEC-F8-029) — Claude
 - AUTORIZAÇÃO: DEC-F8-029 (D-F85-1 a D-F85-7), microetapas F8-5a a F8-5d em sequência; F8-5e proibida.
 - F8-5a (`4b36f2a`): domínio `publication-metrics.ts` (normalização; **`captured_at` nulo = sem dado**, mesmo com zeros; indicador ausente, negativo ou de tipo inesperado = null; janelas 1 h, 3 h, 6 h, 24 h, 72 h, 7 d e Story até 26 h; situação exibida); **migration `20261014010000_f8_5a_publication_metrics`**: tabela `content_publication_metrics` (uma linha por coleta do provedor; `capturedAt` x `fetchedAt`; único por publicação + `capturedAt`; FK composta por organização; CHECK de não negativos; gatilho que só aceita publicação `PUBLISHED`; UPDATE bloqueado; DELETE só com a organização removida) e colunas `metricsCheckedAt`/`metricsLastOutcome`/`metricsLastReason` na publicação; `getPostMetrics` no gateway (descarta `next_sync_eta`) e no simulador (zeros com `captured_at` nulo, coletas, indisponível, erro); coletor no agendador existente, **desligado por padrão** (`PUBLICATION_METRICS_ENABLED=true` e despachante ligado), só nos pontos da janela, 429 interrompe o lote sem consumir o ponto, consulta sem coleta nova não grava.
