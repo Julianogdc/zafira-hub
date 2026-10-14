@@ -131,19 +131,31 @@ export async function contentRoutes(app: FastifyInstance) {
   route('GET', '/clients/:id/deliverables/content-stages', ['deliverables.view', 'content.view'], (ctx, r) =>
     contentStagesService.forClientPeriod(ctx, params(r).id, ContentStagesQuerySchema.parse(query(r)).period));
   // Arquivo servido pela API (autorizado por sessao/carteira); nunca URL publica do storage
-  route('GET', '/content/items/:id/media/:mediaId/file', 'content.view', async (ctx, r, reply) => {
-    const f = await service.openFile(ctx, params(r).id, params(r).mediaId);
-    reply
-      .header('Content-Type', f.mimeType)
-      .header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.filename)}`)
-      .header('Content-Length', f.sizeBytes)
-      .header('X-Content-Type-Options', 'nosniff')
-      .header('Cache-Control', 'private, no-store');
+  for (const prefix of ['', '/api']) {
+    app.get(
+      `${prefix}/content/items/:id/media/:mediaId/file`,
+      { preHandler: [authenticate, requirePermission('content.view')] },
+      async (request, reply) => {
+        const ctx = contextOf(request, reply);
+        if (!ctx) return;
+        try {
+          const f = await service.openFile(ctx, params(request).id, params(request).mediaId);
+          reply
+            .header('Content-Type', f.mimeType)
+            .header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.filename)}`)
+            .header('Content-Length', f.sizeBytes)
+            .header('X-Content-Type-Options', 'nosniff')
+            .header('Cache-Control', 'private, no-store');
 
-    if (f.cleanup) {
-      reply.raw.on('finish', () => { f.cleanup?.().catch(() => {}); });
-      reply.raw.on('close', () => { f.cleanup?.().catch(() => {}); });
-    }
-    return reply.send(f.stream);
-  });
+          if (f.cleanup) {
+            reply.raw.on('finish', () => { f.cleanup?.().catch(() => {}); });
+            reply.raw.on('close', () => { f.cleanup?.().catch(() => {}); });
+          }
+          return reply.send(f.stream);
+        } catch (error) {
+          return fail(error, reply);
+        }
+      }
+    );
+  }
 }

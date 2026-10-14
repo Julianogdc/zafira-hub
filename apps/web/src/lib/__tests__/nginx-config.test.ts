@@ -51,7 +51,8 @@ test('Nginx Proxy Config (HM-3) — Limite multipart suporta 100 MiB com margem 
 test('Nginx Proxy Config (HM-3) — Preservação de cabeçalhos, rotas e ausência de regressão', () => {
   const template = readFileSync(path.join(webRoot, 'nginx.conf.template'), 'utf8');
 
-  // Cabeçalhos de proxy preservados
+  // Cabeçalhos e protocolo de proxy preservados
+  assert.match(template, /proxy_http_version\s+1\.1;/);
   assert.match(template, /proxy_set_header\s+Host\s+\$host;/);
   assert.match(template, /proxy_set_header\s+X-Real-IP\s+\$remote_addr;/);
   assert.match(template, /proxy_set_header\s+X-Forwarded-For\s+\$proxy_add_x_forwarded_for;/);
