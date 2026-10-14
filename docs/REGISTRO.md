@@ -36,6 +36,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-HML-002 — Aceite técnico definitivo da HM-1 e planejamento da medição da VPS (H7) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar tecnicamente a HM-1 e preparar a medição de capacidade da VPS atual antes de qualquer decisão de topologia.
+- Decisão: (1) **Aceite técnico definitivo da HM-1 (H1/P22 e H3/P18)**, com evidências: baseline `ecfc392` (espelho `4c1e70e`); CI run 38615589824, 5/5 (https://github.com/Julianogdc/zafira-hub/actions/runs/38615589824); PostgreSQL 201/201 em duas execuções consecutivas no mesmo banco; Browser Gate F8 125/0; handoff `e50c1a2` (público) e `e78cf90` (interno). (2) **Autorizado somente o planejamento da medição de 7 dias da VPS (H7):** avaliar o script `scripts/infra/vps-capacity-snapshot.sh` (segurança e suficiência), definir comandos somente leitura, frequência, critérios de aceitação e alternativas de topologia; **sem executar comando na VPS**. (3) Proibido: acessar a VPS, criar cron jobs, instalar programas, alterar infraestrutura, HM-2 ou qualquer outra implementação, CI apenas por alteração documental, e expor dados de infraestrutura no repositório público.
+- Alternativas consideradas: —
+- Impacto: documentação (ESTADO e REGISTRO nos dois repositórios; plano H7 somente no interno).
+- Revisão: na decisão da Direção sobre o plano H7.
+
+### 2026-10-14 — Aceite da HM-1 registrado e plano de medição da VPS (H7) entregue (DEC-HML-002) — Claude
+- ACEITE: HM-1 aceita (DEC-HML-001; código `ecfc392`; CI 5/5 run 38615589824). P18 e P22 constam como resolvidas e aceitas. Antes do primeiro deploy real continua necessário rodar o `--check` do RBAC e ler a lista de remoções.
+- PLANO H7 (repositório interno (contém dados de infraestrutura; não espelhado)): (a) **script existente:** somente leitura, não imprime variáveis de ambiente, não escreve na VPS, carga baixa; saída contém dados de infraestrutura (tratar como interna); **insuficiente** para I/O, picos, OOM do kernel, reinícios e containers parados, redes e CPU em intervalo; (b) **complemento** somente leitura (`vmstat`, PSI, `/proc/meminfo`, processos por nome sem linha de comando, `docker ps -a`, reinícios e `OOMKilled`, redes, OOM no kernel), executado por entrada padrão sem criar arquivo na VPS; (c) **7 dias**, 3 amostras por dia mais picos (publicação do Postiz, backup, uso intenso) e uma linha de base; (d) **critérios** verde/amarelo/vermelho por RAM disponível, swap, load, iowait/PSI, disco, containers e steal, com cobertura mínima da medição; (e) **topologias:** B (novo projeto EasyPanel), C (Compose isolado; exige a rota HTTPS pelo proxy existente, hoje proibida de alterar), D (host dedicado) e A descartada; (f) guarda e comparação das amostras apenas no interno, com SHA-256; (g) 5 decisões D-H7-1 a D-H7-5.
+- BASELINE DE CÓDIGO: inalterada — `ecfc392` no público (espelho `4c1e70e`). Nenhum código nem workflow alterado; commits com `[skip ci]`.
+- STATUS: HM-1 **aceita**; plano H7 **entregue para revisão**; nada executado.
+- PENDÊNCIAS: H2 (HM-2), H4 a H9; P33, P34, P40 (acompanhamento) e RS1–RS7.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial acesso à VPS, cron, instalação, EasyPanel, DNS, buckets, credenciais, contratação, HM-2 a HM-6, piloto F8-5e, F9, despachante e coletor.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
 ### 2026-10-14 — HM-1 implementada: bootstrap RBAC (H1/P22) e repetibilidade dos testes PostgreSQL (H3/P18) (DEC-HML-001) — Claude
 - AUTORIZAÇÃO: DEC-HML-001 — exclusivamente a HM-1. Não executada nesta sessão: o planejamento de medição de capacidade da VPS (bloco interrompido e substituído).
 - H1/P22 — DIAGNÓSTICO: o bootstrap só fazia upsert; nunca removia padrões obsoletos. Em banco anterior à F6-IMP.7B o MEMBER mantinha `deliverables.complete`. CORREÇÃO (`111f92c`): módulo `modules/authorization/rbac-sync.ts` (plano puro + aplicação transacional serializável); acrescenta e remove padrões por papel; nunca remove catálogo (cascata apagaria exceções), nunca toca exceções individuais nem organizações; trava de padrões (nenhum papel vazio, todos no catálogo, MANAGER/MEMBER ⊆ ADMIN); `--check`/`--dry-run` somente leitura (saída 2 em divergência); relatório com contagem de exceções por código, sem dados pessoais; `docs/operations/rbac-bootstrap.md` e passo 8.1 no runbook interno.
