@@ -588,21 +588,40 @@ jobs:
             -e POSTGRES_DB=zafira_hub_21_staging \
             ghcr.io/julianogdc/base-postgres:16@sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
 
-          echo "Aguardando PostgreSQL ficar pronto (pg_isready)..."
-          for i in $(seq 1 30); do
-            if docker exec postgres-hml pg_isready -U postgres_hml -d zafira_hub_21_staging >/dev/null 2>&1; then
-              echo "PostgreSQL Staging está pronto!"
+          # P40 (DEC-F8-032): a imagem oficial sobe primeiro um servidor PROVISORIO so por socket Unix (para criar a base)
+          # e o desliga antes do definitivo. pg_isready pelo socket responde nessa fase e a checagem final caia no
+          # desligamento. Aqui a prontidao e conferida por TCP (o provisorio nao atende), com espera limitada e
+          # consulta efetiva na base definitiva, e so vale com tres respostas seguidas (servidor estavel).
+          echo "Aguardando PostgreSQL definitivo ficar pronto (TCP + consulta na base)..."
+          READY=0
+          OK_STREAK=0
+          for i in $(seq 1 90); do
+            if [ "$(docker inspect -f "{{.State.Running}}" postgres-hml 2>/dev/null)" != "true" ]; then
+              echo "FALHA: container postgres-hml não está em execução"
+              docker logs postgres-hml || true
+              exit 1
+            fi
+            DB_NAME=$(docker exec -e PGPASSWORD=hml_staging_dummy_pass_123 postgres-hml \
+              psql -h 127.0.0.1 -p 5432 -U postgres_hml -d zafira_hub_21_staging -t -A -c "SELECT current_database()" 2>/dev/null || true)
+            if [ "$DB_NAME" = "zafira_hub_21_staging" ]; then
+              OK_STREAK=$((OK_STREAK + 1))
+            else
+              OK_STREAK=0
+            fi
+            if [ "$OK_STREAK" -ge 3 ]; then
+              READY=1
+              echo "PostgreSQL Staging está pronto (TCP, base ${DB_NAME}, $OK_STREAK respostas seguidas)!"
               break
             fi
-            echo "Aguardando PostgreSQL... ($i/30)"
+            echo "Aguardando PostgreSQL... ($i/90)"
             sleep 1
           done
 
-          docker exec postgres-hml pg_isready -U postgres_hml -d zafira_hub_21_staging || {
-            echo "FALHA: PostgreSQL staging não respondeu ao pg_isready"
+          if [ "$READY" != "1" ]; then
+            echo "FALHA: PostgreSQL staging não respondeu por TCP com a base definitiva em 90 s"
             docker logs postgres-hml
             exit 1
-          }
+          fi
 
       - name: Validate Database Target Safety
         run: |
