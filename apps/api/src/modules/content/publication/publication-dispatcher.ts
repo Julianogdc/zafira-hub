@@ -1,7 +1,10 @@
 import { Prisma } from '@prisma/client';
 import {
+  checkPilotSend,
   draftIdempotencyKey,
   isPilotPlatform,
+  parsePilotPolicy,
+  type ContentFormat,
   mapRemoteState,
   mediaUploadIdempotencyKey,
   type PublicationState,
@@ -19,6 +22,13 @@ import { GatewayError, resolveBrightBeanGateway, type PublicationGateway, type R
  */
 
 export const publicationDispatchEnabled = (env: NodeJS.ProcessEnv = process.env) => env.PUBLICATION_DISPATCH_ENABLED === 'true';
+
+/** F8-5p.3 (DEC-F8-031, P39): politica do piloto (organizacoes e formatos); ausente, vazia ou invalida = nada e enviado. */
+export const publicationPilotPolicy = (env: NodeJS.ProcessEnv = process.env) =>
+  parsePilotPolicy({ organizationIds: env.PUBLICATION_PILOT_ORGANIZATION_IDS, formats: env.PUBLICATION_PILOT_FORMATS });
+
+/** Codigos das barreiras do piloto: bloqueiam o envio sem nunca tocar no provedor. */
+const BARRIER_CODES = new Set(['PILOT_POLICY_INVALID', 'PILOT_ORGANIZATION_NOT_AUTHORIZED', 'PILOT_FORMAT_NOT_AUTHORIZED', 'ACCOUNT_UNLINKED']);
 
 const CLAIM_LEASE_MS = 2 * 60_000;
 const MAX_ATTEMPTS = 8;
@@ -148,6 +158,8 @@ export class PublicationDispatcher {
     let error: string | null = null;
     let retryAfterS: number | undefined;
     try {
+      // F8-5p.3 (P39): barreiras ANTES de montar o gateway; cancelar segue sempre permitido (so reduz exposicao)
+      if (job.kind !== 'CANCEL') await this.assertSendAllowed(job.publicationId, job.organizationId);
       const gw = await this.gatewayFor(job.organizationId);
       if (job.kind === 'PUBLISH') await this.runPublish(job.publicationId, gw, now);
       else if (job.kind === 'RESCHEDULE') await this.runReschedule(job.publicationId, gw, now);
@@ -196,8 +208,40 @@ export class PublicationDispatcher {
     return new Stop('RETRY', 'UNEXPECTED', (e as Error)?.message ?? 'erro');
   }
 
+  /**
+   * F8-5p.3 (DEC-F8-031, P39): imediatamente antes do envio, reconfere a politica do piloto (organizacao e formato)
+   * e o vinculo ativo entre cliente, conta Instagram e organizacao. Qualquer falha bloqueia sem chamar o provedor.
+   */
+  private async assertSendAllowed(publicationId: string, organizationId: string) {
+    const p = await prisma.contentPublication.findUniqueOrThrow({
+      where: { id: publicationId },
+      select: { organizationId: true, clientId: true, socialAccountId: true, item: { select: { format: true } } },
+    });
+    if (p.organizationId !== organizationId) throw new Stop('FAILED', 'PILOT_ORGANIZATION_NOT_AUTHORIZED', 'Pedido e publicação de organizações diferentes.');
+    const blocked = checkPilotSend(publicationPilotPolicy(this.env), { organizationId: p.organizationId, format: p.item.format as ContentFormat });
+    if (blocked) throw new Stop('FAILED', blocked.code, blocked.message);
+    const link = await prisma.clientIntegration.findFirst({
+      where: { clientId: p.clientId, provider: 'BRIGHTBEAN', externalId: p.socialAccountId, client: { organizationId: p.organizationId } },
+      select: { metadata: true },
+    });
+    const platform = ((link?.metadata ?? {}) as Record<string, unknown>).platform;
+    if (!link || !isPilotPlatform(typeof platform === 'string' ? platform : '')) {
+      throw new Stop('FAILED', 'ACCOUNT_UNLINKED', 'A conta Instagram não está mais vinculada a este cliente: nada foi enviado.');
+    }
+  }
+
   private async failPublication(publicationId: string, kind: string, code: string, message: string) {
     const p = await prisma.contentPublication.findUniqueOrThrow({ where: { id: publicationId } });
+    if (BARRIER_CODES.has(code)) {
+      // barreira do piloto: nada foi enviado nesta tentativa; sem rascunho no provedor encerra como FAILED,
+      // com rascunho (nunca publica sozinho) mantem o estado e registra o motivo; sempre auditado no historico
+      await prisma.contentEvent.create({
+        data: { organizationId: p.organizationId, itemId: p.itemId, versionId: p.versionId, type: 'PUBLICATION_BLOCKED', data: { publicationId: p.id, kind, code } },
+      });
+      if (kind === 'PUBLISH' && !p.externalPostId) await this.setState(p.id, { state: 'FAILED', failureCode: code, failureMessage: safe(message) });
+      else await this.setState(p.id, { failureCode: code, failureMessage: safe(message) });
+      return;
+    }
     if (kind !== 'PUBLISH') {
       // reagendar/cancelar recusados: a publicacao segue no estado do provedor; registra o motivo
       await this.setState(p.id, { failureCode: code, failureMessage: safe(message) });

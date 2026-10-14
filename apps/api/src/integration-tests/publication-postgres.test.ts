@@ -99,7 +99,12 @@ test('Integration Gate: Publicacao pela versao aprovada (F8-4a) em PostgreSQL', 
   const pubOf = (id: string) => prisma.contentPublication.findUniqueOrThrow({ where: { id } });
 
   const sim = new PublicationSimulator({ accounts: [{ id: IG, platform: 'instagram_login', connectionStatus: 'connected', charLimit: 2200 }] });
-  const enabled = new PublicationDispatcher(async () => sim, () => resolveFileStorage(), { PUBLICATION_DISPATCH_ENABLED: 'true' });
+  const enabled = new PublicationDispatcher(async () => sim, () => resolveFileStorage(), {
+    PUBLICATION_DISPATCH_ENABLED: 'true',
+    // F8-5p.3 (P39): o envio exige a politica do piloto explicita (organizacao + formato)
+    PUBLICATION_PILOT_ORGANIZATION_IDS: orgA.id,
+    PUBLICATION_PILOT_FORMATS: 'FEED_IMAGE',
+  });
 
   /* ------------------------------ 1. so versao aprovada ------------------------------ */
   await t.test('1. Somente a versao atual aprovada pelo cliente pode ser agendada (servico e banco)', async () => {

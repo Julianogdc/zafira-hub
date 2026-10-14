@@ -53,6 +53,12 @@ const EVENT_LABEL: Record<string, string> = {
   APPROVAL_LINK_REVOKED: 'Link de aprovação revogado',
   CLIENT_APPROVED: 'Cliente aprovou',
   CLIENT_CHANGES_REQUESTED: 'Cliente solicitou alteração',
+  // F8-4/F8-5p.3: trilha da publicacao (auditoria)
+  PUBLICATION_REQUESTED: 'Agendamento registrado no Hub',
+  PUBLICATION_RESCHEDULE_REQUESTED: 'Reagendamento solicitado',
+  PUBLICATION_CANCEL_REQUESTED: 'Cancelamento solicitado',
+  PUBLICATION_STATE_CHANGED: 'Situação da publicação atualizada',
+  PUBLICATION_BLOCKED: 'Envio bloqueado pelas regras do piloto (nada foi enviado)',
 };
 export const contentEventLabel = (type: string) => EVENT_LABEL[type] ?? type;
 

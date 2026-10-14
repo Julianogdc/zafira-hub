@@ -33,6 +33,8 @@ interface Props {
   currentVersionNumber: number;
   canSchedule: boolean;
   timeZone: string;
+  /** F8-5p.3 (P39): formato do conteudo, para a politica do piloto. */
+  format?: string;
 }
 
 type Confirm =
@@ -40,7 +42,7 @@ type Confirm =
   | { kind: 'reschedule'; id: string; iso: string }
   | { kind: 'cancel'; id: string };
 
-export function PublicationPanel({ itemId, approvalStatus, currentVersionNumber, canSchedule, timeZone }: Props) {
+export function PublicationPanel({ itemId, approvalStatus, currentVersionNumber, canSchedule, timeZone, format }: Props) {
   const [pubs, setPubs] = useState<PublicationView[] | null>(null);
   const [targets, setTargets] = useState<PublicationTarget[]>([]);
   const [settings, setSettings] = useState<PublicationSettings | null>(null);
@@ -78,6 +80,9 @@ export function PublicationPanel({ itemId, approvalStatus, currentVersionNumber,
   const minLead = settings?.minLeadMinutes ?? 5;
   const dispatchEnabled = settings?.dispatchEnabled ?? false;
   const approved = approvalStatus === 'APPROVED';
+  // F8-5p.3 (P39): com a politica do piloto em vigor, so organizacao e formato autorizados podem agendar (o servidor confere de novo)
+  const pilot = settings?.pilotPolicy;
+  const pilotBlocked = Boolean(pilot?.enforced && (!pilot.organizationAuthorized || (format ? !pilot.formats.includes(format) : false)));
   const activeFor = (socialAccountId: string) =>
     (pubs ?? []).some(
       (p) => p.socialAccountId === socialAccountId && p.versionNumber === currentVersionNumber && p.state !== 'CANCELLED' && p.state !== 'FAILED'
@@ -144,6 +149,12 @@ export function PublicationPanel({ itemId, approvalStatus, currentVersionNumber,
       {!approved ? (
         <p className={styles.readOnlyNote} data-testid="publication-not-approved">
           Só a versão atual aprovada pelo cliente pode ser agendada. Envie o link de aprovação e aguarde a resposta.
+        </p>
+      ) : pilotBlocked ? (
+        <p className={styles.readOnlyNote} data-testid="publication-pilot-blocked">
+          {pilot?.organizationAuthorized
+            ? 'Este formato não está autorizado no piloto de publicação.'
+            : 'Esta organização não está autorizada a publicar no piloto.'}
         </p>
       ) : !canSchedule ? (
         <p className={styles.readOnlyNote} data-testid="publication-noperm">Agendar publicações exige a permissão de agendamento.</p>

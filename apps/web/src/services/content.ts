@@ -159,6 +159,8 @@ export interface PublicationSettings {
   minLeadMinutes: number;
   pilot: 'instagram';
   dailyCap: number;
+  /** F8-5p.3 (P39): politica do piloto para esta organizacao. */
+  pilotPolicy?: { enforced: boolean; valid: boolean; organizationAuthorized: boolean; formats: string[] };
 }
 
 const enc = encodeURIComponent;

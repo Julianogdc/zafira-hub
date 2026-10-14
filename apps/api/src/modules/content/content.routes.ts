@@ -116,7 +116,7 @@ export async function contentRoutes(app: FastifyInstance) {
   // o despachante (desligado por padrao) e quem fala com o provedor.
   route('GET', '/content/items/:id/publications', 'content.view', (ctx, r) => publicationService.list(ctx, params(r).id));
   route('GET', '/content/items/:id/publication-targets', 'content.view', (ctx, r) => publicationService.targets(ctx, params(r).id));
-  route('GET', '/content/publication-settings', 'content.view', async () => publicationService.settings());
+  route('GET', '/content/publication-settings', 'content.view', async (ctx) => publicationService.settings(ctx));
   // F8-5b (DEC-F8-029): metricas organicas, somente leitura (permissao de ver conteudo + carteira do cliente)
   route('GET', '/content/publications/:publicationId/metrics', 'content.view', (ctx, r) => publicationService.metrics(ctx, params(r).publicationId));
   route('POST', '/content/items/:id/publications', 'content.schedule', (ctx, r) =>

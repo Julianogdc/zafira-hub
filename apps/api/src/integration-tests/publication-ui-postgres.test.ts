@@ -105,7 +105,11 @@ test('Integration Gate: Leituras e regras da tela de publicacao (F8-4b.1) em Pos
     assert.strictEqual((await call(adminB, orgB.id, 'GET', `/content/items/${item1}/publication-targets`)).statusCode, 404);
     const s = await A(memberA, 'GET', '/content/publication-settings');
     assert.strictEqual(s.statusCode, 200);
-    assert.deepStrictEqual(s.json(), { dispatchEnabled: false, minLeadMinutes: 5, pilot: 'instagram', dailyCap: 25 });
+    assert.deepStrictEqual(s.json(), {
+      dispatchEnabled: false, minLeadMinutes: 5, pilot: 'instagram', dailyCap: 25,
+      // F8-5p.3 (P39): sem politica e com o envio desligado (simulacao) o pedido e livre; o envio seguiria bloqueado
+      pilotPolicy: { enforced: false, valid: false, organizationAuthorized: false, formats: [] },
+    });
   });
 
   /* ------------------------------ 2. visao com versao, envio e acoes ------------------------------ */
@@ -131,7 +135,12 @@ test('Integration Gate: Leituras e regras da tela de publicacao (F8-4b.1) em Pos
 
     // agendado no provedor (simulador): o cancelamento fica "solicitado" ate o despachante confirmar
     const sim = new PublicationSimulator({ accounts: [{ id: IG, platform: 'instagram_login', connectionStatus: 'connected', charLimit: 2200 }] });
-    const on = new PublicationDispatcher(async () => sim, () => resolveFileStorage(), { PUBLICATION_DISPATCH_ENABLED: 'true' });
+    const on = new PublicationDispatcher(async () => sim, () => resolveFileStorage(), {
+    PUBLICATION_DISPATCH_ENABLED: 'true',
+    // F8-5p.3 (P39): o envio exige a politica do piloto explicita (organizacao + formato)
+    PUBLICATION_PILOT_ORGANIZATION_IDS: orgA.id,
+    PUBLICATION_PILOT_FORMATS: 'FEED_IMAGE',
+  });
     await on.dispatchDue();
     const pid = again.json().id;
     const scheduled = await prisma.contentPublication.findUniqueOrThrow({ where: { id: pid } });

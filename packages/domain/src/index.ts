@@ -10,3 +10,4 @@ export * from './content/content-model.js';
 export * from './content/publication-model.js';
 export * from './content/publication-metrics.js';
 export * from './content/image-dimensions.js';
+export * from './content/publication-policy.js';

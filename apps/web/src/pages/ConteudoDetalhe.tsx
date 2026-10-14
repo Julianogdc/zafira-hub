@@ -546,6 +546,7 @@ export default function ConteudoDetalhe() {
         currentVersionNumber={current.number}
         canSchedule={caps.schedule}
         timeZone={resolveTimeZone(currentOrganization?.timezone)}
+        format={detail.format}
       />
 
       <section className={styles.panel} aria-labelledby="versions-title" data-testid="versions-panel">

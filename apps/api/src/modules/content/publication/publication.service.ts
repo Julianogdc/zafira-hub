@@ -5,6 +5,7 @@ import {
   canCancelPublication,
   canReschedulePublication,
   checkDailyCap,
+  checkPilotRequest,
   checkScheduleLead,
   INSTAGRAM_DAILY_CAP,
   PUBLICATION_MIN_LEAD_MINUTES,
@@ -24,7 +25,7 @@ import { AuditService } from '../../audit/audit.service.js';
 import { buildClientResourceScopeWhere } from '../../authorization/client-resource-scope.js';
 import { ContentContext, ContentError, ensureImageDimensions } from '../content.service.js';
 import { resolveFileStorage } from '../file-storage.js';
-import { publicationDispatchEnabled } from './publication-dispatcher.js';
+import { publicationDispatchEnabled, publicationPilotPolicy } from './publication-dispatcher.js';
 
 /**
  * F8-4a (DEC-F8-023) - Pedidos de publicacao pela versao APROVADA. Nenhuma chamada externa aqui:
@@ -162,8 +163,22 @@ export class PublicationService {
   }
 
   /** Situacao do envio para a tela (aviso honesto quando o despachante esta desligado). */
-  settings() {
-    return { dispatchEnabled: publicationDispatchEnabled(), minLeadMinutes: PUBLICATION_MIN_LEAD_MINUTES, pilot: 'instagram' as const, dailyCap: INSTAGRAM_DAILY_CAP };
+  settings(ctx: ContentContext) {
+    const policy = publicationPilotPolicy();
+    const dispatchEnabled = publicationDispatchEnabled();
+    return {
+      dispatchEnabled,
+      minLeadMinutes: PUBLICATION_MIN_LEAD_MINUTES,
+      pilot: 'instagram' as const,
+      dailyCap: INSTAGRAM_DAILY_CAP,
+      // F8-5p.3 (P39): so o que vale para ESTA organizacao (nunca a lista de outras)
+      pilotPolicy: {
+        enforced: policy.configured || dispatchEnabled,
+        valid: policy.valid,
+        organizationAuthorized: policy.valid && policy.organizationIds.includes(ctx.organizationId),
+        formats: policy.valid ? policy.formats : [],
+      },
+    };
   }
 
   async request(ctx: ContentContext, itemId: string, input: RequestPublication, now: Date = new Date()) {
@@ -193,6 +208,9 @@ export class PublicationService {
     if (!isPilotPlatform(platform)) {
       throw new ContentError(422, 'PLATFORM_NOT_IN_PILOT', 'Nesta etapa a publicação está disponível somente para Instagram.');
     }
+    // F8-5p.3 (DEC-F8-031, P39): organizacao e formato do piloto (estrito com politica configurada ou envio ligado)
+    const pilot = checkPilotRequest(publicationPilotPolicy(), publicationDispatchEnabled(), { organizationId: ctx.organizationId, format: item.format as ContentFormat });
+    if (pilot) throw new ContentError(422, pilot.code, pilot.message);
     const captionLimit = Number(meta.charLimit ?? meta.char_limit) || null;
 
     const parsed = parseScheduledAt(input.scheduledAt);
@@ -258,6 +276,11 @@ export class PublicationService {
     if (!parsed.ok) throw new ContentError(422, parsed.problem.code, parsed.problem.message);
     const lead = checkScheduleLead(parsed.at, now);
     if (lead) throw new ContentError(422, lead.code, lead.message);
+    // F8-5p.3 (P39): reagendar empurra uma publicacao ao provedor; mesma barreira do pedido (cancelar segue livre)
+    const target = await this.loadPublication(prisma, ctx, publicationId);
+    const item = await prisma.contentItem.findUniqueOrThrow({ where: { id: target.itemId }, select: { format: true } });
+    const pilot = checkPilotRequest(publicationPilotPolicy(), publicationDispatchEnabled(), { organizationId: ctx.organizationId, format: item.format as ContentFormat });
+    if (pilot) throw new ContentError(422, pilot.code, pilot.message);
     await prisma.$transaction(async (tx) => {
       const p0 = await this.loadPublication(tx, ctx, publicationId);
       await tx.$queryRaw`SELECT "id" FROM "content_publications" WHERE "id" = ${p0.id} FOR UPDATE`;
