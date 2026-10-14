@@ -4,7 +4,8 @@ Zafira Hub 2.1 - F8 Conteudo e Aprovacao do cliente por link - Browser Runtime G
 Chromium autenticado (Playwright) contra as imagens publicadas e o banco de ensaio. NENHUM BrightBean, Asana ou
 cliente real; arquivos sao bytes de teste com assinatura valida; pessoas e clientes ficticios.
 Cobre a F8-1 (cadastro e upload), a F8-2 (link seguro, pagina publica, decisao, nova versao, revogacao)
-e a F8-3 (contador de Entregas por estagio, somente leitura, publicados indisponivel).
+e a F8-3 (contador de Entregas por estagio, somente leitura, publicados indisponivel)
+e a F8-4b (agendamento pela versao aprovada, sem envio real: despachante desligado).
 
 Cenarios:
   A  Capacidades e menu
@@ -19,6 +20,7 @@ Cenarios:
   J  Isolamento da Org B
   K  Responsividade 390 px
   L  Contador de Entregas por estagio (F8-3): sem duplicidade, publicados indisponivel, meta intacta
+  M  Agendamento no Instagram (F8-4b): despachante desligado, versao aprovada, conta vinculada, estados que bloqueiam, legado so leitura
 """
 
 import json
@@ -480,6 +482,127 @@ class ContentGate:
         self.check("L", "painel somente leitura (nenhum botao de acao)", panel.locator("button").count() == 0)
         self.shot(admin, "f8-l-contador-entregas.png")
 
+        # M ---------------------------------------------------------------
+        # F8-4b (DEC-F8-027): agendamento no Instagram pela versao aprovada, com o despachante DESLIGADO.
+        # Nada sai do Hub: sem BrightBean real, sem publicacao. A conta Instagram e um vinculo ficticio no banco de ensaio.
+        self.scenarios.append("M - Agendamento no Instagram (F8-4b, despachante desligado)")
+        ig_account = f"gate-ig-{self.seed}"
+        fb_account = f"gate-fb-{self.seed}"
+        self.db_exec(
+            "await p.clientIntegration.create({data:{clientId:'" + CLIENT_1 + "',provider:'BRIGHTBEAN',externalId:'" + ig_account
+            + "',metadata:{platform:'instagram_login',accountName:'Conta Gate Instagram'}}});"
+            + "await p.clientIntegration.create({data:{clientId:'" + CLIENT_1 + "',provider:'BRIGHTBEAN',externalId:'" + fb_account
+            + "',metadata:{platform:'facebook',accountName:'Pagina Gate Facebook'}}});return true;"
+        )
+        settings = self.api(admin, "/content/publication-settings").get("body") or {}
+        self.check("M", "despachante desligado por padrao no ensaio", settings.get("dispatchEnabled") is False, str(settings))
+        targets = self.api(admin, f"/content/items/{item_id}/publication-targets").get("body") or []
+        self.check("M", "somente contas Instagram vinculadas ao cliente (Facebook fora do piloto)",
+                   [t.get("socialAccountId") for t in targets] == [ig_account], str(targets))
+
+        self.goto(admin, f"/conteudo/{item_id}")
+        panel = admin.get_by_test_id("publication-panel")
+        panel.get_by_test_id("publication-form").wait_for(timeout=15000)
+        ptxt = admin.inner_text("body")
+        self.check("M", "painel abaixo de Aprovacao do cliente",
+                   -1 < ptxt.find("Aprovação do cliente") < ptxt.find("Publicação no Instagram") < ptxt.find("Versões"))
+        self.check("M", "aviso honesto: envio ao Instagram desligado", panel.get_by_test_id("publication-dispatch-off").count() == 1)
+        panel.get_by_test_id("publication-account").select_option(ig_account)
+        panel.get_by_test_id("publication-review").click()
+        confirm = panel.get_by_test_id("publication-confirm")
+        confirm.wait_for(timeout=10000)
+        self.check("M", "confirmacao em dois passos mostra versao, conta e horario",
+                   "versão 2" in confirm.inner_text() and "Conta Gate Instagram" in confirm.inner_text())
+        self.check("M", "nada e registrado antes de confirmar", (self.api(admin, f"/content/items/{item_id}/publications").get("body") or []) == [])
+        confirm.get_by_test_id("publication-confirm-yes").click()
+        panel.get_by_test_id("publication-done").wait_for(timeout=15000)
+        pubs = self.api(admin, f"/content/items/{item_id}/publications").get("body") or []
+        p1 = pubs[0] if pubs else {}
+        self.check("M", "agendamento registrado no Hub, nao enviado ao Instagram",
+                   len(pubs) == 1 and p1.get("state") == "PENDING" and p1.get("sentToProvider") is False and p1.get("versionNumber") == 2, str(pubs)[:300])
+        item_el = panel.locator('[data-testid="publication-item"][data-publication-state="PENDING"]')
+        self.check("M", "tela distingue: Registrado no Hub e envio nao ativo",
+                   "Registrado no Hub" in item_el.inner_text() and "não está ativo" in item_el.get_by_test_id("publication-delivery").inner_text())
+        self.check("M", "conta ja agendada fica indisponivel para nova solicitacao", panel.get_by_test_id("publication-review").is_disabled())
+        dup = self.api(admin, f"/content/items/{item_id}/publications", "POST", {"socialAccountId": ig_account, "scheduledAt": p1.get("scheduledAt")})
+        self.check("M", "segunda publicacao ativa da mesma versao e conta recusada (409)",
+                   dup["status"] == 409 and (dup.get("body") or {}).get("code") == "PUBLICATION_ALREADY_ACTIVE", dup["text"][:160])
+        other = self.api(admin, f"/content/items/{item_id}/publications", "POST", {"socialAccountId": fb_account, "scheduledAt": p1.get("scheduledAt")})
+        self.check("M", "conta fora do piloto recusada", other["status"] in (403, 404, 409, 422), str(other["status"]))
+        self.shot(admin, "f8-m-agendado-hub.png")
+
+        # reagendar pela tela
+        before_at = p1.get("scheduledAt")
+        item_el.get_by_test_id("publication-reschedule").click()
+        rs = panel.get_by_test_id("publication-reschedule-form")
+        rs.wait_for(timeout=10000)
+        new_day = datetime.fromordinal(datetime.now(ZoneInfo("America/Sao_Paulo")).date().toordinal() + 3)
+        rs.get_by_test_id("publication-reschedule-date").fill(new_day.strftime("%Y-%m-%d"))
+        rs.get_by_test_id("publication-reschedule-time").fill("15:30")
+        rs.get_by_test_id("publication-reschedule-review").click()
+        panel.get_by_test_id("publication-confirm").wait_for(timeout=10000)
+        panel.get_by_test_id("publication-confirm-yes").click()
+        panel.get_by_test_id("publication-done").wait_for(timeout=15000)
+        p1b = (self.api(admin, f"/content/items/{item_id}/publications").get("body") or [{}])[0]
+        self.check("M", "reagendamento registrado (novo horario, mesmo registro)",
+                   p1b.get("id") == p1.get("id") and p1b.get("scheduledAt") != before_at, str(p1b)[:200])
+        soon = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 60))
+        r = self.api(admin, f"/content/publications/{p1.get('id')}/reschedule", "POST", {"scheduledAt": soon})
+        self.check("M", "horario com menos de 5 minutos recusado (422)", r["status"] == 422, str(r["status"]))
+        r = self.api(admin, f"/content/publications/{p1.get('id')}/reschedule", "POST", {"scheduledAt": "2030-01-10T10:00:00"})
+        self.check("M", "horario sem fuso explicito recusado (422)", r["status"] == 422, str(r["status"]))
+
+        # cancelar pela tela e agendar de novo
+        panel.locator('[data-testid="publication-item"][data-publication-state="PENDING"]').get_by_test_id("publication-cancel").click()
+        panel.get_by_test_id("publication-confirm").wait_for(timeout=10000)
+        panel.get_by_test_id("publication-confirm-yes").click()
+        panel.get_by_test_id("publication-done").wait_for(timeout=15000)
+        p1c = (self.api(admin, f"/content/items/{item_id}/publications").get("body") or [{}])[0]
+        self.check("M", "cancelamento antes do envio encerra no Hub", p1c.get("state") == "CANCELLED", str(p1c.get("state")))
+        again = self.api(admin, f"/content/items/{item_id}/publications", "POST", {"socialAccountId": ig_account, "scheduledAt": p1b.get("scheduledAt")})
+        self.check("M", "depois do cancelamento, novo agendamento e aceito (201)", again["status"] == 201, again["text"][:160])
+        p2_id = (again.get("body") or {}).get("id", "")
+
+        # estados que bloqueiam acoes (simulados no banco de ensaio; o despachante esta desligado)
+        for state, label in [("AMBIGUOUS", "Em conferência"), ("PROVIDER_RETRY", "Nova tentativa automática"), ("PUBLISHING", "Publicando")]:
+            self.db_exec(f"return await p.contentPublication.update({{where:{{id:'{p2_id}'}},data:{{state:'{state}'}}}}).then(()=>true);")
+            self.goto(admin, f"/conteudo/{item_id}")
+            el = admin.locator(f'[data-testid="publication-item"][data-publication-state="{state}"]')
+            el.wait_for(timeout=15000)
+            self.check("M", f"{state}: rotulo '{label}' e nenhuma acao na tela", label in el.inner_text() and el.locator("button").count() == 0)
+            rc = self.api(admin, f"/content/publications/{p2_id}/cancel", "POST", {})
+            rr = self.api(admin, f"/content/publications/{p2_id}/reschedule", "POST", {"scheduledAt": p1b.get("scheduledAt")})
+            self.check("M", f"{state}: API recusa cancelar e reagendar (409)", rc["status"] == 409 and rr["status"] == 409, f"{rc['status']} {rr['status']}")
+        self.db_exec(f"return await p.contentPublication.update({{where:{{id:'{p2_id}'}},data:{{state:'PENDING'}}}}).then(()=>true);")
+
+        # conteudo nao aprovado
+        self.goto(admin, f"/conteudo/{item2}")
+        admin.get_by_test_id("publication-not-approved").wait_for(timeout=15000)
+        self.check("M", "conteudo nao aprovado: sem formulario, com orientacao", admin.get_by_test_id("publication-form").count() == 0)
+        r = self.api(admin, f"/content/items/{item2}/publications", "POST", {"socialAccountId": ig_account, "scheduledAt": p1b.get("scheduledAt")})
+        self.check("M", "API recusa agendar versao nao aprovada (409)",
+                   r["status"] == 409 and (r.get("body") or {}).get("code") == "VERSION_NOT_APPROVED", r["text"][:160])
+
+        # membro: acompanha, nao agenda
+        self.goto(member, f"/conteudo/{item_id}")
+        member.get_by_test_id("publication-noperm").wait_for(timeout=15000)
+        mpanel = member.get_by_test_id("publication-panel")
+        self.check("M", "membro ve o acompanhamento sem botoes de acao",
+                   mpanel.get_by_test_id("publication-item").count() >= 1 and mpanel.locator("button").count() == 0)
+        r1 = self.api(member, f"/content/items/{item_id}/publications", "POST", {"socialAccountId": ig_account, "scheduledAt": p1b.get("scheduledAt")})
+        r2 = self.api(member, f"/content/publications/{p2_id}/cancel", "POST", {})
+        self.check("M", "API recusa agendar e cancelar pelo membro (403)", r1["status"] == 403 and r2["status"] == 403, f"{r1['status']} {r2['status']}")
+
+        # telas legadas: somente leitura, com orientacao
+        self.goto(admin, "/conteudos")
+        admin.get_by_test_id("legacy-readonly-notice").wait_for(timeout=15000)
+        self.check("M", "Conteudos & Agenda: orientacao e sem compositor", admin.get_by_text("Criar conteúdo", exact=True).count() == 0)
+        r = self.api(admin, "/api/v1/social/upload", "POST", {})
+        self.check("M", "escrita legada desativada na API (410)", r["status"] == 410, str(r["status"]))
+        sent = self.db_exec(f"return await p.contentPublication.count({{where:{{itemId:'{item_id}',externalPostId:{{not:null}}}}}});")
+        self.check("M", "nenhuma publicacao foi enviada ao provedor", sent == "0", sent)
+        self.shot(admin, "f8-m-legado-leitura.png")
+
         # J ---------------------------------------------------------------
         self.scenarios.append("J - Isolamento Org B")
         pb = self.login(browser, self.email_b, self.password_b, "J")
@@ -488,6 +611,15 @@ class ContentGate:
         self.check("J", "Org B: nao gera link para conteudo da Org A (404)", self.api(pb, f"/content/items/{item_id}/approval-links", "POST", {})["status"] == 404)
         self.check("J", "Org B: contador de Entregas do cliente da Org A recusado (404)",
                    self.api(pb, f"/clients/{CLIENT_1}/deliverables/content-stages?period={after['period']}")["status"] == 404)
+        self.check("J", "Org B: agendamentos e contas da Org A recusados (404)",
+                   self.api(pb, f"/content/items/{item_id}/publications")["status"] == 404
+                   and self.api(pb, f"/content/items/{item_id}/publication-targets")["status"] == 404)
+        rb = [
+            self.api(pb, f"/content/items/{item_id}/publications", "POST", {"socialAccountId": ig_account, "scheduledAt": p1b.get("scheduledAt")})["status"],
+            self.api(pb, f"/content/publications/{p2_id}/reschedule", "POST", {"scheduledAt": p1b.get("scheduledAt")})["status"],
+            self.api(pb, f"/content/publications/{p2_id}/cancel", "POST", {})["status"],
+        ]
+        self.check("J", "Org B: nao agenda, reagenda nem cancela na Org A (404)", rb == [404, 404, 404], str(rb))
         self.goto(pb, "/conteudo")
         pb.get_by_text("Nenhum conteúdo cadastrado").first.wait_for(timeout=15000)
         self.ok("J", "Org B: tela vazia, sem dados da Org A")
@@ -500,6 +632,9 @@ class ContentGate:
             admin.wait_for_timeout(800)
             overflow = admin.evaluate("document.documentElement.scrollWidth - document.documentElement.clientWidth")
             self.check("K", f"390 px: {label} sem rolagem horizontal", overflow <= 1, f"excesso {overflow}px")
+        box = admin.get_by_test_id("publication-panel").bounding_box()
+        self.check("K", "390 px: painel de publicacao dentro da largura", bool(box and box["x"] >= 0 and box["x"] + box["width"] <= 391), str(box))
+        self.shot(admin, "f8-k-publicacao-390.png")
         # Entregas com o contador: mesmo caminho do cenario L (aba "Entregas" quando o cliente tem projeto Asana)
         self.goto(admin, f"/projetos?clientId={CLIENT_1}")
         cards = admin.get_by_test_id("content-stages-panel")
