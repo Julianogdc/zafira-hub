@@ -431,3 +431,37 @@ Indicadores: `reach` (principal), `views`, `likes`, `comments`, `saves`, `shares
 **Leitura:** nenhuma métrica do post foi **coletada** até 17 min após a publicação. Os zeros são **valores padrão** — prova: `captured_at` nulo e `series` vazias. O `next_sync_eta` **avança junto com o relógio** (sempre ~5–8 min à frente de cada leitura): é uma estimativa móvel, não um horário de coleta já agendado. As métricas da **conta** têm coleta registrada (`captured_at` 00:17 UTC, antes da publicação) e próxima prevista para **24 h depois** (`next_sync_eta` 2026-10-15 00:17 UTC), com `reach` e `views` = 0.
 
 **Regra para a F8-5 (ausência ≠ zero):** métrica de post só é dado quando `captured_at` não é nulo; com `captured_at` nulo, exibir "aguardando coleta" mesmo que `analytics_available` seja true e os valores venham 0; nunca usar `next_sync_eta` como compromisso de horário. Coleta efetiva de métricas de Story não foi observada nesta janela; o Story expira em 24 h, e a verificação de métricas coletadas fica para um teste futuro (só GET), se a Direção quiser.
+
+## 16. Avaliação técnica final da F8-0b (2026-10-13, DEC-F8-020) — somente análise
+
+### 16.1 Matriz comparativa T31–T34
+| | **T31 — Carrossel no Instagram** | **T32 — Foto no Feed do Facebook** | **T33 — Falha forçada** | **T34 — Horário no passado** |
+|---|---|---|---|---|
+| Capacidade (matriz) | #6 publicação de carrossel | #8 Facebook Feed | #25 retentativa do servidor, #32 `failed`, #34 `publish_error` | #18 disparo imediato |
+| Já comprovado | rascunhos de 2, 10 e 11 itens [V]; mídias processadas [V]; fluxo de publicação de Story [V] | nada (só Instagram conectado e na allowlist) | pelo código: `failed`, 3 retentativas (60 s / 5 min / 30 min), nunca republica sem confirmação | pelo código: sem validação de horário futuro; T30: publicador dispara 16–26 s após o horário [V] |
+| Falta confirmar | aceitação real pela Meta, ordem das mídias, comportamento em falha parcial | tudo; exige Página de testes conectada e na allowlist | estados e mensagens reais; transição `failed` ↔ `scheduled` nas retentativas | apenas a observação do comportamento já lido no código |
+| Risco | **publicação permanente no Feed** (não expira; remoção só manual); sem duplicidade esperada | publicação permanente; exige nova conexão e alteração de configuração | difícil forçar falha sem risco de **publicar de verdade** (entrada "inválida" que a rede aceita); até 3 retentativas em ~36 min | é uma **publicação real** imediata, só para confirmar algo que o Hub deve **bloquear** |
+| Substituível? | parcialmente (código do conector); a aceitação pela Meta só com publicação | não | **sim**: código + simulador da F8-4 cobrindo `failed`/retentativa | **sim**: código + evidência do T30 |
+| **Recomendação** | **Adaptar:** não exigir para iniciar a F8-4; executar (2 imagens, conta de testes, autorização própria) **antes de ligar o despachante em ambiente real**, se o carrossel estiver no escopo do piloto | **Dispensar agora:** condicionado à decisão das redes do piloto ([DECIDIR] da F8); se o Facebook entrar, testar na homologação com Página de testes | **Dispensar como teste real:** substituir por análise de código + simulador; observar `failed` real só se aparecer naturalmente ou na homologação | **Dispensar:** o Hub recusa horário passado/próximo (contrato §4.2); não há valor que justifique uma publicação extra |
+
+### 16.2 Capacidades obrigatórias para **iniciar** a F8-4
+A F8-4 (caixa de saída, despachante **desligado por padrão**, simulador, telas) precisa de um contrato confiável, não de todas as publicações reais. Obrigatórias e **já comprovadas**: credencial, escopo e allowlist (#38) [V]; upload, tipos e limites de imagem (#11, #12, #13) [V]; idempotência de upload e criação (#22, #24 sequencial) [V]; rascunho por formato e validações (#16) [V]; agendar, reagendar e cancelar com fuso (#17, #19, #20, #23, #30) [V]; leitura de post com status, `published_at`, `platform_post_id` e permalink (#26, #32 fluxo feliz, #33) [V]; listagem (#27) [V]; ausência de webhooks e de busca por referência (#28, #29); publicação real de Story (#1) [V]. **Nenhuma das pendências abaixo bloqueia o início da F8-4.**
+
+### 16.3 Encerramento com ressalvas — recomendado
+A F8-0b pode ser **encerrada com ressalvas**, sem T31–T34, porque o objetivo (não liberar a F8-4 com 13 capacidades desconhecidas) foi atingido: das 13, **11 estão classificadas** (confirmadas, confirmadas como indisponíveis ou parcialmente confirmadas com regra definida) e 2 ficam como ressalva (#8 Facebook, #9 fora do piloto). Ressalvas, todas a resolver ou aceitar **antes de ligar o despachante em ambiente real** (portão de homologação), não antes da F8-4:
+- **RS1** carrossel publicado de verdade (T31 adaptado);
+- **RS2** estado `failed` e retentativa não observados (simulador + observação na homologação);
+- **RS3** coleta efetiva de métricas de post não observada (verificação GET abaixo);
+- **RS4** Facebook fora do escopo até decisão das redes do piloto;
+- **RS5** MOV verdadeiro e limite real de vídeo não testados;
+- **RS6** corrida/timeout com duplicidade não testados (mitigados pelo desenho do servidor e pela idempotência do Hub);
+- **RS7** limpeza dos 15 rascunhos e 17 arquivos de teste e do Story publicado (registro no BrightBean); remoção e revogação da chave.
+
+### 16.4 Métricas do T30 — causa e verificação somente GET
+Pelo código (`apps/analytics/tasks.py` e `freshness.py`): posts com menos de 24 h são coletados por uma **rotina de hora em hora**; sem coleta anterior, `next_sync_eta` é sempre **agora + 5 min** — por isso avançava a cada leitura. Com 17 min, a primeira coleta ainda não tinha passado. **Verificação proposta (só GET, sem publicar):** ler `GET /analytics/posts/{D6}` em ~2 h, ~6 h e ~20 h após a publicação (antes de o Story completar 24 h). Aceite: `captured_at` preenchido e `series` não vazias; valores podem ser 0 legítimos (conta de testes sem audiência) — o que distingue dado de padrão é o `captured_at`. Se continuar nulo após 2 ciclos horários, registrar como limitação da coleta de Stories nesta instância (RS3), sem nova publicação.
+
+### 16.5 Contrato mínimo do adaptador
+Em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md`: credencial e escopo, mídia, rascunho, agendamento/cancelamento, reconciliação, falhas e duplicidade, métricas, com cada regra marcada como observada [V] ou lida no código [C].
+
+### 16.6 Recomendação
+**Encerrar a F8-0b com as ressalvas RS1–RS7**, fazer a verificação GET das métricas (§16.4) e decidir a F8-4 com base no contrato (§16.5). Executar **apenas o T31 adaptado**, e só se o carrossel estiver no escopo do piloto, como teste de homologação antes de ligar o despachante. Dispensar T32 (até decisão das redes), T33 e T34 como testes reais.

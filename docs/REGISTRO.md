@@ -36,6 +36,32 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b: avaliação técnica final, contrato do SocialPublisher e aceite da R1+ formalizado (DEC-F8-020, DEC-F8-021) — Claude
+- AUTORIZAÇÃO: DEC-F8-020 — somente leitura e análise; nenhuma chamada à API nesta etapa.
+- EXECUTADO: avaliação de T31–T34 (§16.1); capacidades obrigatórias para iniciar a F8-4 (§16.2, todas comprovadas); proposta de encerramento com ressalvas RS1–RS7 (§16.3); causa da falta de métricas do T30 pelo código (coleta horária; `next_sync_eta` = agora + 5 min sem coleta anterior) e verificação só GET em ~2 h, ~6 h e ~20 h (§16.4); contrato mínimo do adaptador em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` (§16.5); aceite da R1+ formalizado como **DEC-F8-021**. Commit de documentação com `[skip ci]`.
+- RECOMENDAÇÃO: encerrar a F8-0b com ressalvas; T31 só adaptado e só se o carrossel estiver no piloto, antes de ligar o despachante; dispensar T32 (até decisão das redes), T33 e T34 como testes reais.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: R0, R1, R1+ e T30 aceitos; **avaliação final entregue; decisão da Direção pendente**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial novos testes reais, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b / contrato do SocialPublisher (interno e público).
+
+### DEC-F8-021 — Formalização do aceite técnico da R1+ da F8-0b (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: o aceite técnico da R1+ (execução registrada como DEC-F8-016) foi concedido pela Direção, mas não estava formalizado.
+- Decisão: **Aceite técnico da R1+**: T20 (agendar D6 a +7 dias com fuso), T21 (cancelar), T22 (cancelar de novo → 409) e T23 (agendar D7, reagendar a +8 dias, cancelar) aprovados; zero publicações e zero agendamentos de teste ao final e após 3 min. Os registros anteriores permanecem como estão.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: —
+
+### DEC-F8-020 — Avaliação técnica final da F8-0b antes de novos testes reais (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: decidir se a F8-0b continua (T31–T34) ou se encerra, e o que é obrigatório para a F8-4.
+- Decisão: (1) **Autorizada somente análise técnica:** consultar a matriz e o plano; avaliar T31–T34 (capacidade, comprovado, pendente, risco, substituição, recomendação); identificar o obrigatório para iniciar a F8-4; avaliar encerramento com ressalvas; avaliar a falta de coleta das métricas do T30 e propor verificação só GET; preparar o contrato mínimo do SocialPublisher; formalizar o aceite já concedido da R1+ sem reescrever registros. (2) Proibido: publicar, agendar, reagendar, cancelar ou criar; alterar permissões/credenciais; limpar rascunhos ou arquivos; iniciar a F8-4; VPS/produção/infraestrutura; workflows privados. (3) Testes adicionais só com nova decisão.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md` §16 e `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md`).
+- Revisão: na decisão da Direção sobre encerrar a F8-0b.
+
 ### 2026-10-13 — F8-0b: aceite definitivo do T30 e métricas pós-publicação (DEC-F8-019) — Claude
 - AUTORIZAÇÃO: DEC-F8-019 — somente GET.
 - PERMISSÕES: 3× `/me/` → [`create_posts`, `view_analytics`]; `publish_directly` removida; conta de teste conectada.
