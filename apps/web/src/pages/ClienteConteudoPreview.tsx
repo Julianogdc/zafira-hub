@@ -25,7 +25,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useAuthStore } from '@/store/useAuthStore';
-import EditarAgendamentoModal from '@/components/content/EditarAgendamentoModal';
 import {
   SocialPost,
   SocialAccount,
@@ -360,16 +359,17 @@ export default function ClienteConteudoPreview() {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Ação nativa Zafira: Editar agendamento / Agendar rascunho (visível para ADMIN e MANAGER em posts elegíveis) */}
+          {/* F8-4b (DEC-F8-027, D-F84B-2): agendar e reagendar só pelo fluxo de conteúdo aprovado */}
           {isEditable && (
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setIsEditModalOpen(true)}
+              onClick={() => navigate('/conteudo')}
               className="border-purple-500/30 bg-purple-500/10 text-purple-300 hover:bg-purple-500/20 hover:text-purple-200 gap-2 text-xs"
+              data-testid="legacy-go-content"
             >
               <Pencil className="w-3.5 h-3.5" />
-              <span>{post.status === 'DRAFT' ? 'Agendar rascunho' : 'Editar agendamento'}</span>
+              <span>Agendar em Conteúdo</span>
             </Button>
           )}
 
@@ -400,6 +400,14 @@ export default function ClienteConteudoPreview() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div
+        role="status"
+        data-testid="legacy-readonly-notice"
+        className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+      >
+        Prévia só para consulta. Agendar, reagendar ou cancelar agora é feito em Conteúdo, a partir da versão aprovada pelo cliente.
       </div>
 
       {/* 2. CABEÇALHO DO CONTEÚDO */}
@@ -672,19 +680,6 @@ export default function ClienteConteudoPreview() {
         </div>
       </div>
 
-      {/* Modal nativo Zafira para editar data e horário da publicação */}
-      {isEditable && (
-        <EditarAgendamentoModal
-          isOpen={isEditModalOpen}
-          onClose={() => setIsEditModalOpen(false)}
-          post={post}
-          clientId={clientId}
-          clientName={client?.name}
-          onSuccess={(updatedPost) => {
-            setPost(updatedPost);
-          }}
-        />
-      )}
     </div>
   );
 }

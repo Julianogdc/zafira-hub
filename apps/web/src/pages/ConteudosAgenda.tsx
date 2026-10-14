@@ -52,7 +52,6 @@ import {
 } from '@/services/social-publisher';
 import { clientsService } from '@/services/clients';
 import { useAuthStore } from '@/store/useAuthStore';
-import { CompositorZafiraModal } from '@/components/content/CompositorZafiraModal';
 
 interface AgendaSummary {
   scheduledCount: number;
@@ -67,8 +66,6 @@ export default function ConteudosAgenda() {
   const { user } = useAuthStore();
   const canCreate = user?.role === 'admin' || user?.role === 'manager';
 
-  // Estado do Compositor Zafira
-  const [compositorOpen, setCompositorOpen] = useState<boolean>(false);
 
   // Mês de navegação (data de referência)
   const [currentDate, setCurrentDate] = useState<Date>(() => {
@@ -569,14 +566,28 @@ export default function ConteudosAgenda() {
             {canCreate && (
               <Button
                 size="sm"
-                onClick={() => setCompositorOpen(true)}
+                onClick={() => navigate('/conteudo')}
                 className="bg-purple-600 hover:bg-purple-500 text-white gap-2 h-9 px-4 font-semibold shadow-md shadow-purple-600/20"
+                data-testid="legacy-go-content"
               >
                 <Plus className="w-4 h-4" />
-                <span>Criar conteúdo</span>
+                <span>Ir para Conteúdo</span>
               </Button>
             )}
           </div>
+        </div>
+
+        {/* F8-4b (DEC-F8-027, D-F84B-2): tela legada só para leitura */}
+        <div
+          role="status"
+          data-testid="legacy-readonly-notice"
+          className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100"
+        >
+          Esta tela agora é só para consulta. Para criar, agendar, reagendar ou cancelar publicações, use{' '}
+          <button type="button" onClick={() => navigate('/conteudo')} className="underline font-semibold">
+            Conteúdo
+          </button>
+          : o agendamento parte da versão aprovada pelo cliente.
         </div>
 
         {/* ========================================================================= */}
@@ -1271,16 +1282,6 @@ export default function ConteudosAgenda() {
           </DialogContent>
         </Dialog>
 
-        {/* Compositor Zafira de Conteúdo (Admin & Manager) */}
-        <CompositorZafiraModal
-          open={compositorOpen}
-          onOpenChange={setCompositorOpen}
-          clientsList={clientsList}
-          initialClientId={selectedClientId !== 'ALL' ? selectedClientId : undefined}
-          onSuccess={() => {
-            loadData(true);
-          }}
-        />
       </div>
     </TooltipProvider>
   );
