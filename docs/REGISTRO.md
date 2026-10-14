@@ -36,6 +36,29 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — F8-5a a F8-5d implementadas: métricas orgânicas, Publicados e desempenho (DEC-F8-029) — Claude
+- AUTORIZAÇÃO: DEC-F8-029 (D-F85-1 a D-F85-7), microetapas F8-5a a F8-5d em sequência; F8-5e proibida.
+- F8-5a (`4b36f2a`): domínio `publication-metrics.ts` (normalização; **`captured_at` nulo = sem dado**, mesmo com zeros; indicador ausente, negativo ou de tipo inesperado = null; janelas 1 h, 3 h, 6 h, 24 h, 72 h, 7 d e Story até 26 h; situação exibida); **migration `20261014010000_f8_5a_publication_metrics`**: tabela `content_publication_metrics` (uma linha por coleta do provedor; `capturedAt` x `fetchedAt`; único por publicação + `capturedAt`; FK composta por organização; CHECK de não negativos; gatilho que só aceita publicação `PUBLISHED`; UPDATE bloqueado; DELETE só com a organização removida) e colunas `metricsCheckedAt`/`metricsLastOutcome`/`metricsLastReason` na publicação; `getPostMetrics` no gateway (descarta `next_sync_eta`) e no simulador (zeros com `captured_at` nulo, coletas, indisponível, erro); coletor no agendador existente, **desligado por padrão** (`PUBLICATION_METRICS_ENABLED=true` e despachante ligado), só nos pontos da janela, 429 interrompe o lote sem consumir o ponto, consulta sem coleta nova não grava.
+- F8-5b (`94e0cec`): `GET /content/publications/:id/metrics` (`content.view` + carteira + organização; estados aguardando/coletado/indisponível/erro/encerrado; histórico até 50; sem estimativa do provedor); resumo `metrics` na visão da publicação; contador **Publicados** só com publicação confirmada (`PUBLISHED` + `publishedAt` + `platformPostId`) de conteúdo aprovado, **null com o envio desligado** (D-F85-2); `publishedAt` por peça; etapa manual "Postada" intocada (D-F85-5).
+- F8-5c (`b4d5bf4`): bloco "Desempenho" nas publicações confirmadas (aguardando coleta sem número; valores com data da coleta do Instagram e da consulta do Hub no fuso da organização; ausente como "—"; engajamento em %; classes oficiais, 2 colunas no celular).
+- F8-5d (`ba0d5e7`): Browser Gate F8 cenário **N** com dados sintéticos gravados no banco de ensaio (sem provedor e sem coletor): aguardando coleta sem zeros, coleta com `capturedAt` ≠ `fetchedAt`, ausente nulo, coleta repetida e UPDATE recusados, membro só lê, Publicados indisponível com envio desligado; Org B 404 nas métricas; desempenho a 390 px.
+- TESTES: domínio 111/111 (7 de métricas + contador); API 829/829 (4 do coletor desligado); PostgreSQL `publication-metrics-postgres.test.ts` (15 cenários: gatilhos, coletor com simulador, API, contador); web 97/97.
+- CI (rodada única): run 38583200208 (https://github.com/Julianogdc/zafira-hub/actions/runs/38583200208) **5/5**: PostgreSQL 181/181, Docker Build, Publish Images, Homologation (F6, F7-1b, F7-2b, F7-3b, F7-4b e **F8 119/0** PASS). Custo zero.
+- BASELINE DE CÓDIGO: `ba0d5e7` no público (espelhos `9d9329d`, `851ecab`, `17baeab`, `25b3efc` no interno, paridade conferida).
+- STATUS: **pendente de aceite técnico** da Direção.
+- LIMITES/LACUNAS: coleta real nunca observada (RS3; só a F8-5e confirma); P38 (erro de consulta consome o ponto da janela); P33, P34, P35, P37 e RS1–RS7 mantidas; despachante e coletor desligados.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-5e, publicar, conectar contas reais, ligar despachante ou coletor, VPS, produção, credenciais e F9.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE (interno e público).
+
+### DEC-F8-029 — Implementação da F8-5a a F8-5d: métricas orgânicas, Publicados e desempenho (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: implementar a F8-5 sem publicação real, com base em `docs/propostas/F8-5_PROPOSTA_EXECUCAO.md` e DEC-F8-028.
+- Decisão: **D-F85-1** histórico append-only das coletas; **D-F85-2** Publicados indisponível com o envio desligado; **D-F85-3** consultas em 1 h, 3 h, 6 h, 24 h, 72 h e 7 dias, Story até 26 h; **D-F85-4** métricas gerais das contas na F13; **D-F85-5** não automatizar a etapa manual Postada; **D-F85-6** piloto previsto para Story e Feed de imagem, Reel condicionado a vídeo de testes, carrossel condicionado à RS1; **D-F85-7** piloto real só em homologação controlada, com autorização específica. Autorizadas F8-5a a F8-5d. Regras: distinguir `fetchedAt` de `capturedAt`; consultar não significa coleta nova; sem duplicação; preservar indisponibilidade, erro e ausência sem fabricar valores; `PUBLICATION_DISPATCH_ENABLED` e `PUBLICATION_METRICS_ENABLED` desligados por padrão; não alterar registros históricos de Entregas; testes por microetapa e CI completo ao final. Proibido: F8-5e, posts reais, contas reais, despachante ou coletor reais, VPS, produção, credenciais, F9, workflows privados.
+- Alternativas consideradas: só a última coleta (D-F85-1, rejeitada); zero com envio desligado (D-F85-2, rejeitado).
+- Impacto: domínio, banco (migration nova), API, web, Browser Gate.
+- Revisão: no aceite técnico da F8-5a a F8-5d.
+
 ### 2026-10-14 — Aceite da F8-4b, proposta da F8-5 e bloqueios da primeira homologação (DEC-F8-028) — Claude
 - AUTORIZAÇÃO: DEC-F8-028 — somente análise e documentação.
 - ACEITE: F8-4b aceita definitivamente (código `ad44325`, CI 5/5 run 38570183115, Browser Gate F8 104/0, P36 resolvida). Preservadas P33, P34, P35, P37 e RS1–RS7.
