@@ -151,7 +151,13 @@ jobs:
       - name: Second RBAC Bootstrap (Idempotency)
         run: npm run rbac:bootstrap --workspace=@zafira/api
 
+      - name: RBAC Pre-deploy Check (HM-1, read-only)
+        run: npm run rbac:bootstrap --workspace=@zafira/api -- --check
+
       - name: Database Integration Tests
+        run: npm run test:integration:db
+
+      - name: Database Integration Tests (2nd consecutive run, same database - HM-1/P18)
         run: npm run test:integration:db
 
   docker-build:
@@ -747,6 +753,13 @@ jobs:
             -e DATABASE_URL="${DATABASE_URL}" \
             "${API_REF}" \
             npm run rbac:bootstrap --workspace=@zafira/api
+
+          echo "Verificacao pre-deploy de RBAC (somente leitura, imagem publicada; HM-1/P22)..."
+          docker run --rm \
+            --network zafira-hub-hml-ci \
+            -e DATABASE_URL="${DATABASE_URL}" \
+            "${API_REF}" \
+            npm run rbac:bootstrap --workspace=@zafira/api -- --check
 
       - name: Launch Read-Only Asana Mock (F6 Browser Gate)
         run: |
