@@ -75,8 +75,17 @@ export async function publicApprovalRoutes(app: FastifyInstance) {
         async (request, reply) => {
           try {
             const mediaToken = String((request.query as { t?: string }).t ?? '');
-            const f = await approvalService.readMedia(mediaToken);
-            return reply.header('Content-Type', f.mimeType).header('Content-Disposition', 'inline').send(f.data);
+            const f = await approvalService.openMediaStream(mediaToken);
+            reply
+              .header('Content-Type', f.mimeType)
+              .header('Content-Disposition', 'inline')
+              .header('Content-Length', f.sizeBytes);
+
+            if (f.cleanup) {
+              reply.raw.on('finish', () => { f.cleanup?.().catch(() => {}); });
+              reply.raw.on('close', () => { f.cleanup?.().catch(() => {}); });
+            }
+            return reply.send(f.stream);
           } catch (error) {
             return fail(error, reply);
           }

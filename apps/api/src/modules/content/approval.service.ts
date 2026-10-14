@@ -396,6 +396,35 @@ export class ApprovalService {
     const storage = this.storageFactory();
     return { data: await storage.get(media.storageKey), mimeType: media.mimeType };
   }
+
+  /** Midia por URL curta assinada (10 min) via streaming: sem buffers integrais na heap. */
+  async openMediaStream(mediaToken: string) {
+    const [encoded, sig] = mediaToken.split('.');
+    if (!encoded || !sig) throw new PublicLinkUnavailableError();
+    let payload: string;
+    try {
+      payload = Buffer.from(encoded, 'base64url').toString('utf8');
+    } catch {
+      throw new PublicLinkUnavailableError();
+    }
+    const expected = Buffer.from(hmac(payload));
+    const given = Buffer.from(sig);
+    if (expected.length !== given.length || !timingSafeEqual(expected, given)) throw new PublicLinkUnavailableError();
+    const [linkId, mediaId, exp] = payload.split('.');
+    if (!linkId || !mediaId || Number(exp) < Math.floor(Date.now() / 1000)) throw new PublicLinkUnavailableError();
+    const link = await prisma.approvalLink.findUnique({ where: { id: linkId } });
+    if (!link || linkState(link) !== 'ACTIVE') throw new PublicLinkUnavailableError();
+    const media = await prisma.contentMedia.findFirst({ where: { id: mediaId, versionId: link.versionId, removedAt: null } });
+    if (!media) throw new PublicLinkUnavailableError();
+    const storage = this.storageFactory();
+    const res = await storage.openStream(media.storageKey);
+    return {
+      stream: res.stream,
+      sizeBytes: res.sizeBytes,
+      mimeType: media.mimeType,
+      cleanup: res.cleanup,
+    };
+  }
 }
 
 export const approvalService = new ApprovalService();

@@ -1,4 +1,7 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { Prisma } from '@prisma/client';
 import type { CreateContentItemRequest, UpdateContentItemRequest } from '@zafira/contracts';
 import {
@@ -450,18 +453,25 @@ export class ContentService {
     return this.get(ctx, id);
   }
 
-  async uploadMedia(
+  async uploadMediaFromSpool(
     ctx: ContentContext,
     id: string,
-    file: { buffer: Buffer; filename: string },
+    spooled: { tempFilePath: string; sizeBytes: number; sha256: string; filename: string; headerBuffer: Buffer },
     opts: { replaceMediaId?: string } = {}
   ) {
-    const check = validateUploadedFile(file.buffer.subarray(0, 32), file.buffer.length);
+    const check = validateUploadedFile(spooled.headerBuffer.subarray(0, 32), spooled.sizeBytes);
     if (!check.ok) throw new ContentError(check.code === 'FILE_TOO_LARGE' ? 413 : 400, check.code, check.message);
-    // F8-5p.1 (P35): dimensoes lidas do conteudo real; o arquivo e aceito mesmo acima do limite (aviso no detalhe)
-    const dims = check.type.kind === 'IMAGE' ? imageDimensions(file.buffer) : null;
+
+    // F8-5p.1 (P35): dimensoes lidas do conteudo real; tenta nos primeiros 64 KiB, ou le o temp se necessario
+    let dims = check.type.kind === 'IMAGE' ? imageDimensions(spooled.headerBuffer) : null;
+    if (check.type.kind === 'IMAGE' && !dims) {
+      try {
+        dims = imageDimensions(await readFile(spooled.tempFilePath));
+      } catch {}
+    }
+
     const storage = this.storage();
-    const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+    const sha256 = spooled.sha256;
     const storageKey = storageKeyFor(ctx.organizationId, sha256);
 
     await prisma.$transaction(async (tx) => {
@@ -482,7 +492,12 @@ export class ContentService {
       const problem = canAddMedia(item.format as ContentFormat, active.map((m) => m.kind as ContentMediaKind), check.type.kind);
       if (problem) throw new ContentError(409, problem.code, problem.message);
 
-      await storage.put(storageKey, file.buffer);
+      await storage.putFromPath(storageKey, spooled.tempFilePath, {
+        sizeBytes: spooled.sizeBytes,
+        sha256,
+        contentType: check.type.mime,
+      });
+
       const media = await tx.contentMedia.create({
         data: {
           organizationId: ctx.organizationId,
@@ -491,10 +506,10 @@ export class ContentService {
           position,
           kind: check.type.kind,
           mimeType: check.type.mime,
-          sizeBytes: file.buffer.length,
+          sizeBytes: spooled.sizeBytes,
           sha256,
           storageKey,
-          originalFilename: file.filename.slice(0, 255),
+          originalFilename: spooled.filename.slice(0, 255),
           uploadedByUserId: ctx.userId,
           widthPx: dims?.width ?? null,
           heightPx: dims?.height ?? null,
@@ -507,11 +522,38 @@ export class ContentService {
         ctx,
         id,
         opts.replaceMediaId ? 'MEDIA_REPLACED' : 'MEDIA_ADDED',
-        { mediaId: media.id, mime: check.type.mime, sizeBytes: file.buffer.length, sha256, replaced: opts.replaceMediaId ?? null },
+        { mediaId: media.id, mime: check.type.mime, sizeBytes: spooled.sizeBytes, sha256, replaced: opts.replaceMediaId ?? null },
         locked.id
       );
     });
     return this.get(ctx, id);
+  }
+
+  async uploadMedia(
+    ctx: ContentContext,
+    id: string,
+    file: { buffer: Buffer; filename: string },
+    opts: { replaceMediaId?: string } = {}
+  ) {
+    const sha256 = createHash('sha256').update(file.buffer).digest('hex');
+    const tmp = path.join(tmpdir(), `zafira-up-buf-${randomUUID()}.tmp`);
+    await writeFile(tmp, file.buffer);
+    try {
+      return await this.uploadMediaFromSpool(
+        ctx,
+        id,
+        {
+          tempFilePath: tmp,
+          sizeBytes: file.buffer.length,
+          sha256,
+          filename: file.filename,
+          headerBuffer: file.buffer.subarray(0, 64 * 1024),
+        },
+        opts
+      );
+    } finally {
+      await unlink(tmp).catch(() => {});
+    }
   }
 
   async removeMedia(ctx: ContentContext, id: string, mediaId: string) {
@@ -588,6 +630,20 @@ export class ContentService {
     if (!media) throw new ContentError(404, 'MEDIA_NOT_FOUND', 'Arquivo não encontrado.');
     const data = await this.storage().get(media.storageKey);
     return { data, mimeType: media.mimeType, filename: media.originalFilename };
+  }
+
+  async openFile(ctx: ContentContext, id: string, mediaId: string) {
+    await this.loadItem(prisma, ctx, id);
+    const media = await prisma.contentMedia.findFirst({ where: { id: mediaId, itemId: id, organizationId: ctx.organizationId } });
+    if (!media) throw new ContentError(404, 'MEDIA_NOT_FOUND', 'Arquivo não encontrado.');
+    const res = await this.storage().openStream(media.storageKey);
+    return {
+      stream: res.stream,
+      sizeBytes: res.sizeBytes,
+      mimeType: media.mimeType,
+      filename: media.originalFilename,
+      cleanup: res.cleanup,
+    };
   }
 }
 

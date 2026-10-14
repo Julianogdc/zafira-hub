@@ -12,6 +12,7 @@ import {
 import type { PermissionCode, RoleType } from '@zafira/domain';
 import { authenticate, requirePermission } from '../../middleware/auth.js';
 import { ContentContext, ContentError, contentService as service } from './content.service.js';
+import { spoolMultipartUpload } from './upload-spooler.js';
 import { approvalService } from './approval.service.js';
 import { contentStagesService } from './content-stages.service.js';
 import { publicationService } from './publication/publication.service.js';
@@ -92,16 +93,14 @@ export async function contentRoutes(app: FastifyInstance) {
   route('POST', '/content/items/:id/media', 'content.create', async (ctx, r) => {
     const file = await (r as any).file();
     if (!file) throw new ContentError(400, 'FILE_REQUIRED', 'Nenhum arquivo enviado.');
-    let buffer: Buffer;
+    const spooled = await spoolMultipartUpload(file, 100 * 1024 * 1024);
     try {
-      buffer = await file.toBuffer();
-    } catch {
-      throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
+      return await service.uploadMediaFromSpool(ctx, params(r).id, spooled, {
+        replaceMediaId: query(r).replace,
+      });
+    } finally {
+      await spooled.cleanup();
     }
-    if (file.file?.truncated) throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
-    return service.uploadMedia(ctx, params(r).id, { buffer, filename: String(file.filename || 'arquivo') }, {
-      replaceMediaId: query(r).replace,
-    });
   }, 201);
   route('DELETE', '/content/items/:id/media/:mediaId', 'content.create', (ctx, r) =>
     service.removeMedia(ctx, params(r).id, params(r).mediaId)
@@ -130,12 +129,18 @@ export async function contentRoutes(app: FastifyInstance) {
     contentStagesService.forClientPeriod(ctx, params(r).id, ContentStagesQuerySchema.parse(query(r)).period));
   // Arquivo servido pela API (autorizado por sessao/carteira); nunca URL publica do storage
   route('GET', '/content/items/:id/media/:mediaId/file', 'content.view', async (ctx, r, reply) => {
-    const f = await service.readFile(ctx, params(r).id, params(r).mediaId);
+    const f = await service.openFile(ctx, params(r).id, params(r).mediaId);
     reply
       .header('Content-Type', f.mimeType)
       .header('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(f.filename)}`)
+      .header('Content-Length', f.sizeBytes)
       .header('X-Content-Type-Options', 'nosniff')
-      .header('Cache-Control', 'private, no-store')
-      .send(f.data);
+      .header('Cache-Control', 'private, no-store');
+
+    if (f.cleanup) {
+      reply.raw.on('finish', () => { f.cleanup?.().catch(() => {}); });
+      reply.raw.on('close', () => { f.cleanup?.().catch(() => {}); });
+    }
+    return reply.send(f.stream);
   });
 }

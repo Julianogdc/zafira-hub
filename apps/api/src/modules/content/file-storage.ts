@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
@@ -9,17 +10,45 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
  *  - driver "local": EXCLUSIVO para desenvolvimento e testes; recusado em producao;
  *  - driver S3-compativel privado (HM-2, DEC-HML-003): bucket privado de qualquer fornecedor compativel (Cloudflare R2 preferencial),
  *    configurado so por variaveis de ambiente; integridade SHA-256 conferida na escrita e na leitura.
+ *  - HM-3: upload e download sem buffers integrais na heap (streaming e spooling temporario controlado).
  * Chaves enderecadas por hash e isoladas por organizacao (storageKeyFor): escrita idempotente e imutavel.
  */
+export interface PutFromPathOptions {
+  sizeBytes: number;
+  sha256: string;
+  contentType?: string;
+}
+
+export interface StorageStreamResult {
+  stream: NodeJS.ReadableStream;
+  sizeBytes: number;
+  cleanup?: () => Promise<void>;
+}
+
 export interface FileStorage {
   readonly driver: string;
   /** Grava o arquivo; se a chave ja existe (mesmo hash), nao reescreve. */
   put(key: string, data: Buffer): Promise<void>;
   get(key: string): Promise<Buffer>;
   exists(key: string): Promise<boolean>;
+  /** Grava o arquivo a partir de arquivo temporario em disco sem carregar na memoria RAM. */
+  putFromPath(key: string, filePath: string, options: PutFromPathOptions): Promise<void>;
+  /** Abre stream de leitura conferindo a integridade integral do SHA-256 sem buffers integrais. */
+  openStream(key: string): Promise<StorageStreamResult>;
 }
 
 const KEY_PATTERN = /^org\/[0-9a-fA-F-]{8,64}\/sha256\/[0-9a-f]{64}$/;
+
+/** Calcula o SHA-256 de um arquivo via streaming com consumo de memoria constante O(1). */
+export async function computeFileSha256(filePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256');
+    const stream = createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', () => resolve(hash.digest('hex')));
+    stream.on('error', reject);
+  });
+}
 
 export class LocalFileStorage implements FileStorage {
   readonly driver = 'local';
@@ -50,8 +79,43 @@ export class LocalFileStorage implements FileStorage {
     await rename(tmp, target);
   }
 
+  async putFromPath(key: string, filePath: string, options: PutFromPathOptions): Promise<void> {
+    if (options.sha256 !== hashOfKey(key)) {
+      throw new StorageIntegrityError('Conteúdo não corresponde ao hash da chave de armazenamento.');
+    }
+    const target = this.resolve(key);
+    if (await this.exists(key)) return;
+    await mkdir(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${randomUUID()}.tmp`;
+    await copyFile(filePath, tmp);
+    await rename(tmp, target);
+  }
+
   async get(key: string): Promise<Buffer> {
     return readFile(this.resolve(key));
+  }
+
+  async openStream(key: string): Promise<StorageStreamResult> {
+    const full = this.resolve(key);
+    let s;
+    try {
+      s = await stat(full);
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') {
+        const err = new Error('Arquivo não encontrado no armazenamento.') as Error & { code: string };
+        err.code = 'ENOENT';
+        throw err;
+      }
+      throw e;
+    }
+    const digest = await computeFileSha256(full);
+    if (digest !== hashOfKey(key)) {
+      throw new StorageIntegrityError('Integridade do arquivo local corrompida (SHA-256 diverge da chave).');
+    }
+    return {
+      stream: createReadStream(full),
+      sizeBytes: s.size,
+    };
   }
 }
 
@@ -146,6 +210,90 @@ export class S3FileStorage implements FileStorage {
     const bytes = Buffer.from(await out.Body.transformToByteArray());
     if (sha256Hex(bytes) !== hashOfKey(key)) throw new StorageIntegrityError();
     return bytes;
+  }
+
+  async putFromPath(key: string, filePath: string, options: PutFromPathOptions): Promise<void> {
+    const Key = this.objectKey(key);
+    if (options.sha256 !== hashOfKey(key)) {
+      throw new StorageIntegrityError('Conteúdo não corresponde ao hash da chave de armazenamento.');
+    }
+    if (await this.exists(key)) return;
+    const bodyStream = createReadStream(filePath);
+    await this.client.send(
+      new PutObjectCommand({
+        Bucket: this.bucket,
+        Key,
+        Body: bodyStream,
+        ContentType: options.contentType || 'application/octet-stream',
+        ContentLength: options.sizeBytes,
+        Metadata: { sha256: options.sha256 },
+      })
+    );
+  }
+
+  async openStream(key: string): Promise<StorageStreamResult> {
+    const Key = this.objectKey(key);
+    let out;
+    try {
+      out = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key }));
+    } catch (e) {
+      if (isNotFound(e)) {
+        const err = new Error('Arquivo não encontrado no armazenamento.') as Error & { code: string };
+        err.code = 'ENOENT';
+        throw err;
+      }
+      throw e;
+    }
+    if (!out.Body) throw new Error('Resposta do armazenamento sem conteúdo.');
+
+    const tmpPath = path.join(tmpdir(), `zafira-s3-dl-${randomUUID()}.tmp`);
+    const writeStream = createWriteStream(tmpPath, { flags: 'wx' });
+    const hash = createHash('sha256');
+    let totalBytes = 0;
+
+    const source = out.Body as NodeJS.ReadableStream;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        source.on('data', (chunk: Buffer) => {
+          totalBytes += chunk.length;
+          hash.update(chunk);
+          if (!writeStream.write(chunk)) {
+            source.pause();
+            writeStream.once('drain', () => source.resume());
+          }
+        });
+        source.on('end', () => {
+          writeStream.end(() => resolve());
+        });
+        source.on('error', (err) => {
+          writeStream.destroy();
+          reject(err);
+        });
+        writeStream.on('error', (err) => {
+          if ('destroy' in source && typeof (source as any).destroy === 'function') {
+            (source as any).destroy();
+          }
+          reject(err);
+        });
+      });
+
+      const digest = hash.digest('hex');
+      if (digest !== hashOfKey(key)) {
+        await unlink(tmpPath).catch(() => {});
+        throw new StorageIntegrityError('Conteúdo baixado do S3 não confere com o hash da chave.');
+      }
+
+      return {
+        stream: createReadStream(tmpPath),
+        sizeBytes: totalBytes,
+        cleanup: async () => {
+          await unlink(tmpPath).catch(() => {});
+        },
+      };
+    } catch (err) {
+      await unlink(tmpPath).catch(() => {});
+      throw err;
+    }
   }
 }
 
