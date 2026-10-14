@@ -38,6 +38,7 @@ import { ObservabilityService } from './modules/observability/observability.serv
 import { createMetricsRoutes } from './modules/observability/metrics.routes.js';
 import { getFastifyLoggerConfig } from './modules/observability/logger-config.js';
 import { resolveBrightBeanApiUrl } from './modules/integrations/brightbean/brightbean.config.js';
+import { resolveTrustProxy } from './lib/trust-proxy.js';
 
 // Configuração segura da URL base da BrightBean (fail-closed em produção)
 const defaultBrightBeanApiUrl = resolveBrightBeanApiUrl();
@@ -59,15 +60,20 @@ export interface BuildAppOptions {
   logger?: any;
   observabilityService?: ObservabilityService;
   socialPublisherService?: SocialPublisherService;
+  trustProxy?: string | boolean | number | string[];
 }
 
 const REQUEST_START_TIME = Symbol('requestStartTime');
 
 export function buildApp(options?: BuildAppOptions): FastifyInstance {
   const loggerConfig = options?.logger !== undefined ? options.logger : getFastifyLoggerConfig();
+  const trustProxyConfig = resolveTrustProxy(
+    options?.trustProxy !== undefined ? options.trustProxy : process.env.TRUST_PROXY
+  );
 
   const app = fastify({
     logger: loggerConfig,
+    trustProxy: trustProxyConfig,
   });
 
   const observability = options?.observabilityService || new ObservabilityService();
