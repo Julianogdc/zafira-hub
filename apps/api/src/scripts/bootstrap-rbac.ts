@@ -1,12 +1,32 @@
 import { PrismaClient } from '@prisma/client';
+import { PERMISSIONS, ADMIN_DEFAULTS, MANAGER_DEFAULTS, MEMBER_DEFAULTS } from '@zafira/domain';
 import {
-  PERMISSIONS,
-  ADMIN_DEFAULTS,
-  MANAGER_DEFAULTS,
-  MEMBER_DEFAULTS,
-} from '@zafira/domain';
+  applyRbacSync,
+  computeRbacSyncPlan,
+  formatRbacSyncReport,
+  loadRbacState,
+  reportIndividualExceptions,
+  RbacDefaultsInvalidError,
+  assertRbacDefaultsSane,
+  type RbacDefaults,
+} from '../modules/authorization/rbac-sync.js';
 
+/**
+ * Bootstrap RBAC (HM-1 / H1, P22).
+ *
+ *   npm run rbac:bootstrap --workspace=@zafira/api              # sincroniza (cria o que falta e REMOVE o que deixou de ser padrao)
+ *   npm run rbac:bootstrap --workspace=@zafira/api -- --check   # somente leitura: lista divergencias; sai com 2 se houver
+ *
+ * Nunca altera excecoes individuais por membro e nunca remove codigos do catalogo.
+ * Idempotente. Exige DATABASE_URL; nao imprime credenciais.
+ */
 const prisma = new PrismaClient();
+
+const defaults: RbacDefaults = {
+  ADMIN: ADMIN_DEFAULTS,
+  MANAGER: MANAGER_DEFAULTS,
+  MEMBER: MEMBER_DEFAULTS,
+};
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -14,83 +34,37 @@ async function main() {
     console.error('DATABASE_URL não configurada.');
     process.exit(1);
   }
+  const args = process.argv.slice(2);
+  const checkOnly = args.includes('--check') || args.includes('--dry-run');
 
-  // Mask credentials for display
   const maskedUrl = databaseUrl.replace(/:[^:@]+@/, ':***@');
-  console.log(`Iniciando Bootstrap RBAC no ambiente: ${maskedUrl}`);
+  console.log(`${checkOnly ? 'Verificação' : 'Bootstrap'} RBAC no ambiente: ${maskedUrl}`);
 
   try {
-    // 1. Upsert Permissions
-    console.log('Sincronizando catálogo de permissões...');
-    for (const code of PERMISSIONS) {
-      const area = code.split('.')[0];
-      await prisma.permission.upsert({
-        where: { code },
-        update: {},
-        create: {
-          code,
-          area,
-          description: `Permissão do sistema: ${code}`,
-        },
-      });
+    assertRbacDefaultsSane(PERMISSIONS, defaults);
+
+    if (checkOnly) {
+      const plan = computeRbacSyncPlan(PERMISSIONS, defaults, await loadRbacState(prisma));
+      const exceptions = await reportIndividualExceptions(prisma);
+      console.log(formatRbacSyncReport(plan, exceptions, 'check'));
+      if (!plan.inSync) {
+        console.error('Divergências entre as permissões padrão esperadas e as cadastradas. Rode o bootstrap (sem --check) antes do deploy.');
+        process.exitCode = 2;
+      }
+      return;
     }
 
-    // 2. Garantir RolePermissions para cada role e permissão default
-    console.log('Sincronizando defaults para Role: ADMIN...');
-    for (const code of ADMIN_DEFAULTS) {
-      await prisma.rolePermission.upsert({
-        where: {
-          role_permissionCode: {
-            role: 'ADMIN',
-            permissionCode: code,
-          },
-        },
-        update: {},
-        create: {
-          role: 'ADMIN',
-          permissionCode: code,
-        },
-      });
-    }
-
-    console.log('Sincronizando defaults para Role: MANAGER...');
-    for (const code of MANAGER_DEFAULTS) {
-      await prisma.rolePermission.upsert({
-        where: {
-          role_permissionCode: {
-            role: 'MANAGER',
-            permissionCode: code,
-          },
-        },
-        update: {},
-        create: {
-          role: 'MANAGER',
-          permissionCode: code,
-        },
-      });
-    }
-
-    console.log('Sincronizando defaults para Role: MEMBER...');
-    for (const code of MEMBER_DEFAULTS) {
-      await prisma.rolePermission.upsert({
-        where: {
-          role_permissionCode: {
-            role: 'MEMBER',
-            permissionCode: code,
-          },
-        },
-        update: {},
-        create: {
-          role: 'MEMBER',
-          permissionCode: code,
-        },
-      });
-    }
-
-    console.log('Bootstrap RBAC concluído com sucesso.');
+    const { result, plan } = await applyRbacSync(prisma, PERMISSIONS, defaults);
+    const exceptions = await reportIndividualExceptions(prisma);
+    console.log(formatRbacSyncReport(plan, exceptions, 'apply'));
+    console.log(`Bootstrap RBAC concluído: ${result.created} criada(s) no catálogo, ${result.added} acrescentada(s), ${result.removed} removida(s).`);
   } catch (error) {
-    console.error('Erro durante o bootstrap RBAC:', error);
-    process.exit(1);
+    if (error instanceof RbacDefaultsInvalidError) {
+      console.error(`Padrões de permissão inválidos: ${error.message} Nada foi alterado.`);
+    } else {
+      console.error('Erro durante o bootstrap RBAC:', error);
+    }
+    process.exitCode = 1;
   } finally {
     await prisma.$disconnect();
   }
