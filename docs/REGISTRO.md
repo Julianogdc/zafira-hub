@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b: preparação da R2/T30 (DEC-F8-017) — Claude
+- AUTORIZAÇÃO: DEC-F8-017 — somente leitura e preparação.
+- LEITURAS: `/me/` × 3 → só `create_posts` (`publish_directly` removida); conta de teste conectada. D6: Story rascunho, 1 mídia, sem horário. Código do fork (`4e5bef9`): sem "publicar agora"; publicação = agendar e o publicador dispara em ~15 s; retentativas 60 s/5 min/30 min (máx. 3); o servidor nunca republica sem confirmação (prefere `failed` a duplicar). Commit de documentação com `[skip ci]`.
+- PREPARADO: executor do T30 (uma única escrita — agendar D6 entre agora + 2 e + 10 min com fuso; travas testadas offline; acompanhamento de 25 min; métricas e totais ao final; permalink só no interno). Roteiro e critérios em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §13.
+- R1+: executada (DEC-F8-016); aceite técnico ainda não registrado.
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: T30 **preparado, não autorizado**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial publicar sem autorização, alterar credenciais pelo agente, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b (interno e público).
+
+### DEC-F8-017 — Preparação da R2 da F8-0b (primeira publicação real, T30), sem execução (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: preparar o primeiro cenário de publicação real (Story imagem D6) depois da R1+.
+- Decisão: (1) A Direção retirou `publish_directly` da chave. (2) **Autorizada somente a preparação:** confirmar por `GET /me/` a remoção; consultar o estado de D6; verificar no código o procedimento de publicação de um rascunho; identificar permissões, riscos e verificação do resultado; preparar executor restrito a D6 e à conta de testes; definir verificação de status, permalink e métricas; prever detecção de falha e duplicidade; apresentar roteiro e critérios de aceite. (3) Proibido: publicar, agendar, cancelar, alterar permissões/credenciais, criar posts ou mídia, VPS/produção, iniciar a R2.
+- Alternativas consideradas: horário no passado (publica em ~15 s) — reservado ao T34.
+- Impacto: documentação.
+- Revisão: na autorização do T30.
+
 ### 2026-10-13 — F8-0b R1+ executada: T20–T23 aprovados, zero agendados e zero publicados (DEC-F8-016) — Claude
 - AUTORIZAÇÃO: DEC-F8-016.
 - PORTÃO: após 35 s, 3× `/me/` com permissões exatas `create_posts` + `publish_directly` e 1 conta de teste conectada; conta sem agendados/publicações; D6 e D7 em rascunho.

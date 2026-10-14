@@ -352,3 +352,41 @@ Mesmo executor da §11, sem alterações (travas: só D6 e D7; só agendar, reag
 **Observação:** o horário de +7 dias caiu depois da validade informada da chave (20/10/2026); como a revogação ou expiração da chave **não** cancela agendados, o cancelamento imediato era obrigatório e foi feito.
 
 **Pendências para a R2:** retirar `publish_directly` da chave até a R2 ser autorizada; R2 teste a teste (T30–T34) na conta de testes, com aprovação específica; primeira publicação confirma #33 permalink, #36 métricas de post e #32/#34 estados de publicação e falha.
+
+## 13. Preparação da R2 — primeira publicação real (T30, Story imagem D6) (2026-10-13, DEC-F8-017) — sem execução
+
+**Leituras feitas (só GET):** `/me/` × 3 → permissões efetivas **[`create_posts`]** (`publish_directly` removida, conforme a Direção), conta de teste conectada. **D6:** `draft`, Story (`post_type` = `story`), 1 mídia (JPG 1080×1920), sem horário. Campos do filho expostos pela API: `status`, `scheduled_at`, `published_at`, `platform_post_id`, `permalink_url`, `publish_error` (`retry_count` **não** é exposto).
+
+### 13.1 Procedimento exato
+A API v1 **não tem "publicar agora"** (`action` só `draft`/`schedule`). O caminho controlado é **agendar D6 para poucos minutos à frente**: `POST /posts/{D6}/schedule` com `scheduled_at` = agora + 3 min (minuto cheio, fuso `-03:00`). O publicador roda a cada ~15 s, pega o filho `scheduled` vencido, passa para `publishing`, envia ao Instagram e grava `published` + `published_at` + `platform_post_id` + `permalink_url` (ou `failed` + `publish_error`). Horário no passado também publica (~15 s), mas **não** é o caminho escolhido (fica para o T34, se autorizado).
+
+### 13.2 Permissões
+Chave com **`create_posts` + `publish_directly` + `view_analytics`** (esta última só para ler as métricas do post), mesma conta de teste na allowlist; aguardar 30 s após a alteração. Retirar `publish_directly` logo após o teste.
+
+### 13.3 Riscos
+| Risco | Tratamento |
+|---|---|
+| Publicação pública no Instagram | conta própria de testes, autorizada pela Direção; Story some em 24 h; conteúdo sintético `[TESTE F8-0b]` |
+| Publicação não pode ser apagada pela API | remoção, se desejada, só manual no Instagram |
+| Retentativa automática do servidor | em falha transitória o filho volta a `scheduled` com nova tentativa em 60 s, 5 min e 30 min (máx. 3); o executor acompanha 25 min e **alerta** se D6 seguir agendado (cancelamento só com decisão da Direção) |
+| Duplicidade | o servidor **nunca republica** um `publishing` sem confirmação (marca `failed` em vez de arriscar duplicar); o executor faz **uma única escrita**, **não reenvia** nem em falha de rede, e alerta se a conta tiver mais de 1 publicado |
+| Horário errado | executor só aceita `scheduled_at` com fuso e entre agora + 2 min e agora + 10 min |
+| Permalink tardio | ausência de permalink logo após `published` = "pendente"; releitura posterior |
+| Métricas atrasadas | `analytics_available`/`next_sync_eta`; ausente ≠ zero; nova leitura (só GET) depois |
+| Teto diário | 1 publicação no teto de 25/24 h da conta |
+
+### 13.4 Executor (preparado, não executado)
+Restrito a D6 e à conta de testes; **uma única escrita** (agendar D6, janela +2 a +10 min, fuso obrigatório); bloqueia qualquer outra rota, outro post, cancelamento e segunda escrita (travas testadas offline). Portão: 3× `/me/` com permissões exatas e conta de teste `instagram_login` conectada; conta sem agendados/publicando; D6 = Story rascunho com 1 mídia. Acompanha a cada 15 s por até 25 min: estado de D6, totais da conta por estado; encerra em `published` com permalink ou em `failed`. Final: estado de D6, totais, métricas do post (`GET /analytics/posts/{D6}`). O permalink fica **só** no repositório interno.
+
+### 13.5 Verificações e critérios de aceite do T30
+1. `schedule` → 200 com horário em UTC no mesmo instante.
+2. Linha do tempo `scheduled` → `publishing` → **`published`**, com `published_at` e `platform_post_id`.
+3. `permalink_url` presente (ou pendente, confirmado em releitura).
+4. **Exatamente 1** publicado na conta; **zero** agendados e zero `publishing` ao final.
+5. Métricas do post: HTTP 200 (disponíveis ou com `next_sync_eta`), sem tratar ausência como zero.
+6. Conferência visual da Direção no perfil de testes: **um único** Story.
+7. Retirada de `publish_directly` em seguida.
+Falha (`failed`) também é resultado válido: registrar `publish_error` e não repetir sem nova autorização.
+
+### 13.6 Roteiro
+Direção adiciona `publish_directly` e `view_analytics` à chave → autorização expressa do T30 → executor (portão, uma escrita, acompanhamento, leitura final) → relatório → Direção confere o perfil e retira `publish_directly` → aceite. T31–T34 continuam teste a teste.
