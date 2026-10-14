@@ -36,6 +36,25 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — Aceite da F8-4b, proposta da F8-5 e bloqueios da primeira homologação (DEC-F8-028) — Claude
+- AUTORIZAÇÃO: DEC-F8-028 — somente análise e documentação.
+- ACEITE: F8-4b aceita definitivamente (código `ad44325`, CI 5/5 run 38570183115, Browser Gate F8 104/0, P36 resolvida). Preservadas P33, P34, P35, P37 e RS1–RS7.
+- F8-5 (`docs/propostas/F8-5_PROPOSTA_EXECUCAO.md`): o escopo oficial é sincronização de status, permalink e falhas, métricas orgânicas (leitura), conteúdo piloto e Portão F8. A sincronização de status e permalink já existe na reconciliação da F8-4a, mas nunca foi exercitada com o provedor real. Limitações do BrightBean incorporadas: zeros com `captured_at` nulo não são dado; `next_sync_eta` móvel; coleta horária; coleta efetiva nunca observada (RS3); Story expira em 24 h. Desenho: coletas append-only (único por coleta, sem UPDATE/DELETE), coletor desligado por padrão (`PUBLICATION_METRICS_ENABLED`), API só leitura com estados aguardando/coletado/indisponível/encerrado, "Publicados" da F8-3 só com publicação confirmada e indisponível sem integração ativa. Microetapas F8-5a–d sem publicação; F8-5e (piloto real do Portão F8) com autorização própria. Decisões D-F85-1 a D-F85-7; 8 critérios de aceite.
+- HOMOLOGAÇÃO (`docs/propostas/HOMOLOGACAO_1_BLOQUEIOS.md`): bloqueadores H1 P22; H2 armazenamento em produção inexistente (driver local recusado, S3 não implementado); H3 P18; H4 sem massa sintética própria; H5 perfil de ambiente desatualizado (20 de ~70 variáveis, checklist cita 14 de 32 migrações); H6 comportamento sem simuladores não verificado; H7 infraestrutura não decidida; H8 segredos próprios; H9 ensaio de backup/restauração. Itens que não bloqueiam a homologação sintética listados (P28, P5, P24–P26, P27 com recomendação de triagem das altas, P13, Portão da Fase 1).
+- BASELINE DE CÓDIGO: inalterada — `ad44325` no público (espelho `51e1af0`).
+- STATUS: **F8-4b aceita**; F8-5 e homologação **propostas, não autorizadas**.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial implementar a F8-5, ligar o despachante, publicar, VPS, produção e credenciais.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE / proposta F8-5 / bloqueios da homologação (interno e público).
+
+### DEC-F8-028 — Aceite técnico definitivo da F8-4b e preparação da F8-5 e da primeira homologação (somente análise) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: encerrar a F8-4b e preparar os próximos passos: métricas e Portão F8, e a primeira homologação.
+- Decisão: (1) **Aceite técnico definitivo da F8-4b**, com evidências: baseline `ad44325`; CI 38570183115, 5/5; Browser Gate F8 104/0; governança anterior DEC-F8-027; P36 resolvida. (2) Preservar P33, P34, P35, P37 e RS1–RS7. (3) Autorizados somente análise e documentação: escopo oficial da F8-5 considerando as limitações de métricas do BrightBean; proposta técnica da F8-5 com microetapas, testes e critérios de aceite; relação do que falta para uma primeira homologação controlada com dados sintéticos. (4) Proibido: implementar a F8-5, ativar o despachante, publicar, alterar VPS, produção ou credenciais.
+- Alternativas consideradas: —
+- Impacto: documentação (`docs/propostas/F8-5_PROPOSTA_EXECUCAO.md`, `docs/propostas/HOMOLOGACAO_1_BLOQUEIOS.md`).
+- Revisão: na autorização da F8-5 e da homologação.
+
 ### 2026-10-14 — F8-4b implementada: agendamento no Instagram pela versão aprovada (DEC-F8-027) — Claude
 - AUTORIZAÇÃO: DEC-F8-027 (D-F84B-1 a D-F84B-4), microetapas executadas em sequência.
 - F8-4b.1 (`fc9d744` + `ad44325`): leituras `GET /content/items/:id/publication-targets` (só contas Instagram vinculadas ao cliente, sem chamar o provedor) e `GET /content/publication-settings` (despachante, antecedência, piloto, teto); a visão da publicação passa a ter `versionNumber`, `sentToProvider` (registrado no Hub x enviado ao provedor) e `actions` (reagendar/cancelar, falsas com cancelamento pendente); **`PROVIDER_RETRY` passa a bloquear reagendar e cancelar**; `content.schedule` exposta em `/auth/capabilities` (faltava; achada pelo Browser Gate na 1ª rodada). Teste PostgreSQL `publication-ui-postgres.test.ts`: leituras, ações, estados que bloqueiam, cancelamento x novo pedido x unicidade (cancelamento pedido segue ocupando a vaga até o provedor confirmar: 409 `PUBLICATION_ALREADY_ACTIVE`; depois da confirmação, novo pedido 201) e **P36** (teto de 25 em 24 h).
