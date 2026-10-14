@@ -1,0 +1,74 @@
+name: Mirror base images to GHCR
+
+# DEC-F8-025: espelho proprio das imagens-base no GHCR (opcao A da DEC-F8-024).
+# Disparo MANUAL. Copia cada imagem pelo digest fixado, com todas as arquiteturas, preservando o digest
+# (mesmo conteudo byte a byte), e confere a equivalencia. Sem segredo novo: usa o token do proprio workflow.
+# Downloads com falha (ex.: 429) NAO sao repetidos indefinidamente: no maximo 2 origens x 2 tentativas.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  mirror:
+    name: Mirror pinned base images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Copy and verify (all architectures, preserving digests)
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          skopeo --version
+          echo "$GHCR_TOKEN" | skopeo login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null
+
+          # nome | tag no espelho | digest fixado (indice multi-arquitetura da imagem oficial)
+          IMAGES="
+          node|24.12.0-bookworm-slim|sha256:7326fb2dbdce998edd72140946851be64ef4a643e8715e138ca467e8e9d92c99
+          node|24.12.0-alpine|sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8
+          nginx|alpine|sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+          postgres|16|sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d
+          "
+
+          echo "$IMAGES" | while IFS='|' read -r name tag digest; do
+            [ -z "${name// }" ] && continue
+            name="$(echo "$name" | xargs)"; tag="$(echo "$tag" | xargs)"; digest="$(echo "$digest" | xargs)"
+            dst="ghcr.io/julianogdc/base-${name}"
+            copied=""
+            for src in "docker.io/library/${name}" "public.ecr.aws/docker/library/${name}"; do
+              for attempt in 1 2; do
+                if skopeo copy --all --preserve-digests --retry-times 0 "docker://${src}@${digest}" "docker://${dst}:${tag}"; then
+                  copied="$src"; break 2
+                fi
+                echo "Falha ao copiar de ${src} (tentativa ${attempt}); aguardando 60 s"
+                sleep 60
+              done
+            done
+            [ -n "$copied" ] || { echo "FALHA: ${name}:${tag} nao copiado"; exit 1; }
+
+            # Equivalencia 1: o indice no espelho tem exatamente o digest de origem
+            got="sha256:$(skopeo inspect --raw "docker://${dst}@${digest}" | sha256sum | cut -d' ' -f1)"
+            [ "$got" = "$digest" ] || { echo "DIVERGENCIA no indice ${dst}: ${got} != ${digest}"; exit 1; }
+            # Equivalencia 2: cada manifesto de plataforma existe no espelho com o mesmo digest
+            for m in $(skopeo inspect --raw "docker://${dst}@${digest}" | jq -r '.manifests[].digest'); do
+              mg="sha256:$(skopeo inspect --raw "docker://${dst}@${m}" | sha256sum | cut -d' ' -f1)"
+              [ "$mg" = "$m" ] || { echo "DIVERGENCIA no manifesto ${m} de ${dst}"; exit 1; }
+            done
+            plats="$(skopeo inspect --raw "docker://${dst}@${digest}" | jq -r '[.manifests[].platform | "\(.os)/\(.architecture)\(if .variant then "/"+.variant else "" end)"] | join(", ")')"
+            echo "OK ${dst}:${tag}@${digest} (origem ${copied}; plataformas: ${plats})"
+          done
+
+      - name: Verify anonymous (public) pull
+        run: |
+          set -euo pipefail
+          for name in node nginx postgres; do
+            token="$(curl -fsS "https://ghcr.io/token?scope=repository:julianogdc/base-${name}:pull" | jq -r .token)"
+            code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${token}" "https://ghcr.io/v2/julianogdc/base-${name}/tags/list")"
+            echo "base-${name}: acesso anonimo HTTP ${code}"
+            [ "$code" = "200" ] || { echo "Pacote base-${name} NAO esta publico"; exit 1; }
+          done
