@@ -36,6 +36,31 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-14 — HM-1 implementada: bootstrap RBAC (H1/P22) e repetibilidade dos testes PostgreSQL (H3/P18) (DEC-HML-001) — Claude
+- AUTORIZAÇÃO: DEC-HML-001 — exclusivamente a HM-1. Não executada nesta sessão: o planejamento de medição de capacidade da VPS (bloco interrompido e substituído).
+- H1/P22 — DIAGNÓSTICO: o bootstrap só fazia upsert; nunca removia padrões obsoletos. Em banco anterior à F6-IMP.7B o MEMBER mantinha `deliverables.complete`. CORREÇÃO (`111f92c`): módulo `modules/authorization/rbac-sync.ts` (plano puro + aplicação transacional serializável); acrescenta e remove padrões por papel; nunca remove catálogo (cascata apagaria exceções), nunca toca exceções individuais nem organizações; trava de padrões (nenhum papel vazio, todos no catálogo, MANAGER/MEMBER ⊆ ADMIN); `--check`/`--dry-run` somente leitura (saída 2 em divergência); relatório com contagem de exceções por código, sem dados pessoais; `docs/operations/rbac-bootstrap.md` e passo 8.1 no runbook interno.
+- H3/P18 — DIAGNÓSTICO: apenas `rbac-postgres.test.ts` usa organizações fixas; deixava a configuração da organização alterada (Q) e logs de auditoria que quebravam a contagem de P. CORREÇÃO (`2891e8c`): reset do estado-base antes do teste (guardado), restauração em `finally` no M, asserções escopadas no P, restauração no Q; guarda única `lib/test-database-guard.ts` (NODE_ENV, `ZAFIRA_TEST_DATABASE=1`, nome exato `zafira_hub_ci`, host local ou lista explícita, organizações `ci-*` antes de limpeza destrutiva, sem senha nas mensagens) aplicada nos 19 arquivos; `docs/operations/integration-test-database.md`.
+- CI (`ecfc392`): `--check` após os dois bootstraps; segunda execução consecutiva de `test:integration:db` no mesmo banco; verificação RBAC `--check` na imagem publicada do ensaio de homologação.
+- ARQUIVOS: novos `rbac-sync.ts`, `rbac-sync.test.ts`, `rbac-bootstrap-postgres.test.ts`, `test-database-guard.ts` e seu teste, 2 documentos de operações; alterados `bootstrap-rbac.ts`, 19 arquivos de teste/script (guarda), `rbac-postgres.test.ts`, `foundation-ci.yml` (2 arquivos com diferenças intencionais preservadas).
+- TESTES: API 842/842 (locais e CI); domínio 123/123; web 99/99; PostgreSQL 201/201 **em duas execuções consecutivas** no mesmo banco; bootstrap no CI: 1ª execução 73 criadas e 136 acrescentadas, 2ª 0/0/0; `--check` em sincronia no banco de testes e no do ensaio; Browser Gates F6–F8 PASS (F8 125/0). Sem PostgreSQL local: a prova das duas execuções é a do CI.
+- CI: run 38615589824 (https://github.com/Julianogdc/zafira-hub/actions/runs/38615589824) **5/5**.
+- COMMITS: público `111f92c` (H1), `2891e8c` (H3), `ecfc392` (CI); interno `0d0b03f`, `31afe02`, `4c1e70e`. Um erro de processo corrigido antes do push: o runbook interno entrara num commit público local; refeito sem ele e o script de envio passou a abortar quando a guarda pública acusar.
+- BASELINE DE CÓDIGO: `ecfc392` no público (espelho `4c1e70e`).
+- STATUS: **pendente de aceite técnico** da Direção.
+- RISCOS RESIDUAIS: a remoção vale na próxima requisição (o resolvedor lê o banco), então rodar `--check` e ler as remoções antes de aplicar em ambiente com usuários; catálogo obsoleto fica só relatado (decisão de limpar é futura); o reset de `rbac-postgres` cobre os dados que o arquivo cria hoje, e um teste novo que use `ci-org-a`/`ci-org-b` precisa entrar na lista; a guarda aceita `zafira_hub_ci` em hosts locais, então um banco de teste com esse nome em host remoto exige lista explícita; `rbac-bootstrap-postgres` usa a guarda única, mas assume CI já sincronizado.
+- PENDÊNCIAS: H2–H9 (HM-2 a HM-6 e H7/H8/H9) não iniciadas; P33, P34, P40 (acompanhamento), RS1–RS7 mantidas.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial VPS, EasyPanel, DNS, buckets, credenciais, contratação, HM-2 a HM-6, piloto F8-5e, F9, despachante e coletor.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / HOMOLOGACAO_1_BLOQUEIOS.
+
+### DEC-HML-001 — Diretrizes de arquitetura de H2/H7 e autorização exclusiva da HM-1 (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: decidir a arquitetura de armazenamento e a abordagem de infraestrutura da primeira homologação e liberar o primeiro passo de código.
+- Decisão: (1) **Aprovada a arquitetura de armazenamento S3-compatível com bucket externo e privado**; Cloudflare R2 é o fornecedor preferencial e a escolha definitiva depende de decisão posterior do proprietário. (2) **H7:** avaliar primeiro a capacidade da VPS atual, antes de contratar outro servidor; a homologação deve permanecer isolada dos serviços existentes; nenhuma contratação, provisionamento ou alteração na VPS autorizada. (3) Nginx (limite de corpo), `trustProxy`, consumo de memória, compatibilidade S3 e autenticação do GHCR ficam para etapas futuras. (4) **Autorizada exclusivamente a HM-1** (H1/P22 e H3/P18), com commits separados, espelhamento, testes locais e CI 5/5; parar em caso de falha; não declarar aceite em nome da Direção. (5) Proibido: VPS, EasyPanel, DNS, proxy de produção, bancos reais, buckets, credenciais, contratação, integrações, HM-2 a HM-6, homologação real, F8-5e e Fase 9.
+- Alternativas consideradas: host dedicado imediato (adiada: medir a VPS primeiro); armazenamento autohospedado na VPS (não recomendado, ver análise H2/H7).
+- Impacto: código de autorização (script e módulo), testes e CI; documentação operacional.
+- Revisão: no aceite técnico da HM-1 e na decisão da HM-2.
+
 ### DEC-F8-033 — Aceite técnico definitivo da correção do P40 (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
 - Problema: encerrar tecnicamente a correção da prontidão do PostgreSQL do ensaio de homologação no CI.

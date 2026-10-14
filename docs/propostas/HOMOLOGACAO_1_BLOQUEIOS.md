@@ -25,6 +25,8 @@
 | H8 | **Segredos próprios da homologação** | `JWT_SECRET`, `COOKIE_SECRET`, `HUB_INTERNAL_API_KEY`, `INTEGRATION_ENCRYPTION_KEY`, `APPROVAL_MEDIA_SECRET`, senha do banco; a senha de exemplo do `docker-compose.reference.yml` (P12) precisa ser sempre sobrescrita | proprietário gera e guarda os valores no ambiente (nunca no repositório nem na conversa); a checagem do H5 recusa os valores de exemplo | **proprietário** |
 | H9 | **Ensaio de backup e restauração no banco de homologação** | o runbook existe, mas nunca foi executado fora do CI | um backup e uma restauração completos no banco de homologação antes de convidar usuários | proprietário executa; agente prepara os comandos |
 
+> **Atualização HM-1 (DEC-HML-001, 2026-10-14):** H1 (P22) e H3 (P18) implementadas e com CI 5/5 (run 38615589824), pendentes de aceite técnico. H2, H4–H9 seguem abertas.
+
 ## 3. Não bloqueiam a homologação sintética (mas bloqueiam etapas seguintes)
 
 | Item | Por que não bloqueia agora | Bloqueia |
