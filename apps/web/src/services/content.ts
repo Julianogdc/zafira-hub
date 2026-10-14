@@ -86,6 +86,9 @@ export interface ContentMediaView {
   originalFilename: string;
   createdAt: string;
   removedAt: string | null;
+  /** F8-5p.1 (P35): dimensoes lidas do arquivo (null = ainda nao lidas ou ilegiveis). */
+  widthPx?: number | null;
+  heightPx?: number | null;
 }
 
 export interface ContentVersionView {

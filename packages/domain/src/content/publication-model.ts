@@ -6,6 +6,7 @@
  */
 
 import type { ContentFormat, ContentMediaKind } from './content-model.js';
+import { imagePixelProblem } from './image-dimensions.js';
 
 export const PUBLICATION_STATES = [
   'PENDING', // pedido gravado na caixa de saida, nada enviado ao provedor
@@ -46,6 +47,8 @@ export type PublicationProblemCode =
   | 'MEDIA_KIND_INVALID'
   | 'MEDIA_TYPE_NOT_PUBLISHABLE'
   | 'MEDIA_TOO_LARGE'
+  | 'MEDIA_DIMENSIONS_UNKNOWN'
+  | 'MEDIA_TOO_MANY_PIXELS'
   | 'CAPTION_TOO_LONG'
   | 'DAILY_CAP_REACHED';
 
@@ -79,6 +82,9 @@ export interface PublishableMedia {
   kind: ContentMediaKind;
   mimeType: string;
   sizeBytes: number;
+  /** F8-5p.1 (P35): dimensoes da imagem; ausente/nulo = desconhecido e bloqueia (fail closed). */
+  widthPx?: number | null;
+  heightPx?: number | null;
 }
 
 /** Validacoes que o provedor NAO faz na criacao do rascunho (carrossel, legenda) e limites de arquivo. */
@@ -119,6 +125,15 @@ export function validatePublicationContent(input: {
   }
   if (input.media.some((m) => m.kind === 'VIDEO' && m.sizeBytes > PUBLISH_MAX_VIDEO_BYTES)) {
     problems.push({ code: 'MEDIA_TOO_LARGE', message: 'Vídeo acima de 1 GB não é aceito pelo provedor de publicação.' });
+  }
+  // F8-5p.1 (DEC-F8-031, P35): imagem com dimensoes ilegiveis ou acima de 30 MP nunca chega ao provedor
+  for (const m of input.media) {
+    if (m.kind !== 'IMAGE') continue;
+    const px = imagePixelProblem({ widthPx: m.widthPx, heightPx: m.heightPx });
+    if (px) {
+      problems.push(px);
+      break;
+    }
   }
   const limit = input.captionLimit ?? INSTAGRAM_DEFAULT_CAPTION_LIMIT;
   if ([...input.caption].length > limit) {

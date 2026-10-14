@@ -386,6 +386,7 @@ export default function ConteudoDetalhe() {
                   <div className={styles.badges}>
                     <Badge variant="neutral">{m.kind === 'VIDEO' ? 'Vídeo' : 'Imagem'}</Badge>
                     <Badge variant="neutral">{formatBytes(m.sizeBytes)}</Badge>
+                    {m.widthPx && m.heightPx ? <Badge variant="neutral" data-testid="media-dimensions">{m.widthPx}×{m.heightPx}</Badge> : null}
                   </div>
                 </div>
                 {canEdit ? (

@@ -22,7 +22,8 @@ import {
 import { prisma } from '../../../lib/prisma.js';
 import { AuditService } from '../../audit/audit.service.js';
 import { buildClientResourceScopeWhere } from '../../authorization/client-resource-scope.js';
-import { ContentContext, ContentError } from '../content.service.js';
+import { ContentContext, ContentError, ensureImageDimensions } from '../content.service.js';
+import { resolveFileStorage } from '../file-storage.js';
 import { publicationDispatchEnabled } from './publication-dispatcher.js';
 
 /**
@@ -198,9 +199,11 @@ export class PublicationService {
     if (!parsed.ok) throw new ContentError(422, parsed.problem.code, parsed.problem.message);
     const lead = checkScheduleLead(parsed.at, now);
     if (lead) throw new ContentError(422, lead.code, lead.message);
+    // F8-5p.1 (DEC-F8-031, P35): dimensoes (antigas calculadas uma vez); ilegivel ou acima de 30 MP bloqueia
+    const media = await ensureImageDimensions(current.media, () => resolveFileStorage());
     const problems = validatePublicationContent({
       format: item.format as ContentFormat,
-      media: current.media.map((m) => ({ kind: m.kind as ContentMediaKind, mimeType: m.mimeType, sizeBytes: m.sizeBytes })),
+      media: media.map((m) => ({ kind: m.kind as ContentMediaKind, mimeType: m.mimeType, sizeBytes: m.sizeBytes, widthPx: m.widthPx, heightPx: m.heightPx })),
       caption: current.caption,
       captionLimit,
     });

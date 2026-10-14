@@ -3,7 +3,10 @@ import { Prisma } from '@prisma/client';
 import type { CreateContentItemRequest, UpdateContentItemRequest } from '@zafira/contracts';
 import {
   PUBLISH_COMPATIBILITY_NOTE,
+  PUBLISH_MAX_IMAGE_BYTES,
   canAddMedia,
+  imageDimensions,
+  imagePixelProblem,
   canChangeFormat,
   isVersionEditable,
   storageKeyFor,
@@ -24,6 +27,36 @@ import { resolveFileStorage, StorageNotConfiguredError, type FileStorage } from 
  */
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * F8-5p.1 (DEC-F8-031, P35): calcula e grava UMA vez as dimensoes de imagens antigas (sem largura/altura),
+ * lendo o proprio arquivo. Imagem acima de 20 MB nao e lida (ja e recusada para publicacao). Ilegivel segue nula
+ * (desconhecida), o que bloqueia o agendamento. O banco so aceita a transicao nulo -> valor.
+ */
+export async function ensureImageDimensions<T extends { id: string; kind: string; storageKey: string; sizeBytes: number; widthPx: number | null; heightPx: number | null }>(
+  media: T[],
+  storage: () => FileStorage
+): Promise<T[]> {
+  const out: T[] = [];
+  for (const m of media) {
+    if (m.kind !== 'IMAGE' || (m.widthPx && m.heightPx) || m.sizeBytes > PUBLISH_MAX_IMAGE_BYTES) {
+      out.push(m);
+      continue;
+    }
+    try {
+      const dims = imageDimensions(await storage().get(m.storageKey));
+      if (!dims) {
+        out.push(m);
+        continue;
+      }
+      await prisma.contentMedia.updateMany({ where: { id: m.id, widthPx: null }, data: { widthPx: dims.width, heightPx: dims.height } });
+      out.push({ ...m, widthPx: dims.width, heightPx: dims.height });
+    } catch {
+      out.push(m); // armazenamento indisponivel: segue desconhecida (bloqueia o agendamento, nunca libera)
+    }
+  }
+  return out;
+}
 
 export interface ContentContext {
   organizationId: string;
@@ -65,6 +98,14 @@ function linkConflictOf(error: unknown): ContentError | null {
 
 export class ContentService {
   constructor(private readonly storageFactory: () => FileStorage = () => resolveFileStorage()) {}
+
+  /** Dimensoes dos arquivos ativos da versao atual (calcula as antigas uma vez; sem armazenamento, segue como esta). */
+  private async withDimensions<T extends { id: string; kind: string; storageKey: string; sizeBytes: number; widthPx: number | null; heightPx: number | null; removedAt: Date | null }>(media: T[]): Promise<T[]> {
+    const pending = media.filter((m) => !m.removedAt && m.kind === 'IMAGE' && !(m.widthPx && m.heightPx));
+    if (!pending.length) return media;
+    const filled = new Map((await ensureImageDimensions(pending, () => this.storage())).map((m) => [m.id, m]));
+    return media.map((m) => filled.get(m.id) ?? m);
+  }
 
   private storage(): FileStorage {
     try {
@@ -175,6 +216,8 @@ export class ContentService {
     originalFilename: string;
     createdAt: Date;
     removedAt: Date | null;
+    widthPx?: number | null;
+    heightPx?: number | null;
   }) {
     return {
       id: m.id,
@@ -186,6 +229,8 @@ export class ContentService {
       originalFilename: m.originalFilename,
       createdAt: m.createdAt.toISOString(),
       removedAt: m.removedAt?.toISOString() ?? null,
+      widthPx: m.widthPx ?? null,
+      heightPx: m.heightPx ?? null,
     };
   }
 
@@ -239,7 +284,11 @@ export class ContentService {
       prisma.contentEvent.findMany({ where: { itemId: id }, orderBy: { createdAt: 'desc' }, take: 100 }),
     ]);
     const current = versions[versions.length - 1];
-    const activeKinds = (current?.media ?? []).filter((m) => !m.removedAt).map((m) => m.kind as ContentMediaKind);
+    if (current) current.media = await this.withDimensions(current.media);
+    const active = (current?.media ?? []).filter((m) => !m.removedAt);
+    const activeKinds = active.map((m) => m.kind as ContentMediaKind);
+    // F8-5p.1 (P35): aviso ja no upload, antes da aprovacao, quando a imagem nao poderia ser publicada
+    const pixelProblems = active.flatMap((m) => (m.kind === 'IMAGE' ? [imagePixelProblem(m)].filter((p): p is NonNullable<typeof p> => p !== null) : []));
     return {
       id: item.id,
       clientId: item.clientId,
@@ -253,7 +302,7 @@ export class ContentService {
       updatedAt: item.updatedAt.toISOString(),
       editable: current ? isVersionEditable(current) : false,
       currentVersionNumber: current?.number ?? 1,
-      problems: validateMediaSet(item.format as ContentFormat, activeKinds),
+      problems: [...validateMediaSet(item.format as ContentFormat, activeKinds), ...pixelProblems],
       publishCompatibilityNote: PUBLISH_COMPATIBILITY_NOTE,
       versions: versions.map((v) => ({
         id: v.id,
@@ -405,6 +454,8 @@ export class ContentService {
   ) {
     const check = validateUploadedFile(file.buffer.subarray(0, 32), file.buffer.length);
     if (!check.ok) throw new ContentError(check.code === 'FILE_TOO_LARGE' ? 413 : 400, check.code, check.message);
+    // F8-5p.1 (P35): dimensoes lidas do conteudo real; o arquivo e aceito mesmo acima do limite (aviso no detalhe)
+    const dims = check.type.kind === 'IMAGE' ? imageDimensions(file.buffer) : null;
     const storage = this.storage();
     const sha256 = createHash('sha256').update(file.buffer).digest('hex');
     const storageKey = storageKeyFor(ctx.organizationId, sha256);
@@ -441,6 +492,8 @@ export class ContentService {
           storageKey,
           originalFilename: file.filename.slice(0, 255),
           uploadedByUserId: ctx.userId,
+          widthPx: dims?.width ?? null,
+          heightPx: dims?.height ?? null,
         },
       });
       const shas = [...active, media].sort((a, b) => a.position - b.position).map((m) => m.sha256);

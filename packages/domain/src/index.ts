@@ -9,3 +9,4 @@ export * from './automation/automation-model.js';
 export * from './content/content-model.js';
 export * from './content/publication-model.js';
 export * from './content/publication-metrics.js';
+export * from './content/image-dimensions.js';

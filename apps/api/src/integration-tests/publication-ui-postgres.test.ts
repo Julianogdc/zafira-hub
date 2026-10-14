@@ -67,7 +67,7 @@ test('Integration Gate: Leituras e regras da tela de publicacao (F8-4b.1) em Pos
   const upload = (itemId: string) => {
     const boundary = `----zafira${randomBytes(6).toString('hex')}`;
     const head = Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.bin"\r\nContent-Type: application/octet-stream\r\n\r\n`);
-    const data = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(96)]);
+    const data = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x05, 0x46, 0x04, 0x38, 0x03, 1, 1, 1, 1, 1, 1, 1, 1, 1]) /* JPEG minimo com SOF0 1080x1350 (P35) */, randomBytes(96)]);
     return app.inject({
       method: 'POST', url: `/content/items/${itemId}/media`, cookies: { token: tokenOf(adminA, orgA.id) },
       headers: { 'content-type': `multipart/form-data; boundary=${boundary}` },

@@ -17,7 +17,7 @@ import {
 
 // F8-4a (DEC-F8-023): regras puras de publicacao pela versao aprovada.
 
-const img = (sizeBytes = 1000, mimeType = 'image/jpeg') => ({ kind: 'IMAGE' as const, mimeType, sizeBytes });
+const img = (sizeBytes = 1000, mimeType = 'image/jpeg') => ({ kind: 'IMAGE' as const, mimeType, sizeBytes, widthPx: 1080, heightPx: 1350 });
 const vid = (sizeBytes = 1000) => ({ kind: 'VIDEO' as const, mimeType: 'video/mp4', sizeBytes });
 const codes = (p: { code: string }[]) => p.map((x) => x.code);
 

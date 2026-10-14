@@ -1884,6 +1884,9 @@ model ContentMedia {
   createdAt        DateTime         @default(now())
   removedAt        DateTime?
   removedByUserId  String?
+  // F8-5p.1 (DEC-F8-031, P35): dimensoes lidas do cabecalho; preenchidas uma unica vez (nulo -> valor)
+  widthPx          Int?
+  heightPx         Int?
 
   organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   item         ContentItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)

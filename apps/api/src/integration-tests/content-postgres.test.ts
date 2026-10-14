@@ -68,7 +68,7 @@ test('Integration Gate: Conteudo (F8-1) em PostgreSQL', { concurrency: 1 }, asyn
     });
   };
 
-  const jpeg = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), randomBytes(64)]);
+  const jpeg = () => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x05, 0x46, 0x04, 0x38, 0x03, 1, 1, 1, 1, 1, 1, 1, 1, 1]) /* JPEG minimo com SOF0 1080x1350 (P35) */, randomBytes(64)]);
   const png = () => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), randomBytes(64)]);
   const webp = () => Buffer.concat([Buffer.from('RIFF'), Buffer.from([1, 2, 3, 4]), Buffer.from('WEBP'), randomBytes(32)]);
   const mp4 = (brand = 'isom') => Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftyp'), Buffer.from(brand), randomBytes(48)]);
@@ -160,7 +160,7 @@ test('Integration Gate: Conteudo (F8-1) em PostgreSQL', { concurrency: 1 }, asyn
     assert.strictEqual(media.filter((m: any) => !m.removedAt)[0].mimeType, 'image/webp');
     assert.notStrictEqual(rep.json().versions[0].contentHash, hash1);
     // arquivo muito grande
-    const big = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(101 * 1024 * 1024, 1)]);
+    const big = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, 0x05, 0x46, 0x04, 0x38, 0x03, 1, 1, 1, 1, 1, 1, 1, 1, 1]) /* JPEG minimo com SOF0 1080x1350 (P35) */, Buffer.alloc(101 * 1024 * 1024, 1)]);
     const tooBig = await upload(memberA, orgA.id, feedId, big, 'grande.jpg');
     assert.strictEqual(tooBig.statusCode, 413);
   });
