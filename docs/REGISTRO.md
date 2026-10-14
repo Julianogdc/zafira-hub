@@ -36,6 +36,32 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-4a implementada; CI bloqueado por limite externo no Docker Build (DEC-F8-023) — Claude
+- AUTORIZAÇÃO: DEC-F8-023 — somente a F8-4a.
+- CÓDIGO (público `44619b3`; espelho no interno `eb2836c`, conferido arquivo a arquivo):
+  - **Domínio** (`publication-model.ts`): estados (`PENDING`, `DRAFTED`, `SCHEDULED`, `PROVIDER_RETRY`, `PUBLISHING`, `PUBLISHED`, `FAILED`, `CANCELLED`, `AMBIGUOUS`); fuso explícito; antecedência de 5 min; piloto Instagram; carrossel 2–10, Story 1, Reel 1 vídeo; imagem ≤ 20 MB, vídeo ≤ 1 GB; tipos publicáveis (JPG, PNG, WebP, MP4; MOV fora até verificação); legenda ≤ limite da conta (2200 padrão); teto de 25/24 h; sem reagendar/cancelar depois de `PUBLISHING`; mapeamento do estado do provedor falhando fechado; chaves de idempotência (upload pelo SHA-256, rascunho por publicação).
+  - **Banco** (migration `20261013040000_f8_4a_publication`): `content_publications` e `publication_outbox`; índice único parcial (uma ativa por versão + conta); gatilho de inserção que exige a **versão atual** com `ApprovalDecision` APPROVED sobre o mesmo `contentHash`; identidade imutável; sem DELETE.
+  - **API**: `GET/POST /content/items/:id/publications`, `POST /content/publications/:id/reschedule` e `/cancel` (`content.schedule`; leitura com `content.view`), escopo de cliente e organização; publicação + pedido na mesma transação; nenhuma chamada externa no pedido.
+  - **Despachante** (`PUBLICATION_DISPATCH_ENABLED=false` por padrão): reserva otimista, um pedido por publicação em ordem, lê o estado no provedor antes de agir, `AMBIGUOUS` em timeout com replay da mesma chave, recuo exponencial, 429 respeitando `retry_after`, falha fechada sem permissão do provedor; reconciliação por leitura periódica. Agendador ligado no servidor só com a variável.
+  - **Simulador do BrightBean** (em memória, só testes): comportamento observado na F8-0b e modos de falha (timeout após criar, retentativa do provedor, falha definitiva, 429, permissão, publicação em andamento).
+  - **D-F84-1**: quatro rotas legadas de escrita do SocialPublisher respondem **410 `LEGACY_WRITE_DISABLED`** (autenticação e permissão verificadas antes; provedor não chamado); consultas mantidas. Dois testes antigos ajustados para o novo comportamento (continuam provando que o provedor não é chamado).
+- TESTES LOCAIS: typecheck API e web 0 erros; domínio **103/103** (+9); API **825/825** (+3: prova da configuração padrão — despachante e agendador não iniciam e nunca montam o gateway real); web 88/88; `lint:f6` 0 erros; build completo.
+- CI OFICIAL: run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502) — **Code Quality ✔ (domínio 103/103, API 825/825, web 88/88); PostgreSQL ✔ 159/159** (inclui os 13 cenários da F8-4a com o simulador); **Docker Build ✘ nas duas tentativas por limite externo** (`429 Too Many Requests` do registro público da Amazon ao baixar `node:24.12.0-bookworm-slim`); Publish Images e Homologation Rehearsal não executados. Runners `ubuntu-latest`, 0 ms faturáveis. **5/5 não atingido**; nova tentativa ou mudança da origem da imagem dependem de decisão. Commit de documentação com `[skip ci]`.
+- NENHUMA PUBLICAÇÃO REAL POSSÍVEL NA CONFIGURAÇÃO PADRÃO: despachante desligado; sem a variável, `dispatchDue`/`reconcileDue` retornam antes de ler a caixa de saída e o gateway real nunca é montado (provado em teste unitário e no PostgreSQL); rotas legadas de escrita bloqueadas.
+- BASELINE DE CÓDIGO: `44619b3` no público (espelho `eb2836c`).
+- STATUS: F8-4a **implementada; CI 5/5 pendente (bloqueio externo); aceite técnico pendente**. F8-4b não iniciada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial ligar o despachante, publicação real, F8-4b, Facebook, VPS, produção, credenciais e alteração da infraestrutura do CI sem autorização.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / MAPA_MESTRE (interno e público).
+
+### DEC-F8-023 — Decisões D-F84-1 a D-F84-4 e autorização exclusiva da F8-4a (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: aprovar a proposta da F8-4 (`docs/propostas/F8-4_PROPOSTA_EXECUCAO.md`) e definir a primeira fatia.
+- Decisão: (1) **D-F84-1:** bloquear as rotas legadas que criam ou agendam publicações direto no BrightBean sem passar pela aprovação do cliente; preservar as consultas. (2) **D-F84-2:** antecedência mínima de **5 minutos**, com fuso horário explícito. (3) **D-F84-3:** depois de `PUBLICANDO`, sem reagendamento nem cancelamento; só acompanhamento. (4) **D-F84-4:** piloto **exclusivamente Instagram**; Facebook e demais redes depois, com arquitetura desacoplada. (5) **Autorizada exclusivamente a F8-4a:** domínio `ContentPublication` e caixa de saída transacional; só versões aprovadas pelo cliente; idempotência, concorrência e estados ambíguos; despachante desligado por padrão (`PUBLICATION_DISPATCH_ENABLED=false`); simulador do BrightBean; bloqueio da escrita das rotas legadas; validações de formato, tamanho, legenda, limites da conta e horário; RBAC e isolamento; testes de domínio, API, PostgreSQL e integração com o simulador. (6) Validação: repositório público `hub-2.1`, governança sincronizada com o privado, testes locais e CI oficial 5/5 só com runners padrão gratuitos; encerramento só com aceite técnico. (7) Restrições: sem F8-4b, sem publicação real, despachante não conectado à instância real nos testes, sem VPS/produção, sem workflows privados, sem credenciais, sem Facebook.
+- Alternativas consideradas: manter as rotas legadas para administração (D-F84-1, recusada).
+- Impacto: packages/domain, packages/contracts, apps/api (serviço, despachante, simulador, rotas, migration `20261013040000_f8_4a_publication`).
+- Revisão: no aceite técnico da F8-4a.
+
 ### 2026-10-13 — F8-0b encerrada com ressalvas; contrato consolidado e proposta da F8-4 (DEC-F8-022) — Claude
 - AUTORIZAÇÃO: DEC-F8-022.
 - MÉTRICAS DO T30 (só GET, ~28 min após a publicação): chave válida e restrita; `captured_at` nulo, séries vazias, 7 indicadores com valor padrão 0; **nenhuma coleta** (esperado: coleta horária). Verificação pendente em ~2 h, ~6 h e ~20 h (P34). Commit de documentação com `[skip ci]`.
