@@ -686,8 +686,12 @@ class ContentGate:
         big = (b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + (6000).to_bytes(4, "big") + (6000).to_bytes(4, "big")
                + bytes([8, 6, 0, 0, 0]) + (b"zafira-gate-big-%d" % self.seed))
         admin.set_input_files('[data-testid="file-input"]', files=[{"name": "grande.png", "mimeType": "image/png", "buffer": big}])
+        # espera o aviso especifico (a lista ja existe antes do upload com "Envie os arquivos finais"); sem atraso fixo
         probs = admin.get_by_test_id("media-problems")
-        probs.wait_for(timeout=15000)
+        try:
+            probs.filter(has_text="30 megapixels").wait_for(timeout=20000)
+        except Exception:  # noqa: BLE001 - a checagem abaixo registra a falha com o texto encontrado
+            pass
         self.check("O", "P35: aviso ja no upload para imagem acima de 30 MP (negativo)", "30 megapixels" in probs.inner_text(), probs.inner_text()[:200])
         bd = self.api(admin, f"/content/items/{big_id}").get("body") or {}
         self.check("O", "P35: API sinaliza MEDIA_TOO_MANY_PIXELS antes da aprovacao",
