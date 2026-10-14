@@ -677,7 +677,7 @@ test('SocialPublisher Client Resource Scope Hardening Suite (F4.4B-S2B)', { conc
     assert.equal(JSON.parse(resContent.body).error, 'CLIENT_NOT_FOUND');
   });
 
-  await t.test('3. MEMBER create cross-client bloqueado com 404 e provider.createPost NÃO chamado', async () => {
+  await t.test('3. MEMBER create cross-client bloqueado (escrita legada desativada, D-F84-1: 410) e provider.createPost NÃO chamado', async () => {
     setupAuthMocks();
     const token = createToken({ sub: memberUserId, email: 'member@zafira.test', activeOrganizationId: orgA });
     const initialCreateCount = providerCalls.createPost;
@@ -696,13 +696,13 @@ test('SocialPublisher Client Resource Scope Hardening Suite (F4.4B-S2B)', { conc
       },
     });
 
-    assert.equal(res.statusCode, 404);
-    assert.equal(JSON.parse(res.body).error, 'CLIENT_NOT_FOUND');
+    assert.equal(res.statusCode, 410);
+    assert.equal(JSON.parse(res.body).code, 'LEGACY_WRITE_DISABLED');
     assert.equal(providerCalls.createPost, initialCreateCount, 'provider.createPost NÃO deve ser chamado');
     assert.equal(res.body.includes(SENTINEL_VALUE), false, 'Sentinel não deve vazar na resposta');
   });
 
-  await t.test('4. MANAGER schedule e cancel cross-client bloqueados com 404 e provider NÃO chamado', async () => {
+  await t.test('4. MANAGER schedule e cancel cross-client bloqueados (escrita legada desativada, D-F84-1: 410) e provider NÃO chamado', async () => {
     setupAuthMocks();
     const token = createToken({ sub: managerUserId, email: 'manager@zafira.test', activeOrganizationId: orgA });
     const initialScheduleCount = providerCalls.schedulePost;
@@ -714,8 +714,8 @@ test('SocialPublisher Client Resource Scope Hardening Suite (F4.4B-S2B)', { conc
       headers: { authorization: `Bearer ${token}` },
       payload: { scheduledAt: '2026-11-01T10:00:00Z' },
     });
-    assert.equal(resSchedule.statusCode, 404);
-    assert.equal(JSON.parse(resSchedule.body).error, 'CLIENT_NOT_FOUND');
+    assert.equal(resSchedule.statusCode, 410);
+    assert.equal(JSON.parse(resSchedule.body).code, 'LEGACY_WRITE_DISABLED');
     assert.equal(providerCalls.schedulePost, initialScheduleCount, 'provider.schedulePost NÃO deve ser chamado');
 
     const resCancel = await app.inject({
@@ -723,8 +723,8 @@ test('SocialPublisher Client Resource Scope Hardening Suite (F4.4B-S2B)', { conc
       url: `/api/v1/clients/${clientB}/social/content/post_b1/cancel`,
       headers: { authorization: `Bearer ${token}` },
     });
-    assert.equal(resCancel.statusCode, 404);
-    assert.equal(JSON.parse(resCancel.body).error, 'CLIENT_NOT_FOUND');
+    assert.equal(resCancel.statusCode, 410);
+    assert.equal(JSON.parse(resCancel.body).code, 'LEGACY_WRITE_DISABLED');
     assert.equal(providerCalls.cancelPost, initialCancelCount, 'provider.cancelPost NÃO deve ser chamado');
   });
 

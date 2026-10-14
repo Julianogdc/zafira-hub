@@ -138,6 +138,8 @@ model Organization {
   contentMedia           ContentMedia[]
   contentEvents          ContentEvent[]
   approvalLinks          ApprovalLink[]
+  contentPublications    ContentPublication[]
+  publicationOutbox      PublicationOutbox[]
   approvalDecisions      ApprovalDecision[]
 
   @@map("organizations")
@@ -276,6 +278,7 @@ model Client {
   @@index([responsibleUserId])
   @@map("clients")
   contentItems ContentItem[]
+  contentPublications ContentPublication[]
 }
 
 model IntegrationConnection {
@@ -1833,6 +1836,7 @@ model ContentItem {
   events       ContentEvent[]
   approvalLinks     ApprovalLink[]
   approvalDecisions ApprovalDecision[]
+  publications      ContentPublication[]
 
   @@unique([organizationId, id])
   @@index([organizationId, clientId])
@@ -1856,6 +1860,7 @@ model ContentVersion {
   media        ContentMedia[]
   approvalLinks ApprovalLink[]
   decision      ApprovalDecision?
+  publications  ContentPublication[]
 
   @@unique([itemId, number])
   @@unique([organizationId, id])
@@ -1977,4 +1982,93 @@ model ApprovalDecision {
   @@index([organizationId])
   @@index([itemId])
   @@map("approval_decisions")
+}
+
+// ---------------------------------------------------------------------------
+// F8-4a (DEC-F8-023): publicacao da versao APROVADA pelo cliente, via caixa de saida transacional.
+// Piloto: somente Instagram. Despachante desligado por padrao (PUBLICATION_DISPATCH_ENABLED=false).
+// Regras no banco (migration 20261013040000): uma publicacao ativa por versao + conta (indice parcial),
+// so versao com decisao APPROVED e mesmo contentHash, identidade imutavel e sem DELETE.
+// ---------------------------------------------------------------------------
+enum PublicationState {
+  PENDING
+  DRAFTED
+  SCHEDULED
+  PROVIDER_RETRY
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+  AMBIGUOUS
+}
+
+enum PublicationOutboxKind {
+  PUBLISH
+  RESCHEDULE
+  CANCEL
+}
+
+enum PublicationOutboxStatus {
+  PENDING
+  RETRYING
+  DONE
+  FAILED
+}
+
+model ContentPublication {
+  id                String           @id @default(uuid())
+  organizationId    String
+  clientId          String
+  itemId            String
+  versionId         String
+  socialAccountId   String // id da conta no provedor (BrightBean), vinculada ao cliente por ClientIntegration
+  platform          String
+  state             PublicationState @default(PENDING)
+  scheduledAt       DateTime // horario pedido (UTC)
+  externalPostId    String? // id do post no provedor (reconciliacao)
+  remoteMediaIds    Json?
+  platformPostId    String?
+  permalink         String?
+  publishedAt       DateTime?
+  failureCode       String?
+  failureMessage    String?
+  cancelRequestedAt DateTime?
+  lastSyncedAt      DateTime?
+  createdByUserId   String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client              @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  item         ContentItem         @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  version      ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  outbox       PublicationOutbox[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, itemId])
+  @@index([state])
+  @@map("content_publications")
+}
+
+model PublicationOutbox {
+  id             String                  @id @default(uuid())
+  organizationId String
+  publicationId  String
+  kind           PublicationOutboxKind
+  idempotencyKey String                  @unique
+  payload        Json?
+  status         PublicationOutboxStatus @default(PENDING)
+  attempts       Int                     @default(0)
+  nextAttemptAt  DateTime                @default(now())
+  lastError      String?                 @db.Text
+  finishedAt     DateTime?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+
+  organization Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  publication  ContentPublication @relation(fields: [organizationId, publicationId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([publicationId])
+  @@map("publication_outbox")
 }

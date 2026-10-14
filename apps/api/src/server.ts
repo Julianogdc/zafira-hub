@@ -2,6 +2,7 @@ import { app } from './app.js';
 import { asanaMirrorScheduler } from './modules/integrations/asana/mirror/asana-mirror.scheduler.js';
 import { googleCalendarScheduler } from './modules/integrations/google-calendar/google-calendar.scheduler.js';
 import { automationScheduler } from './modules/onboarding/automation.scheduler.js';
+import { publicationScheduler } from './modules/content/publication/publication.scheduler.js';
 
 const PORT = Number(process.env.PORT) || 3001;
 const HOST = '0.0.0.0';
@@ -10,6 +11,7 @@ const HOST = '0.0.0.0';
 app.addHook('onClose', async () => asanaMirrorScheduler.stop());
 app.addHook('onClose', async () => googleCalendarScheduler.stop());
 app.addHook('onClose', async () => automationScheduler.stop());
+app.addHook('onClose', async () => publicationScheduler.stop());
 
 async function start() {
   try {
@@ -21,6 +23,8 @@ async function start() {
     googleCalendarScheduler.start(app.log);
     // F7-4a - despachante das automacoes n8n; so liga com N8N_DISPATCH_ENABLED=true
     automationScheduler.start(app.log);
+    // F8-4a - despachante de publicacoes; so liga com PUBLICATION_DISPATCH_ENABLED=true
+    publicationScheduler.start(app.log);
   } catch (err) {
     app.log.error(err);
     process.exit(1);

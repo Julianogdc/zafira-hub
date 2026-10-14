@@ -24,6 +24,19 @@ const schedulePostSchema = z.object({
   scheduledAt: z.string().min(1, 'scheduledAt é obrigatório'),
 });
 
+/**
+ * D-F84-1 (DEC-F8-023): as rotas legadas que criavam, agendavam ou cancelavam publicacoes direto no
+ * BrightBean (sem passar pela aprovacao do cliente) ficam bloqueadas. Autenticacao e permissao continuam
+ * sendo verificadas antes; consultas seguem disponiveis. Publicar agora so por /content/items/:id/publications.
+ */
+function legacyWriteDisabled(reply: FastifyReply) {
+  return reply.status(410).send({
+    status: 'error',
+    code: 'LEGACY_WRITE_DISABLED',
+    message: 'Esta operação foi desativada. Agende pelo conteúdo aprovado pelo cliente.',
+  });
+}
+
 export function createSocialPublisherRoutes(service: SocialPublisherService) {
   return async function socialPublisherRoutes(app: FastifyInstance) {
     const handleError = (error: unknown, reply: FastifyReply) => {
@@ -158,32 +171,9 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
     app.post(
       '/api/v1/social/upload',
       { preHandler: [authenticate, requirePermission('content.create')] },
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const organizationId = getOrganizationId(request);
-          const idempotencyKey = requireIdempotencyKey(request);
-
-          const fileData = await request.file();
-          if (!fileData) {
-            return reply.status(400).send({
-              status: 'error',
-              error: 'FILE_REQUIRED',
-              message: 'Nenhum arquivo enviado para upload.',
-            });
-          }
-
-          const buffer = await fileData.toBuffer();
-          const result = await service.uploadMedia(organizationId, {
-            buffer,
-            filename: fileData.filename,
-            mimeType: fileData.mimetype,
-            idempotencyKey,
-          });
-
-          return reply.status(200).send(result);
-        } catch (error) {
-          return handleError(error, reply);
-        }
+      async (_request: FastifyRequest, reply: FastifyReply) => {
+        // D-F84-1 (DEC-F8-023): escrita direta no provedor bloqueada; publicar so pela versao aprovada.
+        return legacyWriteDisabled(reply);
       }
     );
 
@@ -298,27 +288,9 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
     app.post(
       '/api/v1/clients/:clientId/social/content',
       { preHandler: [authenticate, requirePermission('content.create')] },
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const scope = getAuthorizationContext(request);
-          const idempotencyKey = requireIdempotencyKey(request);
-          const { clientId } = request.params as { clientId: string };
-          const body = createPostSchema.parse(request.body);
-
-          const result = await service.createPost(scope, clientId, {
-            accountId: body.accountId,
-            format: body.format,
-            content: body.content,
-            mediaIds: body.mediaIds,
-            isDraft: body.isDraft,
-            scheduledAt: body.scheduledAt ?? null,
-            idempotencyKey,
-          });
-
-          return reply.status(201).send(result);
-        } catch (error) {
-          return handleError(error, reply);
-        }
+      async (_request: FastifyRequest, reply: FastifyReply) => {
+        // D-F84-1 (DEC-F8-023): escrita direta no provedor bloqueada; publicar so pela versao aprovada.
+        return legacyWriteDisabled(reply);
       }
     );
 
@@ -326,19 +298,9 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
     app.patch(
       '/api/v1/clients/:clientId/social/content/:postId/schedule',
       { preHandler: [authenticate, requirePermission('content.schedule')] },
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const scope = getAuthorizationContext(request);
-          const { clientId, postId } = request.params as { clientId: string; postId: string };
-          const body = schedulePostSchema.parse(request.body);
-          const result = await service.schedulePost(scope, clientId, {
-            postId,
-            scheduledAt: body.scheduledAt,
-          });
-          return reply.status(200).send(result);
-        } catch (error) {
-          return handleError(error, reply);
-        }
+      async (_request: FastifyRequest, reply: FastifyReply) => {
+        // D-F84-1 (DEC-F8-023): escrita direta no provedor bloqueada; publicar so pela versao aprovada.
+        return legacyWriteDisabled(reply);
       }
     );
 
@@ -346,15 +308,9 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
     app.post(
       '/api/v1/clients/:clientId/social/content/:postId/cancel',
       { preHandler: [authenticate, requirePermission('content.delete')] },
-      async (request: FastifyRequest, reply: FastifyReply) => {
-        try {
-          const scope = getAuthorizationContext(request);
-          const { clientId, postId } = request.params as { clientId: string; postId: string };
-          const result = await service.cancelPost(scope, clientId, postId);
-          return reply.status(200).send(result);
-        } catch (error) {
-          return handleError(error, reply);
-        }
+      async (_request: FastifyRequest, reply: FastifyReply) => {
+        // D-F84-1 (DEC-F8-023): escrita direta no provedor bloqueada; publicar so pela versao aprovada.
+        return legacyWriteDisabled(reply);
       }
     );
 

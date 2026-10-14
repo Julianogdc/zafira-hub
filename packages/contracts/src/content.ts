@@ -110,3 +110,19 @@ export interface ContentStagesResponse {
   };
   items: ContentStageItem[];
 }
+
+/* ==========================================================================
+   F8-4a (DEC-F8-023) - Agendamento pela versao aprovada (piloto: Instagram).
+   Horario sempre com fuso explicito; antecedencia minima validada no dominio.
+   ========================================================================== */
+
+const ScheduledAtSchema = z.string().trim().min(16).max(40);
+
+export const RequestPublicationSchema = z.object({
+  socialAccountId: z.string().trim().min(1).max(100),
+  scheduledAt: ScheduledAtSchema,
+});
+export type RequestPublication = z.infer<typeof RequestPublicationSchema>;
+
+export const ReschedulePublicationSchema = z.object({ scheduledAt: ScheduledAtSchema });
+export type ReschedulePublication = z.infer<typeof ReschedulePublicationSchema>;
