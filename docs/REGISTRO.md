@@ -36,6 +36,29 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-HML-003 — Aceite técnico definitivo da HM-2 (Driver de armazenamento S3-compatível) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção, via proprietário.
+- Problema: avaliar e homologar tecnicamente a implementação do driver de armazenamento S3-compatível privado (HM-2), validada no CI oficial e Browser Gates.
+- Decisão: (1) **Aceite técnico definitivo da HM-2 (Driver de armazenamento S3-compatível)**, com evidências: baseline de código pública `817315f` (driver em `96091d3`, env em `817315f`), espelho interno `9bd4db7` (driver em `9775be1`, env em `9bd4db7`); CI oficial run 38627531741, 5/5 (domínio 123/123, API 850/850, web 99/99, PostgreSQL 208/208 em duas execuções consecutivas no mesmo banco, Docker Build, Publish Images, Homologation Rehearsal); Browser Gate F8: 125 aprovados, 0 falhas; testes unitários e de integração PostgreSQL (`storage-s3-postgres.test.ts`) 100% aprovados contra emulador S3 local em processo.
+  (2) **Ressalvas técnicas registradas obrigatoriamente:**
+  - *Cloudflare R2 real ainda não testado:* o driver foi exercitado contra emulador S3 local e nos gates automatizados; teste contra Cloudflare R2 real depende de criação de bucket e credenciais pelo proprietário em teste controlado.
+  - *Armazenamento ainda utiliza buffers integrais:* uploads e downloads na API mantêm buffers integrais na heap (demanda prioritária da etapa HM-3).
+  - *Idempotência por HEAD/PUT:* verificação de existência prévia (`exists()` via `HeadObject`) antes do `PutObject` não equivale a gravação estritamente atômica sob concorrência paralela massiva com mesma chave (mitigado pelo endereçamento determinístico por SHA-256 e imutabilidade dos arquivos).
+  (3) Proibido: acessar a VPS, realizar deploy, criar buckets ou credenciais reais, habilitar publicação ou coletores reais, executar o piloto F8-5e, modificar a implementação da HM-3 antes de aprovação do diagnóstico técnico. A Fase 8 permanece aberta (Portão F8 aberto).
+- Alternativas consideradas: volume local em produção (rejeitada por DEC-HML-001); presunção de testes reais sem credenciais (rejeitada).
+- Impacto: módulo de storage (`file-storage.ts`), documentação operacional (`file-storage-s3.md`), perfil de ambiente e testes.
+- Revisão: na execução do teste controlado contra bucket R2 real provisionado pelo proprietário.
+
+### 2026-10-14 — Aceite da HM-2 registrado (DEC-HML-003) e diagnóstico da HM-3 entregue — Antigravity
+- BASELINE (commit): `817315f` no público `Julianogdc/zafira-hub` (espelho no interno: `9bd4db7`).
+- CI/EVIDÊNCIA: run 38627531741 (https://github.com/Julianogdc/zafira-hub/actions/runs/38627531741) **5/5**; domínio 123/123; API 850/850; web 99/99; PostgreSQL 208/208; Docker Build, Publish Images e Homologation Rehearsal aprovados; Browser Gate F8 125/0.
+- STATUS: concluído (aceite formal registrado; diagnóstico e plano técnico da HM-3 apresentados para revisão).
+- O QUE MUDOU: Registro formal do aceite técnico da HM-2 como DEC-HML-003; documentação atualizada (`ESTADO_ATUAL.md`, `REGISTRO.md`); registro obrigatório de 3 ressalvas técnicas (R2 real não testado, buffers integrais, idempotência HEAD/PUT); levantamento técnico de escopo, arquivos e riscos da HM-3 (consumo de memória no upload/streaming, Nginx client_max_body_size e Fastify trustProxy).
+- LIMITES/LACUNAS: Cloudflare R2 real ainda não testado (aguarda provisionamento pelo proprietário); upload/download ainda alocam buffers integrais na memória; HEAD/PUT concorrente não é atômico; limites do Nginx (1m default) e ausência de trustProxy na API identificados e propostos para a HM-3; Fase 8 segue aberta e F8-5e não autorizada.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguarda decisão e autorização da Direção para o plano técnico da HM-3.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial acesso à VPS, deploy, criação de buckets/chaves, F8-5e, ativação de despachantes ou coletores reais.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
 ### DEC-HML-002 — Aceite técnico definitivo da HM-1 e planejamento da medição da VPS (H7) (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
 - Problema: encerrar tecnicamente a HM-1 e preparar a medição de capacidade da VPS atual antes de qualquer decisão de topologia.
