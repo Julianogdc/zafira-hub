@@ -182,3 +182,11 @@ Continuam **não verificadas**: #8 (Facebook Feed), #18 (horário passado dispar
 | 33 | Permalink | **Confirmada** | [V] presente logo após `published` |
 | 36 | Métricas de post | **Parcialmente confirmada** | [V] HTTP 200 e `analytics_available` true; **antes da coleta os indicadores vêm 0 com `captured_at` nulo** — tratar como sem dado |
 | 18/19 | Antecedência do agendamento | **Confirmada (caso de 3 min)** | [V] publicado ~26 s após o horário |
+
+## 10. Atualização pelo aceite do T30 (2026-10-13, DEC-F8-019)
+
+| # | Capacidade | Nova classe | Evidência |
+|---|---|---|---|
+| 36 | Métricas de post | **Parcialmente confirmada** | [V] rota responde 200 e expõe 7 indicadores, mas **nenhuma coleta em 17 min** após a publicação: `captured_at` nulo, `series` vazias e valores **padrão 0**; `next_sync_eta` é estimativa móvel. Coleta efetiva não observada |
+| 37 | Métricas de conta | **Confirmada** | [V] `captured_at` registrado; próxima coleta em ~24 h |
+| 38 | Escopo da chave | **Confirmada** | [V] retirada de `publish_directly` refletida em `/me/` |

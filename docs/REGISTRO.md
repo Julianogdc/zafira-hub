@@ -36,6 +36,27 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-13 — F8-0b: aceite definitivo do T30 e métricas pós-publicação (DEC-F8-019) — Claude
+- AUTORIZAÇÃO: DEC-F8-019 — somente GET.
+- PERMISSÕES: 3× `/me/` → [`create_posts`, `view_analytics`]; `publish_directly` removida; conta de teste conectada.
+- MÉTRICAS DO POST: 200 em 00:25, 00:35 e 00:42 UTC (até ~17 min após a publicação); `captured_at` **nulo**, séries vazias, 7 indicadores com valor padrão **0**; `next_sync_eta` móvel (00:31 → 00:39 → 00:47). **Nenhuma coleta efetiva** na janela. Métricas da conta: coletadas às 00:17 UTC, próxima em ~24 h. Commit de documentação com `[skip ci]`.
+- REGRA PARA A F8-5: `captured_at` nulo = sem dado ("aguardando coleta"), mesmo com `analytics_available` true e valores 0; `next_sync_eta` não é compromisso.
+- MATRIZ F8-0: §10 acrescentada (#36, #37, #38).
+- BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
+- STATUS: **T30 aceito definitivamente.** T31–T34 não autorizados.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
+- PENDÊNCIAS: aceite técnico da R1+ ainda não registrado; decisão sobre T31–T34; limpeza dos rascunhos/arquivos de teste; remover e revogar a chave ao fim da F8-0b.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial publicar sem autorização, F8-4/F8-5, VPS, produção e cobrança.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano da F8-0b / matriz F8-0 (interno e público).
+
+### DEC-F8-019 — Aceite definitivo do T30 da F8-0b e leitura das métricas pós-publicação (Direção, 2026-10-13)
+- Data / responsável: 2026-10-13 / Direção, via proprietário.
+- Problema: encerrar o T30 (DEC-F8-018).
+- Decisão: (1) **Aceite definitivo do T30.** O proprietário visualizou e confirmou o Story D6 no Instagram de testes; `publish_directly` removida da chave; `view_analytics` mantida. (2) **Autorizado somente GET:** confirmar em `/me/` a remoção de `publish_directly`; consultar as métricas de D6 após a sincronização; verificar data de coleta, próxima sincronização e valores; distinguir métricas coletadas de valores padrão; registrar o aceite e as evidências nos dois repositórios; atualizar a matriz. (3) Proibido: criar, agendar, alterar ou publicar; ampliar permissões; T31–T34; F8-4; VPS/produção.
+- Alternativas consideradas: —
+- Impacto: documentação.
+- Revisão: na decisão sobre os próximos testes da R2.
+
 ### 2026-10-13 — F8-0b R2/T30: Story publicada na conta de testes, sem falha e sem duplicidade (DEC-F8-018) — Claude
 - AUTORIZAÇÃO: DEC-F8-018 — somente o T30.
 - PORTÃO: após 35 s, 3× `/me/` com `create_posts`, `publish_directly`, `view_analytics`; só a conta de testes; conta sem pendências; D6 Story rascunho com 1 mídia.

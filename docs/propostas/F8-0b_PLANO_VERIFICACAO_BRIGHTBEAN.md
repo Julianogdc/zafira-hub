@@ -411,3 +411,23 @@ Executor da §13 com a espera de 35 s acrescentada antes do portão (sem outra a
 **Métricas do post** (`GET /analytics/posts/{D6}`, 200): `analytics_available` = true, 7 indicadores (`reach`, `views`, `likes`, `comments`, `saves`, `shares`, `engagement`) **todos com valor 0**, porém `captured_at` = **nulo** e `next_sync_eta` ≈ 6 min depois da publicação. **Achado:** antes da primeira coleta o BrightBean devolve **0 em vez de "indisponível"**; a F8-5 deve tratar `captured_at` nulo como **sem dado** (ausência ≠ zero), nunca como engajamento zero.
 
 **Pendências:** conferência visual do perfil (um único Story); **retirar `publish_directly`** da chave; leitura das métricas depois da sincronização (só GET, se a Direção quiser); T31–T34 teste a teste; o Story expira em 24 h no Instagram, e o registro no BrightBean permanece `published`.
+
+## 15. Aceite definitivo do T30 e métricas pós-publicação (2026-10-13, DEC-F8-019)
+
+**Aceite:** a Direção visualizou e confirmou o Story D6 no Instagram de testes (**um único Story**) e retirou `publish_directly` da chave.
+
+**Permissões (3× `GET /me/`, 00:35 e 00:42 UTC):** **[`create_posts`, `view_analytics`]** — `publish_directly` efetivamente removida; 1 conta de teste conectada. D6 segue `published`.
+
+**Métricas do post** (`GET /analytics/posts/{D6}`, 200 em todas as leituras):
+
+| Leitura (UTC) | Minutos após a publicação | `captured_at` | `next_sync_eta` | Indicadores |
+|---|---|---|---|---|
+| 00:25:40 | ~0 | nulo | 00:31 | 7 × `0`, séries vazias |
+| 00:35:03 | ~10 | nulo | 00:39 | 7 × `0`, séries vazias |
+| 00:42:20 | ~17 | nulo | 00:47 | 7 × `0`, séries vazias |
+
+Indicadores: `reach` (principal), `views`, `likes`, `comments`, `saves`, `shares` (`kind` = count) e `engagement` (`kind` = percent); `analytics_available` = true; `unavailable_reason` = nulo.
+
+**Leitura:** nenhuma métrica do post foi **coletada** até 17 min após a publicação. Os zeros são **valores padrão** — prova: `captured_at` nulo e `series` vazias. O `next_sync_eta` **avança junto com o relógio** (sempre ~5–8 min à frente de cada leitura): é uma estimativa móvel, não um horário de coleta já agendado. As métricas da **conta** têm coleta registrada (`captured_at` 00:17 UTC, antes da publicação) e próxima prevista para **24 h depois** (`next_sync_eta` 2026-10-15 00:17 UTC), com `reach` e `views` = 0.
+
+**Regra para a F8-5 (ausência ≠ zero):** métrica de post só é dado quando `captured_at` não é nulo; com `captured_at` nulo, exibir "aguardando coleta" mesmo que `analytics_available` seja true e os valores venham 0; nunca usar `next_sync_eta` como compromisso de horário. Coleta efetiva de métricas de Story não foi observada nesta janela; o Story expira em 24 h, e a verificação de métricas coletadas fica para um teste futuro (só GET), se a Direção quiser.
