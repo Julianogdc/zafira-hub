@@ -260,11 +260,13 @@ class ContentGate:
         admin = self.login(browser, self.email_admin, self.password_a, "A")
         caps = (self.api(admin, "/api/v1/auth/capabilities").get("body") or {}).get("permissions", {})
         self.check("A", "administrador: view, create e send_to_client", caps.get("content.view") is True and caps.get("content.create") is True and caps.get("content.send_to_client") is True, str(caps))
+        self.check("A", "administrador: agenda publicacoes (content.schedule)", caps.get("content.schedule") is True, str(caps))
         member = self.login(browser, self.email_member, self.password_a, "A")
         mcaps = (self.api(member, "/api/v1/auth/capabilities").get("body") or {}).get("permissions", {})
         self.check("A", "membro: ve e cria, mas nao envia ao cliente", mcaps.get("content.view") is True and mcaps.get("content.create") is True and mcaps.get("content.send_to_client") is False, str(mcaps))
         self.goto(admin, "/conteudo")
         admin.get_by_test_id("content-page").wait_for(timeout=15000)
+        self.check("A", "membro: nao agenda publicacoes", mcaps.get("content.schedule") is False, str(mcaps))
         self.check("A", "menu lateral exibe Arquivos de conteudo", admin.locator("nav[aria-label='Navegação do sistema'] a").filter(has_text="Arquivos de conteúdo").count() > 0)
         # F8-3: ponto de partida do contador e da meta, antes de qualquer conteudo deste gate
         stages_before = self.stages(admin)

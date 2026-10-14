@@ -22,7 +22,8 @@ const ONBOARDING_CAPABILITY_CODES = [
   'onboarding.cancel',
 ] as const satisfies readonly PermissionCode[];
 
-const CONTENT_CAPABILITY_CODES = ['content.view', 'content.create', 'content.send_to_client'] as const satisfies readonly PermissionCode[];
+// F8-4b (DEC-F8-027): content.schedule exibe o painel de agendamento (a rota valida de novo)
+const CONTENT_CAPABILITY_CODES = ['content.view', 'content.create', 'content.send_to_client', 'content.schedule'] as const satisfies readonly PermissionCode[];
 const AUTOMATION_CAPABILITY_CODES = ['automation.manage', 'automation.view'] as const satisfies readonly PermissionCode[];
 
 export class AuthService {
@@ -249,6 +250,7 @@ export class AuthService {
         'content.view': Boolean(contentFlags[0].allowed),
         'content.create': Boolean(contentFlags[1].allowed),
         'content.send_to_client': Boolean(contentFlags[2].allowed),
+        'content.schedule': Boolean(contentFlags[3].allowed),
         'automation.manage': Boolean(automationFlags[0].allowed),
         'automation.view': Boolean(automationFlags[1].allowed),
       },

@@ -80,6 +80,7 @@ export const EffectiveCapabilitiesPermissionsSchema = z.object({
   'content.view': z.boolean(),
   'content.create': z.boolean(),
   'content.send_to_client': z.boolean(),
+  'content.schedule': z.boolean(),
   'automation.manage': z.boolean(),
   'automation.view': z.boolean(),
 });
