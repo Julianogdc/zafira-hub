@@ -6,8 +6,8 @@
 
 | Campo | Valor |
 |---|---|
-| Última atualização | 2026-10-15 — Antigravity — **Aceite técnico definitivo da microetapa HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5)** pela Direção Técnica (DEC-HML-006). HM-1, HM-2, HM-3 e HM-4a aceitas definitivamente (DEC-HML-002, DEC-HML-003, DEC-HML-004, DEC-HML-006). Fase 8 não encerrada (Portão F8 aberto; F8-5e não autorizada). Próximo passo: autorização formal da microetapa HM-4b pelo proprietário. |
-| **Sessão ativa** | nenhuma |
+| Última atualização | 2026-10-15 — Antigravity — **Autorização exclusiva da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6)** pelo proprietário (DEC-HML-007). HM-1, HM-2, HM-3 e HM-4a aceitas definitivamente. Em execução: HM-4b. |
+| **Sessão ativa** | Antigravity — 2026-10-15 09:28 — HM-4b |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
 | **Baseline de código** | `f0be88f` no público `Julianogdc/zafira-hub` — HM-4a: perfil de ambiente e validação de inicialização segura, travas contra credenciais fracas/ausentes, segregação de segredos criptográficos, obrigatoriedade de S3 em produção com HTTPS, eliminação de bypasses de runtime, configuração sintética de teste para o CI e suíte com 16 testes focados (espelho no interno: `b97062f`) |
 | Situação da baseline | **HM-4a aceita definitivamente (DEC-HML-006) com CI oficial consolidado 5/5** no run 38687981804 (https://github.com/Julianogdc/zafira-hub/actions/runs/38687981804): Code Quality and Tests (API 916/916 em 46 suites, Web 102/102, Domain 123/123, Secret Scan e Public Guard OK), **PostgreSQL Integration Gate 208/208 em duas execuções consecutivas no mesmo banco**, Docker Build Gate (container smoke e reverse proxy OK), Publish Images (GHCR validado por digest pull) e Homologation Rehearsal (Browser Gates F4 a F8 PASS, F8 125/0, rollback e redeploy OK). |
@@ -35,7 +35,7 @@
 | **F6 (IMP.1–9, RO.0–2)** | ✅ **encerrada** (ressalva → F15) |
 | F7 — Onboarding e Agenda | ✅ **encerrada funcionalmente em 2026-10-12** (DEC-F7-018), com ressalvas (P22, P28, sem homologação real de Calendar/n8n) |
 | **F8 — Conteúdos** | 🟡 F8-0 a F8-3 aceitas; F8-0b encerrada com ressalvas; F8-4a, F8-4b, F8-5a a F8-5d e **F8-5p aceitas** (DEC-F8-026/028/030/032); Portão F8 aberto; F8-5e não autorizada; **Fase 8 não encerrada** |
-| **Homologação (HM)** | 🟡 **HM-1, HM-2, HM-3 e HM-4a aceitas definitivamente**; HM-4b, HM-4c, HM-5, HM-6 e H7 a H9 pendentes |
+| **Homologação (HM)** | 🟡 **HM-1, HM-2, HM-3 e HM-4a aceitas definitivamente**; HM-4b em execução; HM-4c, HM-5, HM-6 e H7 a H9 pendentes |
 | F9–F18 | ⬜ pendentes (critérios e portões no Mapa, parte C2) |
 
 ## Próximo passo concreto

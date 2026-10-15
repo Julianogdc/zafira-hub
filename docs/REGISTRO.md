@@ -36,6 +36,22 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-HML-007 — Autorização exclusiva da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Proprietário e Direção Técnica.
+- Problema: na preparação para homologação sintética sem simuladores ou serviços externos (em ambiente de homologação dedicado), o carregamento de `app.ts` invoca `resolveBrightBeanApiUrl()`, que impede a inicialização da API em `NODE_ENV=production` quando `BRIGHTBEAN_API_URL` está ausente, mesmo com publicação e métricas desativadas (`PUBLICATION_DISPATCH_ENABLED=false` e `PUBLICATION_METRICS_ENABLED=false`).
+- Decisão: **Autorização exclusiva da execução da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6)** com as seguintes diretrizes:
+  1. A API deve inicializar com segurança em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL`, desde que a publicação e suas métricas/coletores estejam desligados e sem operações externas ativas.
+  2. Proibido utilizar URL falsa, localhost ou endpoint sintético como fallback em produção.
+  3. Proibido contornar ou desabilitar o `startup-validator` aprovado na HM-4a (DEC-HML-006).
+  4. Se uma operação depender do BrightBean e o provedor estiver desconectado, retornar erro controlado ou estado desconectado sem erro 500 inesperado.
+  5. Se `PUBLICATION_DISPATCH_ENABLED=true` ou `PUBLICATION_METRICS_ENABLED=true` e a URL estiver ausente, falhar fechado.
+  6. Preservar regras de autorização, escopo por organização e a interface `SocialPublisher`.
+  7. Proibido: alterar HM-4a, iniciar HM-4c ou H7 a H9, tocar VPS, EasyPanel, DNS, Cloudflare, criar credenciais/buckets reais, executar deploy ou alterar branch `hub-2.0`.
+- Alternativas consideradas: exigir BrightBean mesmo quando a publicação está desativada (rejeitado por impedir a homologação independente do Hub sem serviços auxiliares).
+- Impacto: módulos `brightbean.config.ts`, `brightbean.provider.ts`, `app.ts`, `social-publisher.service.ts`, `startup-validator.ts`, rotas dependentes e suítes de teste.
+
+---
+
 ### DEC-HML-006 — Aceite técnico definitivo da HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5) (Direção, 2026-10-15)
 - Data / responsável: 2026-10-15 / Direção Técnica, via proprietário.
 - Problema: auditar e homologar tecnicamente a microetapa HM-4a (H5), garantindo que a aplicação inicialize apenas com credenciais e chaves criptográficas seguras, sem segredos reutilizados entre domínios, com obrigatoriedade estrita de driver S3 em produção, remoção de qualquer bypass de runtime (`CI_SMOKE_TEST`, `ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE`), sanitização de mensagens de erro e compatibilidade com os containers de teste do CI mediante configuração sintética válida.
