@@ -1,4 +1,5 @@
 import { app } from './app.js';
+import { validateStartupEnvironment } from './lib/startup-validator.js';
 import { asanaMirrorScheduler } from './modules/integrations/asana/mirror/asana-mirror.scheduler.js';
 import { googleCalendarScheduler } from './modules/integrations/google-calendar/google-calendar.scheduler.js';
 import { automationScheduler } from './modules/onboarding/automation.scheduler.js';
@@ -15,6 +16,9 @@ app.addHook('onClose', async () => publicationScheduler.stop());
 
 async function start() {
   try {
+    // HM-4a (DEC-HML-005, H5) — Validação estrita de inicialização do ambiente antes de abrir a porta HTTP
+    validateStartupEnvironment();
+
     await app.listen({ port: PORT, host: HOST });
     app.log.info(`[Zafira Hub API] Server listening at http://${HOST}:${PORT}`);
     // F6-IMP.8 — agendador do espelho do Asana; só liga com ASANA_MIRROR_SCHEDULE_ENABLED=true
