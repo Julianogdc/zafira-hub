@@ -7,7 +7,7 @@
 | Campo | Valor |
 |---|---|
 | Última atualização | 2026-10-15 — Antigravity — **Conclusão da implementação da microetapa HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5)** autorizada por DEC-HML-005, validada com CI consolidado 5/5 no run 38677924713; aguardando auditoria e aceite da Direção Técnica. HM-1, HM-2 e HM-3 aceitas definitivamente (DEC-HML-002, DEC-HML-003, DEC-HML-004). Fase 8 não encerrada (Portão F8 aberto; F8-5e não autorizada) |
-| **Sessão ativa** | nenhuma |
+| **Sessão ativa** | Antigravity — 2026-10-15 00:25 — HM-4a (Ajustes complementares pré-aceite DEC-HML-005) |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
 | **Baseline de código** | `197dcc5` no público `Julianogdc/zafira-hub` — HM-4a: validador de boot seguro `startup-validator.ts`, travas contra credenciais fracas/ausentes, segregação de segredos criptográficos, rejeição de driver local em produção, validação de S3 com HTTPS obrigatório, inventário `.env.example` categorizado e suíte com 13 testes cobrindo segurança e sanitização (espelho no interno: `6390e72`; workflows e .env.example com diferenças intencionais preservadas) |
 | Situação da baseline | **HM-4a implementada e testada com CI oficial consolidado 5/5** no run 38677924713 (https://github.com/Julianogdc/zafira-hub/actions/runs/38677924713): Code Quality and Tests (API 912/912 em 46 suites, Web 102/102, Domain 123/123, Secret Scan e Public Guard OK), **PostgreSQL Integration Gate 208/208 em duas execuções consecutivas no mesmo banco**, Docker Build Gate (container smoke e reverse proxy OK), Publish Images (GHCR validado por digest pull) e Homologation Rehearsal (Browser Gates F4 a F8 PASS, F8 125/0, rollback e redeploy OK). |
