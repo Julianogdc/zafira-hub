@@ -10,7 +10,7 @@
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
 | **Baseline de código** | `bc080ca` no público `Julianogdc/zafira-hub` — HM-3 ajustes complementares: streaming seguro, interrupção S3, leitura limitada de imagens e medições de memória (espelho no interno: `a6ca298`; workflows e .env.example com diferenças intencionais preservadas) |
-| Situação da baseline | **Testes locais 100% aprovados** (API 889/889, Web 102/102, Domain 123/123, typechecks e build verdes). Submetido para validação oficial única no CI. |
+| Situação da baseline | **CI oficial 5/5** no run 38659458668 (https://github.com/Julianogdc/zafira-hub/actions/runs/38659458668): Code Quality and Tests, **PostgreSQL 208/208 em duas execuções consecutivas no mesmo banco**, Docker Build, Publish Images (GHCR) e Homologation Rehearsal (Browser Gates F5–F8 PASS, F8 125/0). **HM-3 ajustes complementares concluídos e submetidos para aceite DEC-HML-004.** |
 
 "Baseline de código" é o último commit que alterou código. Commits posteriores que só mudam `docs/`, `AGENTS.md`, `CLAUDE.md` ou `GEMINI.md` são esperados. A verificação está em `AGENTS.md`.
 
