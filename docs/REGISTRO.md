@@ -36,6 +36,29 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-HML-004 — Aceite técnico definitivo da HM-3 (Upload e download em streaming, limites de memória e driver S3 seguro) (Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Direção Técnica, via proprietário.
+- Problema: avaliar e homologar tecnicamente as correções e ajustes da HM-3, incluindo streaming de upload/download, descarte de arquivos truncados, tratamento de interrupções de stream no S3, eliminação integral de leituras por `storage.get()` no preenchimento de dimensões de imagens (`ensureImageDimensions`), e medições de memória.
+- Decisão: (1) **Aceite técnico definitivo da HM-3 (Upload e download em streaming, limites de memória e driver S3 seguro)**, com evidências:
+  - Baseline de código pública: `0910051` (`fix(content): HM-3 substitui leitura integral em ensureImageDimensions por stream limitado`);
+  - Baseline de código interna: `f2d97e9` (mesmo commit espelhado);
+  - CI oficial consolidado: run 38665559755 (https://github.com/Julianogdc/zafira-hub/actions/runs/38665559755), **5/5 SUCCESS**;
+  - Testes de domínio: 123/123 aprovados;
+  - Testes de API: 900/900 aprovados em 46 suites (incluindo suíte expandida de 18 testes em `image-head.test.ts` e 11 testes em `content-streaming-upload.test.ts`);
+  - Testes do Web: 102/102 aprovados;
+  - PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco (`test:integration:db`);
+  - Docker Build Gate: aprovado com Bundle Safety Scan e Secret Files Scan;
+  - Publish Images: aprovado com publicação no GHCR e validação por digest pull;
+  - Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4 e **F8 (125 aprovados, 0 falhas)**, mecânica de rollback e redeploy;
+  - Última ressalva técnica de auditoria resolvida: `ensureImageDimensions()` 100% convertido para leitura limitada via streaming (`readImageDimensionsFromStorage`) com teto de 1 MiB, sem chamadas a `storage.get()`, sem alocação integral na heap e impedindo contorno pós-upload.
+  (2) **Ressalvas não bloqueantes registradas obrigatoriamente:**
+  - *Validação futura com Cloudflare R2 real:* o driver e os mecanismos de streaming foram validados contra emulador S3 em processo e gates automatizados; a validação contra bucket R2 físico real depende de credenciais de homologação provisionadas na fase de homologação física.
+  - *Natureza do spool temporário no download S3:* o download de objetos S3 utiliza spool temporário em disco com conferência integral prévia do SHA-256 antes da entrega por stream HTTP (garantindo que bytes parciais ou corrompidos nunca cheguem ao cliente), não constituindo streaming direto S3 -> socket sem disco.
+  (3) Proibido: acessar a VPS, realizar deploy, criar buckets/credenciais reais, habilitar despachantes ou coletores reais, executar o piloto F8-5e, ou iniciar a HM-4 sem autorização formal expressa da Direção Técnica. A Fase 8 permanece aberta (Portão F8 aberto).
+- Alternativas consideradas: manter leitura integral legada em `ensureImageDimensions` (rejeitada pela auditoria por violar as diretrizes de memória da HM-3).
+- Impacto: módulos `content.service.ts`, `image-head.ts`, `upload-spooler.ts`, `file-storage.ts`, `nginx.conf.template`, `app.ts` e suítes de teste.
+- Revisão: na execução da validação contra Cloudflare R2 real em ambiente de homologação.
+
 ### 2026-10-14 — Execução da HM-3 (Ajuste complementar final de auditoria: eliminação de leitura integral em ensureImageDimensions por stream limitado sem storage.get) — Antigravity
 - BASELINE (commit): `0910051` no público `Julianogdc/zafira-hub` (espelho no interno: `f2d97e9`).
 - CI/EVIDÊNCIA: run 38665559755 (https://github.com/Julianogdc/zafira-hub/actions/runs/38665559755) **5/5 SUCCESS** (Code Quality and Tests: API 900/900 em 46 suites, Web 102/102, Domain 123/123; PostgreSQL Integration Gate: 208/208 em duas execuções consecutivas no mesmo banco; Docker Build Gate; Publish Images GHCR; Homologation Rehearsal: Browser Gates F4–F8, F8 125/0). Testes locais 1.125/1.125 aprovados (`image-head.test.ts` 18/18; `content-streaming-upload.test.ts` 11/11; storage/publication 30/30; 4 typechecks e monorepo build 100% OK).
