@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
+import { createReadStream, createWriteStream, type ReadStream, type WriteStream } from 'node:fs';
 import { copyFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Transform, type Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 
 /**
@@ -10,7 +12,10 @@ import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from 
  *  - driver "local": EXCLUSIVO para desenvolvimento e testes; recusado em producao;
  *  - driver S3-compativel privado (HM-2, DEC-HML-003): bucket privado de qualquer fornecedor compativel (Cloudflare R2 preferencial),
  *    configurado so por variaveis de ambiente; integridade SHA-256 conferida na escrita e na leitura.
- *  - HM-3: upload e download sem buffers integrais na heap (streaming e spooling temporario controlado).
+ *  - HM-3: o recebimento (upload) usa spool temporario em disco, sem buffer integral na heap; no S3 o envio usa PutObjectCommand
+ *    com stream do arquivo temporario (nao ha multipart nem @aws-sdk/lib-storage). A leitura (download) do S3 NAO e streaming direto
+ *    S3 -> socket: o objeto e baixado para um spool temporario em disco, o SHA-256 integral e conferido, e so entao o arquivo
+ *    temporario e entregue por stream HTTP (bytes corrompidos ou incompletos nunca chegam ao cliente).
  * Chaves enderecadas por hash e isoladas por organizacao (storageKeyFor): escrita idempotente e imutavel.
  */
 export interface PutFromPathOptions {
@@ -33,7 +38,11 @@ export interface FileStorage {
   exists(key: string): Promise<boolean>;
   /** Grava o arquivo a partir de arquivo temporario em disco sem carregar na memoria RAM. */
   putFromPath(key: string, filePath: string, options: PutFromPathOptions): Promise<void>;
-  /** Abre stream de leitura conferindo a integridade integral do SHA-256 sem buffers integrais. */
+  /**
+   * Abre stream de leitura somente depois de conferir o SHA-256 INTEGRAL. No driver S3 isso implica baixar o objeto para um
+   * spool temporario em disco antes da entrega (sem buffer integral na heap, mas sem streaming direto S3 -> socket).
+   * O `cleanup` e idempotente; o spool tambem e removido quando o stream devolvido fecha (fim, erro ou destruicao).
+   */
   openStream(key: string): Promise<StorageStreamResult>;
 }
 
@@ -134,6 +143,39 @@ export class StorageIntegrityError extends Error {
   }
 }
 
+/** A leitura do armazenamento terminou antes do fim do objeto (conexao fechada sem `end` nem `error`): nunca devolve bytes parciais. */
+export class StorageStreamInterruptedError extends Error {
+  constructor(message = 'Leitura do armazenamento interrompida antes do fim do objeto.') {
+    super(message);
+    this.name = 'StorageStreamInterruptedError';
+  }
+}
+
+/**
+ * Fecha o stream de arquivo (esperando o descritor realmente fechar, inclusive se a abertura ainda estiver em andamento)
+ * e so entao apaga o arquivo. No Windows, apagar com o descritor aberto falha; em qualquer SO evita o arquivo orfao.
+ */
+async function closeThenUnlink(stream: ReadStream | WriteStream, filePath: string): Promise<void> {
+  const closable: NodeJS.EventEmitter & { closed: boolean; destroy: () => unknown } = stream;
+  await new Promise<void>((resolve) => {
+    if (closable.closed) return resolve();
+    closable.once('close', () => resolve());
+    closable.destroy();
+  });
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      await unlink(filePath);
+      return;
+    } catch (e: any) {
+      if (e?.code === 'ENOENT') return;
+      if (attempt < 4 && (e?.code === 'EPERM' || e?.code === 'EBUSY')) {
+        await new Promise((r) => setTimeout(r, 25));
+        continue;
+      }
+    }
+  }
+}
+
 /** O hash SHA-256 da chave (ultimo segmento). A chave ja foi validada por KEY_PATTERN. */
 const hashOfKey = (key: string) => key.slice(key.lastIndexOf('/') + 1);
 const sha256Hex = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
@@ -153,10 +195,12 @@ const isNotFound = (e: unknown) => {
  */
 export class S3FileStorage implements FileStorage {
   readonly driver = 's3';
+  /** `tempDir` so e trocado em testes (para inspecionar residuos); em producao e o diretorio temporario do SO. */
   constructor(
     private readonly client: S3Like,
     private readonly bucket: string,
-    private readonly prefix = ''
+    private readonly prefix = '',
+    private readonly tempDir = tmpdir()
   ) {}
 
   private objectKey(key: string): string {
@@ -219,16 +263,21 @@ export class S3FileStorage implements FileStorage {
     }
     if (await this.exists(key)) return;
     const bodyStream = createReadStream(filePath);
-    await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.bucket,
-        Key,
-        Body: bodyStream,
-        ContentType: options.contentType || 'application/octet-stream',
-        ContentLength: options.sizeBytes,
-        Metadata: { sha256: options.sha256 },
-      })
-    );
+    try {
+      await this.client.send(
+        new PutObjectCommand({
+          Bucket: this.bucket,
+          Key,
+          Body: bodyStream,
+          ContentType: options.contentType || 'application/octet-stream',
+          ContentLength: options.sizeBytes,
+          Metadata: { sha256: options.sha256 },
+        })
+      );
+    } finally {
+      // falha do envio (rede, credencial, permissao) nao pode deixar o descritor do arquivo temporario aberto
+      bodyStream.destroy();
+    }
   }
 
   async openStream(key: string): Promise<StorageStreamResult> {
@@ -246,54 +295,53 @@ export class S3FileStorage implements FileStorage {
     }
     if (!out.Body) throw new Error('Resposta do armazenamento sem conteúdo.');
 
-    const tmpPath = path.join(tmpdir(), `zafira-s3-dl-${randomUUID()}.tmp`);
+    // O objeto e baixado para spool temporario com `pipeline`: erro, destruicao ou `close` SEM `end` em qualquer ponto do
+    // encadeamento rejeitam (ERR_STREAM_PREMATURE_CLOSE) e destroem todos os streams; nada fica pendurado nem sem apagar.
+    const source = out.Body as Readable;
+    const tmpPath = path.join(this.tempDir, `zafira-s3-dl-${randomUUID()}.tmp`);
     const writeStream = createWriteStream(tmpPath, { flags: 'wx' });
     const hash = createHash('sha256');
     let totalBytes = 0;
+    const meter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        totalBytes += chunk.length;
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
 
-    const source = out.Body as NodeJS.ReadableStream;
     try {
-      await new Promise<void>((resolve, reject) => {
-        source.on('data', (chunk: Buffer) => {
-          totalBytes += chunk.length;
-          hash.update(chunk);
-          if (!writeStream.write(chunk)) {
-            source.pause();
-            writeStream.once('drain', () => source.resume());
-          }
-        });
-        source.on('end', () => {
-          writeStream.end(() => resolve());
-        });
-        source.on('error', (err) => {
-          writeStream.destroy();
-          reject(err);
-        });
-        writeStream.on('error', (err) => {
-          if ('destroy' in source && typeof (source as any).destroy === 'function') {
-            (source as any).destroy();
-          }
-          reject(err);
-        });
-      });
-
-      const digest = hash.digest('hex');
-      if (digest !== hashOfKey(key)) {
-        await unlink(tmpPath).catch(() => {});
-        throw new StorageIntegrityError('Conteúdo baixado do S3 não confere com o hash da chave.');
-      }
-
-      return {
-        stream: createReadStream(tmpPath),
-        sizeBytes: totalBytes,
-        cleanup: async () => {
-          await unlink(tmpPath).catch(() => {});
-        },
-      };
+      await pipeline(source, meter, writeStream);
     } catch (err) {
-      await unlink(tmpPath).catch(() => {});
+      await closeThenUnlink(writeStream, tmpPath);
+      if ((err as NodeJS.ErrnoException)?.code === 'ERR_STREAM_PREMATURE_CLOSE') throw new StorageStreamInterruptedError();
       throw err;
     }
+
+    if (hash.digest('hex') !== hashOfKey(key)) {
+      await closeThenUnlink(writeStream, tmpPath);
+      throw new StorageIntegrityError('Conteúdo baixado do S3 não confere com o hash da chave.');
+    }
+
+    let readStream: ReadStream;
+    try {
+      readStream = createReadStream(tmpPath);
+    } catch (err) {
+      await closeThenUnlink(writeStream, tmpPath);
+      throw err;
+    }
+    let cleanupPromise: Promise<void> | null = null;
+    const cleanup = () => {
+      if (!cleanupPromise) {
+        cleanupPromise = closeThenUnlink(readStream, tmpPath);
+      }
+      return cleanupPromise;
+    };
+    // fim normal, erro ou destruicao pelo consumidor (cliente HTTP que desistiu): o spool e sempre removido
+    readStream.once('close', () => {
+      void cleanup();
+    });
+    return { stream: readStream, sizeBytes: totalBytes, cleanup };
   }
 }
 

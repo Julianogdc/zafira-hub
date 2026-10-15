@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Prisma } from '@prisma/client';
@@ -23,6 +23,7 @@ import { prisma } from '../../lib/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
 import { buildClientResourceScopeWhere, findClientInResourceScope } from '../authorization/client-resource-scope.js';
 import { resolveFileStorage, StorageNotConfiguredError, type FileStorage } from './file-storage.js';
+import { identifyImageDimensions } from './image-head.js';
 
 /**
  * F8-1 (DEC-F8-003) - Conteudo: arquivos finais versionados.
@@ -462,13 +463,10 @@ export class ContentService {
     const check = validateUploadedFile(spooled.headerBuffer.subarray(0, 32), spooled.sizeBytes);
     if (!check.ok) throw new ContentError(check.code === 'FILE_TOO_LARGE' ? 413 : 400, check.code, check.message);
 
-    // F8-5p.1 (P35): dimensoes lidas do conteudo real; tenta nos primeiros 64 KiB, ou le o temp se necessario
-    let dims = check.type.kind === 'IMAGE' ? imageDimensions(spooled.headerBuffer) : null;
-    if (check.type.kind === 'IMAGE' && !dims) {
-      try {
-        dims = imageDimensions(await readFile(spooled.tempFilePath));
-      } catch {}
-    }
+    // F8-5p.1 (P35): dimensoes lidas do conteudo real. HM-3: somente leitura LIMITADA (cabecalho capturado e, se preciso,
+    // ate 1 MiB do inicio do temp); nunca o arquivo inteiro. Nao identificadas = nulas (desconhecidas) e o agendamento
+    // segue bloqueado por imagePixelProblem (falha fechado).
+    const dims = check.type.kind === 'IMAGE' ? await identifyImageDimensions(spooled) : null;
 
     const storage = this.storage();
     const sha256 = spooled.sha256;

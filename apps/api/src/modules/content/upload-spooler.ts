@@ -22,16 +22,37 @@ const HEADER_CAPTURE_BYTES = 64 * 1024; // 64 KiB para deteccao de tipo e dimens
  * HM-3 - Recebe upload multipart via streaming direto para spool temporario em disco.
  * Evita carregar arquivos de ate 100 MiB integralmente na memoria (heap) da API.
  * Calcula SHA-256 e tamanho de forma incremental com backpressure e limpeza garantida.
+ *
+ * Ajuste complementar: o arquivo temporario so e criado DEPOIS de confirmado que o stream nao chegou truncado
+ * (nada para limpar nesse caso) e o cleanup espera o descritor fechar antes do unlink (a abertura de um
+ * WriteStream e assincrona: sem isso, um unlink precoce deixaria o arquivo criado depois, orfao).
+ * `options.tempDir` existe para os testes inspecionarem residuos; em producao e o diretorio temporario do SO.
  */
 export async function spoolMultipartUpload(
   multipartFile: MultipartFile,
-  maxBytes = DEFAULT_MAX_FILE_BYTES
+  maxBytes = DEFAULT_MAX_FILE_BYTES,
+  options: { tempDir?: string } = {}
 ): Promise<SpooledUpload> {
   if (!multipartFile || !multipartFile.file) {
     throw new ContentError(400, 'FILE_REQUIRED', 'Nenhum arquivo enviado.');
   }
 
-  const tempFilePath = path.join(tmpdir(), `zafira-up-${randomUUID()}.tmp`);
+  const fileStream = multipartFile.file;
+
+  const isTruncated = () =>
+    Boolean(
+      (multipartFile as any)?.truncated ||
+      (multipartFile.file as any)?.truncated ||
+      (fileStream as any)?.truncated
+    );
+
+  // Antes de qualquer recurso em disco: stream ja truncado nao cria temp, nao abre descritor e e descartado.
+  if (isTruncated()) {
+    fileStream.resume();
+    throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
+  }
+
+  const tempFilePath = path.join(options.tempDir ?? tmpdir(), `zafira-up-${randomUUID()}.tmp`);
   const writeStream = createWriteStream(tempFilePath, { flags: 'wx' });
   const hash = createHash('sha256');
 
@@ -43,24 +64,14 @@ export async function spoolMultipartUpload(
   const cleanup = async () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    try {
+    // espera o descritor fechar (inclusive se a abertura ainda estiver em andamento) antes de apagar
+    await new Promise<void>((resolve) => {
+      if (writeStream.closed) return resolve();
+      writeStream.once('close', () => resolve());
       writeStream.destroy();
-    } catch {}
+    });
     await unlink(tempFilePath).catch(() => {});
   };
-
-  const fileStream = multipartFile.file;
-
-  const isTruncated = () =>
-    Boolean(
-      (multipartFile as any)?.truncated ||
-      (multipartFile.file as any)?.truncated ||
-      (fileStream as any)?.truncated
-    );
-
-  if (isTruncated()) {
-    throw new ContentError(413, 'FILE_TOO_LARGE', 'O arquivo excede o limite de 100 MB.');
-  }
 
   try {
     await new Promise<void>((resolve, reject) => {
