@@ -5,9 +5,10 @@ import { URL } from 'node:url';
  *
  * Garante que a API do Zafira Hub 2.1 não inicialize em ambiente de produção/homologação com:
  *  - Credenciais ausentes, fracas, curtas ou com valores conhecidos de desenvolvimento;
- *  - Chaves criptográficas em formato inadequado ou reutilizadas entre domínios diferentes;
- *  - Driver de armazenamento inseguro (FILE_STORAGE_DRIVER=local é terminantemente proibido em produção);
- *  - Endpoints S3 inseguros (http sem TLS é proibido em produção);
+ *  - Chaves criptográficas em formato inadequado ou reutilizadas entre domínios diferentes (segregação estrita);
+ *  - Driver de armazenamento inseguro (FILE_STORAGE_DRIVER=local ou drivers desconhecidos são terminantemente proibidos em produção);
+ *  - Driver S3 sem credenciais completas ou com endpoints HTTP inseguros (sem TLS);
+ *  - Armazenamento não configurado sem a exceção explícita de teste isolado do CI;
  *  - Variáveis condicionais ativadas sem suas dependências de segurança;
  *
  * REGRA ABSOLUTA DE SEGURANÇA:
@@ -33,6 +34,7 @@ export interface StartupValidationResult {
 export interface StartupValidationOptions {
   env?: NodeJS.ProcessEnv;
   strictProduction?: boolean;
+  isSmokeTest?: boolean;
 }
 
 /** Conjunto de valores conhecidos de desenvolvimento, testes e exemplos que NUNCA devem ser aceitos em produção. */
@@ -52,6 +54,7 @@ const KNOWN_INSECURE_SECRETS = new Set([
   'secret_internal_key_org',
   'postgres_staging_secret',
   'changeme',
+  'change_me',
   'secret',
   'password',
   '12345678',
@@ -140,52 +143,54 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     return { valid: true, errors: [], warnings: [] };
   }
 
+  // Exceção estrita e explícita para perfil isolado de teste do CI (smoke test de container Docker)
+  const isSmokeTest =
+    options?.isSmokeTest ??
+    (env.CI_SMOKE_TEST === 'true' || env.ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE === 'true');
+
   // ============================================================================
-  // 1. SEGREDOS CRIPTOGRÁFICOS GLOBAIS DE PRODUÇÃO (OBRIGATÓRIOS)
+  // 1. SEGREDOS CRIPTOGRÁFICOS DE PRODUÇÃO / HOMOLOGAÇÃO
   // ============================================================================
 
-  // 1.1 JWT_SECRET
+  // 1.1 JWT_SECRET (obrigatório global)
   const jwtCheck = isSecretWeak(env.JWT_SECRET, 32);
   if (jwtCheck.weak) {
     errors.push(`JWT_SECRET inválido: ${jwtCheck.reason}.`);
   }
 
-  // 1.2 COOKIE_SECRET
+  // 1.2 COOKIE_SECRET (obrigatório global)
   const cookieCheck = isSecretWeak(env.COOKIE_SECRET, 32);
   if (cookieCheck.weak) {
     errors.push(`COOKIE_SECRET inválido: ${cookieCheck.reason}.`);
   }
 
-  // 1.3 Defesa em profundidade: Segregação de Chaves
-  if (env.JWT_SECRET && env.COOKIE_SECRET && env.JWT_SECRET === env.COOKIE_SECRET) {
-    errors.push('JWT_SECRET e COOKIE_SECRET não podem ser idênticos (exige segregação de segredos).');
-  }
-
-  // 1.4 INTEGRATION_ENCRYPTION_KEY (se fornecida, exige validação estrita; chave dedicada)
+  // 1.3 INTEGRATION_ENCRYPTION_KEY
+  // Obrigatória no perfil de homologação/produção com gerenciamento de credenciais.
   if (env.INTEGRATION_ENCRYPTION_KEY) {
     const encKeyCheck = isCryptoKeyValid(env.INTEGRATION_ENCRYPTION_KEY, 32);
     if (!encKeyCheck.valid) {
       errors.push(`INTEGRATION_ENCRYPTION_KEY inválida: ${encKeyCheck.reason}.`);
     }
-    if (env.JWT_SECRET && env.INTEGRATION_ENCRYPTION_KEY === env.JWT_SECRET) {
-      errors.push('INTEGRATION_ENCRYPTION_KEY e JWT_SECRET não podem ser idênticos.');
-    }
+  } else if (isSmokeTest) {
+    warnings.push('INTEGRATION_ENCRYPTION_KEY ausente: tolerada exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).');
   } else {
-    warnings.push('INTEGRATION_ENCRYPTION_KEY ausente: rotas que persistem novas credenciais exigirão esta chave.');
+    errors.push('INTEGRATION_ENCRYPTION_KEY é obrigatória no perfil de homologação/produção com gerenciamento de credenciais.');
   }
 
-  // 1.5 APPROVAL_MEDIA_SECRET (se fornecida, exige validação estrita; se ausente, faz fallback para JWT_SECRET)
+  // 1.4 APPROVAL_MEDIA_SECRET
+  // Obrigatória no perfil de homologação/produção com aprovações (exige chave dedicada para links públicos).
   if (env.APPROVAL_MEDIA_SECRET) {
     const approvalCheck = isSecretWeak(env.APPROVAL_MEDIA_SECRET, 32);
     if (approvalCheck.weak) {
       errors.push(`APPROVAL_MEDIA_SECRET inválido: ${approvalCheck.reason}.`);
     }
-    if (env.JWT_SECRET && env.APPROVAL_MEDIA_SECRET === env.JWT_SECRET) {
-      errors.push('APPROVAL_MEDIA_SECRET e JWT_SECRET não podem ser idênticos.');
-    }
+  } else if (isSmokeTest) {
+    warnings.push('APPROVAL_MEDIA_SECRET ausente: tolerada exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).');
+  } else {
+    errors.push('APPROVAL_MEDIA_SECRET é obrigatória no perfil de homologação/produção com aprovações (exige chave própria dedicada, proibindo fallback).');
   }
 
-  // 1.6 HUB_INTERNAL_API_KEY (segredo de máquina opcional)
+  // 1.5 HUB_INTERNAL_API_KEY (segredo de máquina opcional)
   if (env.HUB_INTERNAL_API_KEY) {
     const hubKeyCheck = isSecretWeak(env.HUB_INTERNAL_API_KEY, 32);
     if (hubKeyCheck.weak) {
@@ -193,8 +198,38 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     }
   }
 
+  // 1.6 CALENDAR_IDENTITY_HMAC_KEY (se fornecida explicitamente ou agendador ativado)
+  if (env.CALENDAR_IDENTITY_HMAC_KEY) {
+    const hmacCheck = isSecretWeak(env.CALENDAR_IDENTITY_HMAC_KEY, 32);
+    if (hmacCheck.weak) {
+      errors.push(`CALENDAR_IDENTITY_HMAC_KEY inválida: ${hmacCheck.reason}.`);
+    }
+  }
+
   // ============================================================================
-  // 2. BANCO DE DADOS (DATABASE_URL)
+  // 2. SEGREGAÇÃO COMPLETA DE SEGREDOS CRIPTOGRÁFICOS ATIVOS
+  // Nenhuma chave de criptografia, assinatura ou token de máquina pode compartilhar o mesmo valor.
+  // ============================================================================
+  const activeSecrets: Array<{ name: string; value: string }> = [];
+  if (env.JWT_SECRET) activeSecrets.push({ name: 'JWT_SECRET', value: env.JWT_SECRET.trim() });
+  if (env.COOKIE_SECRET) activeSecrets.push({ name: 'COOKIE_SECRET', value: env.COOKIE_SECRET.trim() });
+  if (env.INTEGRATION_ENCRYPTION_KEY) activeSecrets.push({ name: 'INTEGRATION_ENCRYPTION_KEY', value: env.INTEGRATION_ENCRYPTION_KEY.trim() });
+  if (env.APPROVAL_MEDIA_SECRET) activeSecrets.push({ name: 'APPROVAL_MEDIA_SECRET', value: env.APPROVAL_MEDIA_SECRET.trim() });
+  if (env.HUB_INTERNAL_API_KEY) activeSecrets.push({ name: 'HUB_INTERNAL_API_KEY', value: env.HUB_INTERNAL_API_KEY.trim() });
+  if (env.CALENDAR_IDENTITY_HMAC_KEY) activeSecrets.push({ name: 'CALENDAR_IDENTITY_HMAC_KEY', value: env.CALENDAR_IDENTITY_HMAC_KEY.trim() });
+
+  for (let i = 0; i < activeSecrets.length; i++) {
+    for (let j = i + 1; j < activeSecrets.length; j++) {
+      if (activeSecrets[i].value === activeSecrets[j].value) {
+        errors.push(
+          `Violação de segregação de segredos criptográficos: ${activeSecrets[i].name} e ${activeSecrets[j].name} não podem ser idênticos.`
+        );
+      }
+    }
+  }
+
+  // ============================================================================
+  // 3. BANCO DE DADOS (DATABASE_URL)
   // ============================================================================
   const dbUrl = (env.DATABASE_URL ?? '').trim();
   if (!dbUrl) {
@@ -214,13 +249,25 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
   }
 
   // ============================================================================
-  // 3. ARMAZENAMENTO DE ARQUIVOS (FILE_STORAGE_DRIVER & S3)
+  // 4. ARMAZENAMENTO DE ARQUIVOS (FILE_STORAGE_DRIVER & S3)
   // ============================================================================
   const storageDriver = (env.FILE_STORAGE_DRIVER ?? '').trim().toLowerCase();
+
   if (storageDriver === 'local') {
+    // Proibição absoluta em produção/homologação, mesmo em perfil de teste
     errors.push("FILE_STORAGE_DRIVER 'local' é terminantemente proibido em ambiente de produção/homologação. Utilize 's3'.");
+  } else if (storageDriver !== 's3' && storageDriver !== '') {
+    // Rejeição de drivers desconhecidos ou inválidos
+    errors.push(`FILE_STORAGE_DRIVER desconhecido: '${storageDriver}'. Valores suportados em produção/homologação: 's3'.`);
+  } else if (storageDriver === '') {
+    // Ausente: em perfil isolado de smoke test (CI) emite warning; em homologação/produção falha explicitamente
+    if (isSmokeTest) {
+      warnings.push("FILE_STORAGE_DRIVER ausente: armazenamento não configurado permitido exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).");
+    } else {
+      errors.push("FILE_STORAGE_DRIVER é obrigatório em ambiente de produção/homologação e deve ser configurado como 's3' com as respectivas credenciais.");
+    }
   } else if (storageDriver === 's3') {
-    // Validação estrita do driver S3 quando explicitamente ativado
+    // Validação estrita e detalhada da configuração S3
     const bucket = (env.FILE_STORAGE_S3_BUCKET ?? '').trim();
     if (!bucket) {
       errors.push('FILE_STORAGE_S3_BUCKET é obrigatório para o driver S3 em produção.');
@@ -262,15 +309,13 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     } else if (!env.FILE_STORAGE_S3_REGION || env.FILE_STORAGE_S3_REGION.trim() === '') {
       errors.push('Armazenamento S3 exige configuração de FILE_STORAGE_S3_ENDPOINT ou FILE_STORAGE_S3_REGION.');
     }
-  } else if (storageDriver === '') {
-    warnings.push("FILE_STORAGE_DRIVER não definido em produção; rotas de arquivos exigirão 's3'.");
   }
 
   // ============================================================================
-  // 4. VARIÁVEIS CONDICIONAIS DE AGENDADORES E INTEGRAÇÕES
+  // 5. VARIÁVEIS CONDICIONAIS DE AGENDADORES E INTEGRAÇÕES
   // ============================================================================
 
-  // 4.1 Sincronização da Agenda Google
+  // 5.1 Sincronização da Agenda Google
   if (env.GOOGLE_CALENDAR_SYNC_SCHEDULE_ENABLED === 'true') {
     const hmacKey = env.CALENDAR_IDENTITY_HMAC_KEY;
     const hmacCheck = isSecretWeak(hmacKey, 32);
@@ -279,7 +324,7 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     }
   }
 
-  // 4.2 Despachante de Automações n8n
+  // 5.2 Despachante de Automações n8n
   if (env.N8N_DISPATCH_ENABLED === 'true') {
     const callbackUrl = (env.N8N_CALLBACK_BASE_URL ?? '').trim();
     if (!callbackUrl) {
@@ -302,7 +347,7 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     }
   }
 
-  // 4.3 Despachante de Publicação Social
+  // 5.3 Despachante de Publicação Social
   if (env.PUBLICATION_DISPATCH_ENABLED === 'true') {
     const bbUrl = (env.BRIGHTBEAN_API_URL ?? '').trim();
     if (!bbUrl) {

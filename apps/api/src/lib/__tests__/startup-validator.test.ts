@@ -5,7 +5,7 @@ import {
   StartupValidationError,
 } from '../startup-validator.js';
 
-// Base mock válida para testes de produção
+// Base mock válida para testes de homologação/produção
 function createValidProductionEnv(): NodeJS.ProcessEnv {
   return {
     NODE_ENV: 'production',
@@ -39,17 +39,19 @@ test('startup-validator (HM-4a) — ambiente de desenvolvimento não bloqueia in
   assert.equal(result.errors.length, 0);
 });
 
-test('startup-validator (HM-4a) — configuração válida de produção é aprovada integralmente', () => {
+test('startup-validator (HM-4a) — configuração válida de homologação/produção é aprovada integralmente', () => {
   const env = createValidProductionEnv();
   const result = validateStartupEnvironment({ env });
 
   assert.equal(result.valid, true);
   assert.equal(result.errors.length, 0);
+  assert.equal(result.warnings.length, 0);
 });
 
-test('startup-validator (HM-4a) — configuração de smoke test do CI (healthcheck) é aceita', () => {
+test('startup-validator (HM-4a) — perfil isolado de smoke test do CI (CI_SMOKE_TEST) é aceito com warnings', () => {
   const smokeEnv = {
     NODE_ENV: 'production',
+    CI_SMOKE_TEST: 'true',
     PORT: '3001',
     COOKIE_SECRET: 'smoke-test-dummy-cookie-secret-32-chars-long',
     JWT_SECRET: 'smoke-test-dummy-jwt-secret-at-least-32-chars',
@@ -61,7 +63,8 @@ test('startup-validator (HM-4a) — configuração de smoke test do CI (healthch
   const result = validateStartupEnvironment({ env: smokeEnv });
   assert.equal(result.valid, true);
   assert.equal(result.errors.length, 0);
-  assert(result.warnings.length > 0); // Contém avisos orientativos sobre S3 e chaves de integração
+  assert(result.warnings.length > 0);
+  assert(result.warnings.some((w) => w.includes('CI_SMOKE_TEST=true')));
 });
 
 test('startup-validator (HM-4a) — rejeita segredos obrigatórios ausentes em produção', () => {
@@ -146,11 +149,59 @@ test('startup-validator (HM-4a) — rejeita segredos curtos ou com baixa entropi
   );
 });
 
-test('startup-validator (HM-4a) — exige segregação de segredos criptográficos (chaves não podem ser idênticas)', () => {
+test('startup-validator (HM-4a) — exige INTEGRATION_ENCRYPTION_KEY válida no perfil de homologação/produção', () => {
+  const base = createValidProductionEnv();
+
+  // 1. Ausente em produção sem flag de smoke test
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, INTEGRATION_ENCRYPTION_KEY: undefined } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /INTEGRATION_ENCRYPTION_KEY é obrigatória no perfil de homologação\/produção/);
+      return true;
+    }
+  );
+
+  // 2. Chave hexadecimal curta (< 32 bytes)
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, INTEGRATION_ENCRYPTION_KEY: '0123456789abcdef0123456789abcdef' } }), // 32 hex chars = 16 bytes (< 32 bytes)
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /chave hexadecimal com comprimento em bytes insuficiente/);
+      return true;
+    }
+  );
+});
+
+test('startup-validator (HM-4a) — exige APPROVAL_MEDIA_SECRET dedicada própria no perfil de homologação/produção', () => {
+  const base = createValidProductionEnv();
+
+  // 1. Ausente em produção sem flag de smoke test (proíbe fallback)
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, APPROVAL_MEDIA_SECRET: undefined } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /APPROVAL_MEDIA_SECRET é obrigatória no perfil de homologação\/produção/);
+      return true;
+    }
+  );
+
+  // 2. Curta (< 32 caracteres)
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, APPROVAL_MEDIA_SECRET: 'chave_curta_apenas_20_c' } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /APPROVAL_MEDIA_SECRET inválido: comprimento insuficiente/);
+      return true;
+    }
+  );
+});
+
+test('startup-validator (HM-4a) — exige segregação estrita total entre segredos criptográficos ativos', () => {
   const base = createValidProductionEnv();
   const duplicatedSecret = 'segredo_compartilhado_extremamente_longo_e_forte_32b!';
 
-  // JWT e Cookie idênticos
+  // Caso 1: JWT_SECRET e COOKIE_SECRET idênticos
   assert.throws(
     () => validateStartupEnvironment({
       env: {
@@ -161,67 +212,96 @@ test('startup-validator (HM-4a) — exige segregação de segredos criptográfic
     }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
-      assert.match(err.message, /JWT_SECRET e COOKIE_SECRET não podem ser idênticos/);
+      assert.match(err.message, /Violação de segregação de segredos criptográficos: JWT_SECRET e COOKIE_SECRET não podem ser idênticos/);
       return true;
     }
   );
 
-  // Encryption key e JWT idênticos
+  // Caso 2: COOKIE_SECRET e INTEGRATION_ENCRYPTION_KEY idênticos
   assert.throws(
     () => validateStartupEnvironment({
       env: {
         ...base,
+        COOKIE_SECRET: duplicatedSecret,
         INTEGRATION_ENCRYPTION_KEY: duplicatedSecret,
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /Violação de segregação de segredos criptográficos: COOKIE_SECRET e INTEGRATION_ENCRYPTION_KEY não podem ser idênticos/);
+      return true;
+    }
+  );
+
+  // Caso 3: APPROVAL_MEDIA_SECRET e JWT_SECRET idênticos
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        APPROVAL_MEDIA_SECRET: duplicatedSecret,
         JWT_SECRET: duplicatedSecret,
       },
     }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
-      assert.match(err.message, /INTEGRATION_ENCRYPTION_KEY e JWT_SECRET não podem ser idênticos/);
+      assert.match(err.message, /Violação de segregação de segredos criptográficos: JWT_SECRET e APPROVAL_MEDIA_SECRET não podem ser idênticos/);
+      return true;
+    }
+  );
+
+  // Caso 4: HUB_INTERNAL_API_KEY e JWT_SECRET idênticos
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        HUB_INTERNAL_API_KEY: duplicatedSecret,
+        JWT_SECRET: duplicatedSecret,
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /Violação de segregação de segredos criptográficos: JWT_SECRET e HUB_INTERNAL_API_KEY não podem ser idênticos/);
       return true;
     }
   );
 });
 
-test('startup-validator (HM-4a) — validação estrita de DATABASE_URL e rejeição de senhas fracas', () => {
+test('startup-validator (HM-4a) — validação de STORAGE: ausente, desconhecido e local', () => {
   const base = createValidProductionEnv();
 
-  // DATABASE_URL ausente
+  // 1. FILE_STORAGE_DRIVER ausente em produção sem smoke test (deve falhar explicitamente)
   assert.throws(
-    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: '' } }),
+    () => validateStartupEnvironment({ env: { ...base, FILE_STORAGE_DRIVER: '' } }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
-      assert.match(err.message, /DATABASE_URL é obrigatória/);
+      assert.match(err.message, /FILE_STORAGE_DRIVER é obrigatório em ambiente de produção\/homologação/);
       return true;
     }
   );
 
-  // Protocolo não postgres
+  // 2. FILE_STORAGE_DRIVER com valor desconhecido (ex: 'ftp' ou 'custom')
   assert.throws(
-    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: 'mysql://root:pass@localhost:3306/db' } }),
+    () => validateStartupEnvironment({ env: { ...base, FILE_STORAGE_DRIVER: 'ftp' } }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
-      assert.match(err.message, /DATABASE_URL deve utilizar o protocolo 'postgresql:' ou 'postgres:'/);
+      assert.match(err.message, /FILE_STORAGE_DRIVER desconhecido: 'ftp'/);
       return true;
     }
   );
 
-  // Senha de teste padrão de staging
-  assert.throws(
-    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: 'postgresql://postgres:postgres_staging_secret@db:5432/hub' } }),
-    (err: any) => {
-      assert(err instanceof StartupValidationError);
-      assert.match(err.message, /DATABASE_URL utiliza senha padrão ou conhecida/);
-      return true;
-    }
-  );
-});
-
-test('startup-validator (HM-4a) — rejeita terminantemente driver de arquivo local em produção', () => {
-  const base = createValidProductionEnv();
-
+  // 3. FILE_STORAGE_DRIVER='local' em produção (terminantemente proibido)
   assert.throws(
     () => validateStartupEnvironment({ env: { ...base, FILE_STORAGE_DRIVER: 'local' } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /FILE_STORAGE_DRIVER 'local' é terminantemente proibido em ambiente de produção\/homologação/);
+      return true;
+    }
+  );
+
+  // 4. FILE_STORAGE_DRIVER='local' mesmo com CI_SMOKE_TEST=true continua proibido
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, FILE_STORAGE_DRIVER: 'local', CI_SMOKE_TEST: 'true' } }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
       assert.match(err.message, /FILE_STORAGE_DRIVER 'local' é terminantemente proibido/);
@@ -269,6 +349,40 @@ test('startup-validator (HM-4a) — validação estrita de configuração S3 e r
     (err: any) => {
       assert(err instanceof StartupValidationError);
       assert.match(err.message, /FILE_STORAGE_S3_ENDPOINT não pode conter credenciais embutidas/);
+      return true;
+    }
+  );
+});
+
+test('startup-validator (HM-4a) — validação estrita de DATABASE_URL e rejeição de senhas fracas', () => {
+  const base = createValidProductionEnv();
+
+  // DATABASE_URL ausente
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: '' } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /DATABASE_URL é obrigatória/);
+      return true;
+    }
+  );
+
+  // Protocolo não postgres
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: 'mysql://root:pass@localhost:3306/db' } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /DATABASE_URL deve utilizar o protocolo 'postgresql:' ou 'postgres:'/);
+      return true;
+    }
+  );
+
+  // Senha de teste padrão de staging
+  assert.throws(
+    () => validateStartupEnvironment({ env: { ...base, DATABASE_URL: 'postgresql://postgres:postgres_staging_secret@db:5432/hub' } }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /DATABASE_URL utiliza senha padrão ou conhecida/);
       return true;
     }
   );
