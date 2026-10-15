@@ -1159,6 +1159,7 @@ jobs:
             --name api-hml \
             --network zafira-hub-hml-ci \
             -e NODE_ENV=production \
+            -e CI_SMOKE_TEST=true \
             -e PORT=3001 \
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
@@ -1261,6 +1262,7 @@ jobs:
             --name api-hml \
             --network zafira-hub-hml-ci \
             -e NODE_ENV=production \
+            -e CI_SMOKE_TEST=true \
             -e PORT=3001 \
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
@@ -1315,6 +1317,7 @@ jobs:
             --name api-hml \
             --network zafira-hub-hml-ci \
             -e NODE_ENV=production \
+            -e CI_SMOKE_TEST=true \
             -e PORT=3001 \
             -e COOKIE_SECRET="hml-rehearsal-dummy-cookie-secret-32-chars" \
             -e JWT_SECRET="hml-rehearsal-dummy-jwt-secret-at-least-32-chars" \
