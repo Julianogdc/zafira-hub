@@ -39,7 +39,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-15 — HM-4c: Atualização do Pacote de Homologação e Runbooks de Implantação — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: Validação estrutural do Compose aprovada via `js-yaml` (serviços postgres, api, web; isolamento de portas sem exposição de Postgres/API; porta Web restrita a loopback 127.0.0.1; fail-closed com variáveis obrigatórias vazias); 16/16 testes unitários do `startup-validator` aprovados em 693ms; `validate-immutable-images.sh` validado com rejeição de tags mutáveis (:latest) e aceitação de digests SHA-256; `secret-scan` 0 credenciais suspeitas em 616 arquivos (interno) e 568 arquivos (público); `public-guard` 0 informações operacionais detectadas em 662 arquivos no repositório público.
-- STATUS: pendente de aceite (aguardando auditoria independente da Direção Técnica após correções complementares)
+- STATUS: concluído (aceite técnico definitivo pela Direção Técnica — DEC-HML-010)
 - O QUE MUDOU:
   1. `deploy/homologation/docker-compose.reference.yml`: eliminadas senhas e defaults inseguros (`postgres_staging_secret`, resolvendo P12); adicionadas variáveis obrigatórias do `startup-validator` (HM-4a/HM-4b); porta Web mapeada estritamente para escuta no loopback do host (`127.0.0.1:${WEB_PORT:-8082}:80`); PostgreSQL e API sem exposição de portas ao host; imagens exigidas exclusivamente por digests SHA-256; integrações desligadas por padrão (`false`); limites de CPU/RAM provisórios não fixados (objeto de H7).
   2. `deploy/homologation/homologation.env.example`: atualizado com todas as variáveis obrigatórias deixadas intencionalmente VAZIAS, garantindo fail-closed explícito pelo Compose caso o modelo seja copiado sem preenchimento e impedindo inicialização acidental com valores demonstrativos; variáveis opcionais (`HUB_INTERNAL_API_KEY`, `CALENDAR_IDENTITY_HMAC_KEY`) mantidas vazias para evitar rejeição indevida pelo validador; documentada a exigência de compatibilidade estrita entre `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` e `DATABASE_URL`.
@@ -55,7 +55,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
   - Testes com dados sintéticos permanecem pendentes da etapa H4 (P28).
   - Ensaio de backup e restauração permanece pendente da etapa H9.
   - Smoke test físico em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL` e publicação/métricas desligadas permanece pendente pré-deploy físico.
-- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar auditoria independente da Direção Técnica para HM-4c).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
 
@@ -81,6 +81,39 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
+### DEC-HML-010 — Aceite Técnico Definitivo da HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Direção Técnica, via proprietário.
+- Problema: auditar e homologar tecnicamente a microetapa HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação), verificando a eliminação de senhas padrão e credenciais inseguras no Compose de referência (P12), a exigência de variáveis obrigatórias via fail-closed (`${VAR:?mensagem}`), a sanitização do modelo `.env.example`, a separação conceitual entre validações, o isolamento estrito de portas no host (Postgres/API internos e Web restrita a loopback 127.0.0.1), a atualização documental para 35 migrações do Prisma e a consistência dos runbooks operacionais sem alteração da baseline de código nem das restrições de infraestrutura.
+- Decisão: (1) **Aceite técnico definitivo da microetapa HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação)**, com evidências:
+  - Autorização original: DEC-HML-009;
+  - Commit público inicial: `589f0db`;
+  - Commit interno inicial: `1615b6a`;
+  - Commit público de correção: `e547ff2`;
+  - Commit interno de correção: `5b41213`;
+  - Baseline de código público preservada: `4feacac`;
+  - Baseline de código interno preservada: `fb651a0`;
+  - Último CI oficial de código aprovado: run 38747057275 — **5/5 SUCCESS**;
+  - Resultados auditados e aceitos:
+    1. Eliminação das senhas padrão e fallbacks inseguros do Compose (resolvendo a pendência P12);
+    2. Exigência de variáveis obrigatórias via interpolação fail-closed (`${VAR:?mensagem}`);
+    3. Modelo de ambiente (`homologation.env.example`) com credenciais obrigatórias vazias para fail-closed explícito;
+    4. Separação conceitual estrita entre validação do Compose, `startup-validator` e script de validação de imagens;
+    5. PostgreSQL e API sem portas publicadas no host;
+    6. Porta Web vinculada exclusivamente ao loopback `127.0.0.1:${WEB_PORT:-8082}:80`;
+    7. Integrações, despachantes e agendadores desligados por padrão;
+    8. Atualização de todos os runbooks para 35 migrações do Prisma;
+    9. Preparação documental do subdomínio de homologação dedicado;
+    10. Preservação integral da baseline de código e das restrições de infraestrutura.
+  (2) **Ressalva obrigatória registrada:**
+  - *Validação nativa por `docker compose config -q`:* ainda não foi executada localmente devido à ausência do binário do Docker Compose no ambiente Windows. Deve ser executada como requisito pré-deploy obrigatório antes da primeira implantação física na VPS, contemplando tanto a configuração completa quanto os testes de rejeição de variáveis obrigatórias ausentes.
+  - *Topologia EasyPanel/Traefik:* a escolha da topologia via EasyPanel/Traefik dependerá da etapa H7. A configuração de loopback no Compose de referência não significa que o roteamento físico já está definido.
+  (3) **Consolidação:** macroetapa HM-4 concluída tecnicamente (HM-4a, HM-4b e HM-4c aceitas definitivamente). Bloqueios operacionais da homologação física preservados (H4, H7, H8, H9, HM-5 e HM-6 mantidas como pendências).
+  (4) Proibições mantidas: não alterar código, testes, Compose ou workflows; não executar CI completo; não acessar VPS, EasyPanel, Cloudflare ou DNS; não configurar o subdomínio; não realizar deploy; não criar banco, bucket ou credenciais reais; não iniciar outras etapas sem autorização específica; não habilitar publicação ou integrações reais.
+- Alternativas consideradas: manter porta Web aberta para todas as interfaces no Compose de referência (rejeitado por introduzir risco de exposição antes da definição da topologia H7).
+- Impacto: arquivos `deploy/homologation/docker-compose.reference.yml`, `deploy/homologation/homologation.env.example`, `deploy/homologation/README.md`, runbooks operacionais, `docs/ESTADO_ATUAL.md` e `docs/REGISTRO.md`.
 
 ---
 
