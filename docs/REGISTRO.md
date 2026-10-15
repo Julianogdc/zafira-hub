@@ -36,6 +36,26 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-15 — HM-4a (Correção Final Pré-Aceite — H5) — Antigravity
+- BASELINE (commit): pública `f0be88f` | interna `b97062f`
+- CI/EVIDÊNCIA: run 38687981804 (https://github.com/Julianogdc/zafira-hub/actions/runs/38687981804) — **5/5 SUCCESS** (Code Quality and Tests: 916/916 testes de API aprovados em 46 suites, 102/102 Web, 123/123 Domain, Secret Scan e Public Guard OK; PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco com migrações e RBAC bootstrap; Docker Build Gate: container smoke e reverse proxy OK; Publish Images: imagens publicadas no GHCR e validadas por digest pull; Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4, F8 PASS [125/0], staging smoke tests OK, rollback e redeploy OK).
+- STATUS: pendente de aceite da Direção Técnica (correção final pré-aceite concluída; CI consolidado 5/5 verde).
+- O QUE MUDOU:
+  - 1. Eliminação definitiva de bypasses de runtime: removidas as variáveis `CI_SMOKE_TEST`, `ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE` e a opção `options.isSmokeTest` do validador de boot (`startup-validator.ts`). O runtime da API em `NODE_ENV=production` agora exige incondicionalmente armazenamento S3 configurado e todas as chaves criptográficas dedicadas;
+  - 2. Sanitização estrita de erro: removida da mensagem de erro de `FILE_STORAGE_DRIVER` desconhecido ou inválido a reprodução do valor bruto recebido, prevenindo qualquer vazamento inadvertido de dados ou credenciais arbitrárias;
+  - 3. Configuração sintética nos containers de teste de CI: `.github/workflows/foundation-ci.yml` atualizado para injetar nos containers efêmeros de teste em modo produção uma configuração sintética completa, válida e não-operacional (driver S3 com bucket fictício, endpoint HTTPS sintético e chaves criptográficas dedicadas exclusivas que atendem à matriz de segregação);
+  - 4. Testes expandidos: suíte `startup-validator.test.ts` atualizada para 16 testes unitários focados, comprovando que `CI_SMOKE_TEST` ou `ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE` não contornam a exigência de S3 nem chaves em produção, que o teste sintético de CI inicializa com sucesso absoluto e que mensagens de erro permanecem 100% sanitizadas (916 testes de API no total, 46 suites);
+  - 5. Higiene de governança: secret-scan (0 credenciais suspeitas) e public-guard (0 termos operacionais) 100% validados em ambos os repositórios.
+- LIMITES/LACUNAS:
+  - Modo desconectado do BrightBean e tratamento no boot de publicação social pertencem à HM-4b;
+  - `docker-compose.reference.yml` e runbooks de homologação pertencem à HM-4c;
+  - Validação com Cloudflare R2 real e credenciais de homologação aguarda ambiente físico na HM-5/HM-6.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda auditoria independente da HM-4a pela Direção Técnica e posterior autorização da HM-4b pelo proprietário).
+- PROIBIÇÕES ATUAIS: Não alterar BrightBean, integrações, publicação, frontend, banco ou migrations; não acessar VPS, EasyPanel, Cloudflare ou DNS; não criar credenciais ou serviços reais; não realizar deploy; não iniciar HM-4b, HM-4c, H4 ou etapas posteriores.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
 ### 2026-10-15 — HM-4a (Ajustes Complementares Pré-Aceite — H5) — Antigravity
 - BASELINE (commit): pública `2f2e2cb` | interna `d5a2cdb` (código: pública `b0363c0` | interna `2b71187`)
 - CI/EVIDÊNCIA: run 38683656263 (https://github.com/Julianogdc/zafira-hub/actions/runs/38683656263) — **5/5 SUCCESS** (Code Quality and Tests: 915/915 testes de API aprovados em 46 suites, 102/102 Web, 123/123 Domain, Secret Scan e Public Guard OK; PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco com migrações e RBAC bootstrap; Docker Build Gate: container smoke e reverse proxy OK; Publish Images: imagens publicadas no GHCR e validadas por digest pull; Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4, F8 PASS [125/0], staging smoke tests OK, rollback e redeploy OK).
