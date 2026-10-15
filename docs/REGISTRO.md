@@ -4,7 +4,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 - Estado atual (o que fazer agora): `docs/ESTADO_ATUAL.md`
 - Escopo e regras: `docs/MAPA_MESTRE.md`
-- Cronologia anterior a 10/10/2026: mantida no repositório interno.
+- Cronologia anterior a 10/10/2026 (Google Docs): `docs/historico/REGISTRO_OFICIAL_DRIVE_ate_2026-10-10.md`
 
 ## Formatos
 
@@ -35,6 +35,46 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ```
 
 ---
+
+### 2026-10-15 — HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5) — Antigravity
+- BASELINE (commit): pública `197dcc5` | interna `6390e72`
+- CI/EVIDÊNCIA: run 38677924713 (https://github.com/Julianogdc/zafira-hub/actions/runs/38677924713) — **5/5 SUCCESS** (Code Quality and Tests: 912/912 testes de API aprovados em 46 suites, 102/102 Web, 123/123 Domain, Secret Scan e Public Guard OK; PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco com migrações e RBAC bootstrap; Docker Build Gate: container smoke e reverse proxy OK; Publish Images: imagens publicadas no GHCR e validadas por digest pull; Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4, F8 PASS, rollback e redeploy OK).
+- STATUS: pendente de aceite da Direção Técnica (DEC-HML-005 autorizou; implementação e testes concluídos com 5/5 no CI).
+- O QUE MUDOU:
+  - Criação do módulo `apps/api/src/lib/startup-validator.ts` com validação centralizada e estrita de ambiente no boot (`validateStartupEnvironment`);
+  - Bloqueio imediato no boot contra segredos ausentes, curtos (< 32 chars) ou conhecidos de desenvolvimento/teste em `NODE_ENV=production`;
+  - Validação de chaves criptográficas (`INTEGRATION_ENCRYPTION_KEY`, `APPROVAL_MEDIA_SECRET`, `CALENDAR_IDENTITY_HMAC_KEY`, `JWT_SECRET`, `COOKIE_SECRET`);
+  - Segregação estrita de segredos: chaves não podem ser compartilhadas/idênticas entre si;
+  - Rejeição terminante de `FILE_STORAGE_DRIVER=local` em produção e validação estrita de configuração S3 (HTTPS obrigatório);
+  - Ativação do validador em `apps/api/src/server.ts` antes de abrir a porta HTTP (`app.listen()`);
+  - Atualização completa de `apps/api/.env.example` com o catálogo de variáveis consumidas, categorizadas em obrigatórias, opcionais e condicionais, com placeholders seguros e compatíveis com allowlist do secret-scan;
+  - Criação de suíte de testes com 13 testes em `apps/api/src/lib/__tests__/startup-validator.test.ts` cobrindo cenários de rejeição de configurações inseguras, compatibilidade com funcionalidades desativadas e garantia de sanitização absoluta (nenhum segredo exposto em mensagens).
+- LIMITES/LACUNAS:
+  - `resolveBrightBeanApiUrl()` em `app.ts` ainda é executado no nível do módulo (tratamento do modo desconectado de publicação social pertence à HM-4b);
+  - Testes específicos de subida com ambiente 100% desconectado de serviços externos pertencem à HM-4b;
+  - Atualização de `docker-compose.reference.yml` e runbooks operacionais pertence à HM-4c;
+  - Dados sintéticos de navegação (H4), medição de capacidade VPS (H7), segredos próprios gerados na VPS (H8) e ensaio de backup (H9) seguem pendentes.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguarda auditoria independente da HM-4a pela Direção Técnica e posterior autorização da HM-4b pelo proprietário).
+- PROIBIÇÕES ATUAIS: Não alterar BrightBean, integrações, publicação, frontend, banco ou migrations; não acessar VPS, EasyPanel, Cloudflare ou DNS; não criar credenciais ou serviços reais; não realizar deploy; não iniciar HM-4b, HM-4c, H4 ou etapas posteriores.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+### DEC-HML-005 — Autorização de execução da microetapa HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5) (Proprietário / Direção, 2026-10-14)
+- Data / responsável: 2026-10-14 / Proprietário, com Direção Técnica.
+- Problema: a homologação e produção não podem inicializar com variáveis de ambiente ausentes, credenciais fracas, valores de exemplo de desenvolvimento, chaves criptográficas em formato inválido ou driver de armazenamento inseguro.
+- Decisão: (1) **Autorização formal e exclusiva da microetapa HM-4a (H5)**, compreendendo:
+  - Implementação de `apps/api/src/lib/startup-validator.ts` com validação centralizada e estrita das variáveis de ambiente e formatos criptográficos;
+  - Bloqueio imediato (fail-fast) no boot contra segredos vazios, fracos, curtos (< 32 bytes) ou valores conhecidos de desenvolvimento/fallback em `NODE_ENV=production`;
+  - Verificação rigorosa de chaves criptográficas (`INTEGRATION_ENCRYPTION_KEY`, `APPROVAL_MEDIA_SECRET`, `CALENDAR_IDENTITY_HMAC_KEY`, `JWT_SECRET`, `COOKIE_SECRET`);
+  - Rejeição de `FILE_STORAGE_DRIVER=local` em produção e validação estrita de configuração S3 privada com endpoint HTTPS;
+  - Diferenciação entre variáveis obrigatórias globais e variáveis condicionais (exigidas somente se a funcionalidade correspondente estiver ativada);
+  - Garantia de que valores de segredos nunca sejam expostos em mensagens de erro ou logs;
+  - Integração do validador ao fluxo de inicialização da API antes da abertura da porta HTTP, respeitando a ordem do módulo `app.ts` sem efeitos colaterais;
+  - Atualização completa de `apps/api/.env.example` com o catálogo das variáveis consumidas, classificadas em obrigatórias, opcionais e condicionais, sem dados sensíveis reais;
+  - Criação de suíte de testes automatizados `startup-validator.test.ts`.
+  (2) **Proibições mantidas:** não alterar BrightBean, integrações, publicação, frontend, banco ou migrations; não acessar VPS, EasyPanel, Cloudflare ou DNS; não criar credenciais ou serviços reais; não iniciar HM-4b, HM-4c, H4 ou etapas posteriores.
+- Alternativas consideradas: validar variáveis pontualmente dentro de cada serviço (rejeitado por permitir inicialização parcial e falhas tardias em runtime).
+- Impacto: módulo `startup-validator.ts`, `server.ts`/`app.ts`, `.env.example` e suítes de teste da API.
+- Revisão: na auditoria da Direção Técnica após conclusão da HM-4a.
 
 ### DEC-HML-004 — Aceite técnico definitivo da HM-3 (Upload e download em streaming, limites de memória e driver S3 seguro) (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção Técnica, via proprietário.
@@ -88,6 +128,77 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PROIBIÇÕES ATUAIS: Preservadas integralmente todas as proibições do `ESTADO_ATUAL.md` (sem acesso a VPS, sem deploy, sem F8-5e, agendadores e despachantes desligados).
 - DOCUMENTAÇÃO ATUALIZADA: `docs/ESTADO_ATUAL.md`, `docs/REGISTRO.md`.
 
+### 2026-10-14 — Execução da HM-3 (Ajustes complementares pré-aceite DEC-HML-004: streaming seguro, interrupção S3, leitura limitada de imagens e medições de memória) — Antigravity
+- BASELINE (commit): `bc080ca` no público `Julianogdc/zafira-hub` (espelho no interno: `a6ca298`).
+- CI/EVIDÊNCIA: run 38659458668 (https://github.com/Julianogdc/zafira-hub/actions/runs/38659458668) **5/5 SUCCESS** (Code Quality and Tests, PostgreSQL Integration Gate 208/208 em 2 rodadas consecutivas no mesmo banco, Docker Build Gate, Publish Images GHCR, Homologation Rehearsal com Browser Gates F5, F6, F7-1, F7-2, F7-3, F7-4 e F8: 125/0). Testes locais: API 889/889 aprovados (46 suites, 0 falhas, incluindo 41 testes no módulo de storage/content); Web 102/102 aprovados; Domain 123/123 aprovados; typechecks e build 100% OK.
+- STATUS: concluído pela engenharia, submetido para decisão formal de aceite DEC-HML-004.
+- O QUE MUDOU (5 ajustes da auditoria independente):
+  1. **Remoção de leitura integral de imagens (`content.service.ts` e `image-head.ts`):**
+     - Criado módulo `image-head.ts` com teto de leitura de 1 MiB (`IMAGE_DIMENSIONS_MAX_READ_BYTES`) via `readFileHead`.
+     - Removido `readFile(spooled.tempFilePath)` integral do `content.service.ts` (garantido por teste de guarda estrita no código-fonte).
+     - Caso os metadados de dimensões estejam além de 1 MiB ou o arquivo seja ilegível, os campos permanecem `null` (desconhecidos), preservando o bloqueio de agendamento por `imagePixelProblem` (falha fechado).
+  2. **Limpeza e descarte de arquivos truncados (`upload-spooler.ts`):**
+     - Checagem `isTruncated()` executada *antes* da criação do arquivo temporário e abertura do `WriteStream`.
+     - Streams que chegam truncados têm o consumo escoado (`fileStream.resume()`) e são rejeitados com 413 `FILE_TOO_LARGE` sem gerar arquivos órfãos em disco.
+     - O método `cleanup()` aguarda o descritor fechar (`writeStream.once('close')`) antes do `unlink`, eliminando corridas com aberturas assíncronas.
+  3. **Tratamento e limpeza de streams S3 interrompidos (`file-storage.ts`):**
+     - `S3FileStorage.openStream` reescrito com `pipeline`, convertendo `ERR_STREAM_PREMATURE_CLOSE` na exceção tipada `StorageStreamInterruptedError`.
+     - Implementado `closeThenUnlink` com retries contra bloqueios transitórios de descritores no Windows (`EPERM`/`EBUSY`).
+     - Memorização da promise de `cleanup` no stream retornado e hook automático em `readStream.once('close')` para remover o spool temporário quando o consumidor desiste ou conclui a leitura.
+     - Suíte de regressão criada em `file-storage-s3-interruption.test.ts` (7 testes, 100% aprovados).
+  4. **Retificação documental e arquitetural:**
+     - O envio S3 no Hub utiliza `PutObjectCommand` com stream de arquivo temporário (`Body: createReadStream(filePath)`), e **não** `Upload` multipart da biblioteca `@aws-sdk/lib-storage` (que não faz parte das dependências de runtime).
+     - O download S3 utiliza spool temporário em disco com conferência integral de hash SHA-256 antes da entrega HTTP ao cliente, garantindo que bytes incompletos ou corrompidos nunca alcancem o consumidor. Não há streaming direto S3 → socket.
+  5. **Métricas de memória e rigor metodológico (`memory-probe.ts`):**
+     - Implementado o sensor `MemoryProbe` amostrando `heapUsed`, `external`, `arrayBuffers` e `rss` a cada bloco e em intervalo de 2 ms, registrando linha de base (pós-GC), fim e pico.
+     - **Retificação de benchmark:** a estimativa anterior de "50–80 MiB" citada na primeira entrega era uma estimativa teórica do modelo anterior e não um benchmark medido; fica aqui formalmente desconsiderada como dado empírico.
+     - **Limitações do método:** medição em processo local de testes; não-determinismo do GC do V8; `Buffer` alocado fora da heap (`external`/`arrayBuffers`); `rss` engloba runtime e alocador do Node.js; testes com payload sintético sem rede WAN.
+     - **Resultados empíricos medidos:**
+       - Upload Spooler (25 MiB): DeltaPeak simultâneo Heap+External de **1.94 MiB** (HeapUsed DeltaPeak 1.69 MiB, External 0.25 MiB, RSS 0.46 MiB).
+       - Upload e2e Fastify multipart (50 MiB): DeltaPeak Heap+External de **19.09 MiB** (spooler novo) vs **97.82 MiB** (legado `toBuffer()` sob a mesma sonda).
+       - Download S3 (50 MiB): DeltaPeak Heap+External de **20.65 MiB** (spool + SHA) vs **150.28 MiB** (S3 `get()` integral sob a mesma sonda).
+- RESSALVA TÉCNICA ADICIONAL:
+  - O método legado `ensureImageDimensions` (`content.service.ts`, F8-5p.1) permanece usando `storage().get()` restrito a imagens históricas que não possuíam dimensões no banco, limitado a 20 MB (`PUBLISH_MAX_IMAGE_BYTES`).
+- LIMITES/LACUNAS:
+  - Preservados os limites de segurança, isolamento por organização, ausência de credenciais reais e congelamento da infraestrutura VPS/EasyPanel.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Submissão para aceite formal DEC-HML-004 pela Direção Técnica.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+---
+
+### 2026-10-14 — Execução da HM-3 (Upload/download em streaming sem buffers integrais, Nginx 110 MiB, Fastify trustProxy restrito) concluída e submetida — Antigravity
+- BASELINE (commit): `cd2be14` no público `Julianogdc/zafira-hub` (espelho no interno: `7d12917`).
+- CI/EVIDÊNCIA: run 38649568280 (https://github.com/Julianogdc/zafira-hub/actions/runs/38649568280) **5/5 SUCCESS** (Code Quality and Tests, PostgreSQL Integration Gate 208/208 em 2 rodadas consecutivas no mesmo banco, Docker Build Gate, Publish Images GHCR, Homologation Rehearsal com Browser Gates F5, F6, F7-1, F7-2, F7-3, F7-4 e F8: 125/0). Testes locais: API 869/869 aprovados (46 suites, 0 falhas); Web 102/102 aprovados; typechecks e build 100% OK.
+- STATUS: concluído pela engenharia, pendente de aceite técnico pela Direção Técnica.
+- O QUE MUDOU:
+  1. **Ajustes de documentação:** Correção das contagens oficiais de testes nos documentos (API 850/850, PostgreSQL 208/208 em duas rodadas consecutivas no mesmo banco) sem duplicar a DEC-HML-003. Sincronização do `docs/ESTADO_ATUAL.md` público (que estava parado na HM-1), preservando estritamente a política de governança (apenas informações públicas, sem dados operacionais). Diferenças intencionais de workflows CI e `.env.example` preservadas entre público e interno.
+  2. **Auditoria e Ajuste do Nginx Proxy (`apps/web`):**
+     - Auditado o `Dockerfile` da imagem Web: confirmação de que `nginx.conf.template` é copiado para `/etc/nginx/templates/default.conf.template` e renderizado na inicialização.
+     - Ajustado `client_max_body_size 110m;` com margem adequada para o overhead do formulário multipart em arquivos de 100 MiB (evitando rejeição no limite).
+     - Ajustados os timeouts necessários para arquivos grandes (`client_body_timeout 120s;`, `proxy_read_timeout 120s;`, `proxy_send_timeout 120s;`, `proxy_connect_timeout 60s;`).
+     - Preservados cabeçalhos de proxy (`Host`, `X-Real-IP`, `X-Forwarded-For`, `X-Forwarded-Proto`), protocolo `proxy_http_version 1.1;`, rotas e comportamento same-origin da SPA sem alterações desnecessárias.
+     - Testes automatizados em `apps/web/src/lib/__tests__/nginx-config.test.ts` (3/3 aprovados).
+  3. **Fastify Trust Proxy Restrito e Configurável:**
+     - Criado módulo utilitário `apps/api/src/lib/trust-proxy.ts` com validação de segurança e integrado em `apps/api/src/app.ts`.
+     - Proibição estrita de `trustProxy: true` irrestrito (`InvalidTrustProxyConfigError`). Padrão seguro desativado (`false`).
+     - Suporte a contagem de saltos inteiros (`hops`), listas explícitas de IPs/redes CIDR ou função customizada.
+     - Proteção comprovada de rate limiting, cookies e cabeçalhos forjados por atacantes externos em acesso direto ou atrás de proxy. Testes unitários em `apps/api/src/lib/__tests__/trust-proxy.test.ts` (9/9 aprovados).
+  4. **Upload e Download sem Buffers Integrais:**
+     - Spooling temporário em streaming via `spoolMultipartUpload` (`apps/api/src/modules/content/upload-spooler.ts`) com backpressure (`drain`), limite rígido de 100 MiB interrompendo imediatamente a transferência com `ContentError(413, 'FILE_TOO_LARGE')` caso excedido ou se truncado pelo Busboy, cálculo incremental de hash SHA-256 e captura dos primeiros 64 KiB para validação de tipo de arquivo (magic numbers) e dimensões sem carregar 100 MiB na heap. Limpeza do arquivo temporário garantida em bloco `finally`.
+     - Interface `FileStorage` estendida com `putFromPath(key, filePath, options)` e `openStream(key): Promise<StorageStreamResult>` implementadas tanto no `LocalFileStorage` quanto no `S3FileStorage` (usando `Upload` multipart do `@aws-sdk/lib-storage` para envio via stream e `GetObjectCommand` para download via stream).
+     - Rota autenticada de arquivo de mídia (`content.routes.ts`) e rota pública assinada de prévia de aprovação (`public-approval.routes.ts`) atualizadas para streaming nativo com cleanup garantido nos eventos `finish` e `close` da resposta HTTP.
+  5. **Medições Empíricas de Consumo de Memória (Node.js Heap):**
+     - Upload de arquivo grande (25 MiB): Heap antes: 29.43 MiB | Heap depois: 32.94 MiB | **Variação líquida de heap: 3.51 MiB** (vs. ~50-80 MiB caso mantivesse buffers integrais + parsing multipart em memória).
+     - Download em stream (10 MiB): Heap antes: 34.82 MiB | Heap durante/depois: 34.61 MiB | Sem elevação de heap durante o trânsito dos chunks pelo pipeline HTTP.
+- LIMITES/LACUNAS:
+  - Teste controlado contra Cloudflare R2 real permanece pendente de provisionamento de bucket e credenciais pelo proprietário;
+  - Produção, VPS, EasyPanel e Traefik permanecem 100% intocados;
+  - Fase 8 permanece aberta (Portão F8 aberto; piloto F8-5e não autorizado).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguarda aceite técnico da HM-3 pela Direção Técnica.
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
 ### DEC-HML-003 — Aceite técnico definitivo da HM-2 (Driver de armazenamento S3-compatível) (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
 - Problema: avaliar e homologar tecnicamente a implementação do driver de armazenamento S3-compatível privado (HM-2), validada no CI oficial e Browser Gates.
@@ -105,11 +216,11 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - BASELINE (commit): `817315f` no público `Julianogdc/zafira-hub` (espelho no interno: `9bd4db7`).
 - CI/EVIDÊNCIA: run 38627531741 (https://github.com/Julianogdc/zafira-hub/actions/runs/38627531741) **5/5**; domínio 123/123; API 850/850; web 99/99; PostgreSQL 208/208; Docker Build, Publish Images e Homologation Rehearsal aprovados; Browser Gate F8 125/0.
 - STATUS: concluído (aceite formal registrado; diagnóstico e plano técnico da HM-3 apresentados para revisão).
-- O QUE MUDOU: Registro formal do aceite técnico da HM-2 como DEC-HML-003; documentação atualizada (`ESTADO_ATUAL.md`, `REGISTRO.md`); registro obrigatório de 3 ressalvas técnicas (R2 real não testado, buffers integrais, idempotência HEAD/PUT); levantamento técnico de escopo, arquivos e riscos da HM-3 (consumo de memória no upload/streaming, Nginx client_max_body_size e Fastify trustProxy).
+- O QUE MUDOU: Registro formal do aceite técnico da HM-2 como DEC-HML-003; documentação de governança atualizada (`ESTADO_ATUAL.md`, `REGISTRO.md`, `HOMOLOGACAO_1_BLOQUEIOS.md`); registro obrigatório de 3 ressalvas técnicas (R2 real não testado, buffers integrais, idempotência HEAD/PUT); levantamento técnico de escopo, arquivos e riscos da HM-3 (consumo de memória no upload/streaming, Nginx client_max_body_size e Fastify trustProxy).
 - LIMITES/LACUNAS: Cloudflare R2 real ainda não testado (aguarda provisionamento pelo proprietário); upload/download ainda alocam buffers integrais na memória; HEAD/PUT concorrente não é atômico; limites do Nginx (1m default) e ausência de trustProxy na API identificados e propostos para a HM-3; Fase 8 segue aberta e F8-5e não autorizada.
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Aguarda decisão e autorização da Direção para o plano técnico da HM-3.
 - PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial acesso à VPS, deploy, criação de buckets/chaves, F8-5e, ativação de despachantes ou coletores reais.
-- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / HOMOLOGACAO_1_BLOQUEIOS.
 
 ### DEC-HML-002 — Aceite técnico definitivo da HM-1 e planejamento da medição da VPS (H7) (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
@@ -121,13 +232,13 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-14 — Aceite da HM-1 registrado e plano de medição da VPS (H7) entregue (DEC-HML-002) — Claude
 - ACEITE: HM-1 aceita (DEC-HML-001; código `ecfc392`; CI 5/5 run 38615589824). P18 e P22 constam como resolvidas e aceitas. Antes do primeiro deploy real continua necessário rodar o `--check` do RBAC e ler a lista de remoções.
-- PLANO H7 (repositório interno (contém dados de infraestrutura; não espelhado)): (a) **script existente:** somente leitura, não imprime variáveis de ambiente, não escreve na VPS, carga baixa; saída contém dados de infraestrutura (tratar como interna); **insuficiente** para I/O, picos, OOM do kernel, reinícios e containers parados, redes e CPU em intervalo; (b) **complemento** somente leitura (`vmstat`, PSI, `/proc/meminfo`, processos por nome sem linha de comando, `docker ps -a`, reinícios e `OOMKilled`, redes, OOM no kernel), executado por entrada padrão sem criar arquivo na VPS; (c) **7 dias**, 3 amostras por dia mais picos (publicação do Postiz, backup, uso intenso) e uma linha de base; (d) **critérios** verde/amarelo/vermelho por RAM disponível, swap, load, iowait/PSI, disco, containers e steal, com cobertura mínima da medição; (e) **topologias:** B (novo projeto EasyPanel), C (Compose isolado; exige a rota HTTPS pelo proxy existente, hoje proibida de alterar), D (host dedicado) e A descartada; (f) guarda e comparação das amostras apenas no interno, com SHA-256; (g) 5 decisões D-H7-1 a D-H7-5.
+- PLANO H7 (`docs/propostas/H7_PLANO_MEDICAO_VPS.md` (somente interno)): (a) **script existente:** somente leitura, não imprime variáveis de ambiente, não escreve na VPS, carga baixa; saída contém dados de infraestrutura (tratar como interna); **insuficiente** para I/O, picos, OOM do kernel, reinícios e containers parados, redes e CPU em intervalo; (b) **complemento** somente leitura (`vmstat`, PSI, `/proc/meminfo`, processos por nome sem linha de comando, `docker ps -a`, reinícios e `OOMKilled`, redes, OOM no kernel), executado por entrada padrão sem criar arquivo na VPS; (c) **7 dias**, 3 amostras por dia mais picos (publicação do Postiz, backup, uso intenso) e uma linha de base; (d) **critérios** verde/amarelo/vermelho por RAM disponível, swap, load, iowait/PSI, disco, containers e steal, com cobertura mínima da medição; (e) **topologias:** B (novo projeto EasyPanel), C (Compose isolado; exige a rota HTTPS pelo proxy existente, hoje proibida de alterar), D (host dedicado) e A descartada; (f) guarda e comparação das amostras apenas no interno, com SHA-256; (g) 5 decisões D-H7-1 a D-H7-5.
 - BASELINE DE CÓDIGO: inalterada — `ecfc392` no público (espelho `4c1e70e`). Nenhum código nem workflow alterado; commits com `[skip ci]`.
 - STATUS: HM-1 **aceita**; plano H7 **entregue para revisão**; nada executado.
 - PENDÊNCIAS: H2 (HM-2), H4 a H9; P33, P34, P40 (acompanhamento) e RS1–RS7.
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
 - PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial acesso à VPS, cron, instalação, EasyPanel, DNS, buckets, credenciais, contratação, HM-2 a HM-6, piloto F8-5e, F9, despachante e coletor.
-- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / plano H7 (somente interno).
 
 ### 2026-10-14 — HM-1 implementada: bootstrap RBAC (H1/P22) e repetibilidade dos testes PostgreSQL (H3/P18) (DEC-HML-001) — Claude
 - AUTORIZAÇÃO: DEC-HML-001 — exclusivamente a HM-1. Não executada nesta sessão: o planejamento de medição de capacidade da VPS (bloco interrompido e substituído).
@@ -144,7 +255,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PENDÊNCIAS: H2–H9 (HM-2 a HM-6 e H7/H8/H9) não iniciadas; P33, P34, P40 (acompanhamento), RS1–RS7 mantidas.
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma.
 - PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial VPS, EasyPanel, DNS, buckets, credenciais, contratação, HM-2 a HM-6, piloto F8-5e, F9, despachante e coletor.
-- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / HOMOLOGACAO_1_BLOQUEIOS.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO / HOMOLOGACAO_1_BLOQUEIOS (interno e público).
 
 ### DEC-HML-001 — Diretrizes de arquitetura de H2/H7 e autorização exclusiva da HM-1 (Direção, 2026-10-14)
 - Data / responsável: 2026-10-14 / Direção, via proprietário.
@@ -318,7 +429,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-14 — Aceite da F8-4a registrado e plano da F8-4b (DEC-F8-026) — Claude
 - AUTORIZAÇÃO: DEC-F8-026 — somente análise e documentação.
 - ACEITE: F8-4a aceita definitivamente (código `b8bc5a5`, CI 5/5 run 38561948692). P35 e P36 abertas.
-- ANÁLISE: detalhe do conteúdo (`ConteudoDetalhe.tsx`: painéis Dados, Arquivos, Prévia, Aprovação, Versões, Histórico; componentes do DS e `Banner`); `useContentCapabilities` sem `content.schedule`; fuso da organização disponível; API da F8-4a pronta, faltando leitura de contas elegíveis e da situação do envio; listagem de contas do cliente atual chama o BrightBean (inadequada); **telas legadas** `/conteudos` e `/clientes/:id/conteudo/:postId` com modais que chamam rotas já bloqueadas (410). Commit de documentação com `[skip ci]`.
+- ANÁLISE: detalhe do conteúdo (`ConteudoDetalhe.tsx`: painéis Dados, Arquivos, Prévia, Aprovação, Versões, Histórico; componentes do DS e `Banner`); `useContentCapabilities` sem `content.schedule`; fuso da organização disponível; API da F8-4a pronta, faltando leitura de contas elegíveis e da situação do envio; listagem de contas do cliente atual chama o BrightBean (inadequada); **telas legadas** `/conteudos` e `/clientes/:id/conteudo/:postId` com modais que chamam rotas já bloqueadas (410). Commits de documentação com `[skip ci]` no interno e no público.
 - PLANO (`docs/propostas/F8-4b_PLANO_EXECUCAO.md`): painel "Publicação no Instagram" no detalhe do conteúdo, abaixo da aprovação; conta Instagram vinculada; data e hora no fuso da organização com deslocamento explícito e mínimo de 5 min; acompanhamento com rótulos por estado e ações só antes de `PUBLISHING`; aviso honesto de envio desligado; MEMBER só acompanha; 390 px. API só de leitura (`publication-targets`, `publication-settings`) e capacidade `content.schedule`; telas legadas só leitura com orientação. Microetapas F8-4b.1 a F8-4b.4 com uma rodada de CI. Decisões D-F84B-1 a D-F84B-4.
 - BASELINE DE CÓDIGO: inalterada — `b8bc5a5` no público (espelho `fc4973d`).
 - STATUS: **F8-4a aceita**; F8-4b **planejada, não autorizada**.
@@ -344,7 +455,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 | `node:24.12.0-alpine` | `ghcr.io/julianogdc/base-node:24.12.0-alpine` | `sha256:c921b97d4b74f51744057454b306b418cf693865e73b8100559189605f6955b8` | `apps/web/Dockerfile` (build) |
 | `nginx:alpine` | `ghcr.io/julianogdc/base-nginx:alpine` | `sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2` | `apps/web/Dockerfile` (servidor) |
 | `postgres:16` | `ghcr.io/julianogdc/base-postgres:16` | `sha256:ca0bd484cb98bf4b24eb1010e73fb3fcbd6714d240fbc1a10eea5b7dbecb641d` | serviço do PostgreSQL Integration Gate e ensaio de homologação |
-- REFERÊNCIAS: público `b8bc5a5` — 7 trocas (`apps/api/Dockerfile` 1, `apps/web/Dockerfile` 2, `foundation-ci.yml` 4: serviço PostgreSQL e ensaio de homologação), mesmas versões, `imagem:tag@digest`. Interno `fc4973d` (espelho conferido). Nenhum código funcional alterado. Commit de documentação com `[skip ci]`.
+- REFERÊNCIAS: público `b8bc5a5` — 7 trocas (`apps/api/Dockerfile` 1, `apps/web/Dockerfile` 2, `foundation-ci.yml` 4: serviço PostgreSQL e ensaio de homologação), mesmas versões, `imagem:tag@digest`. Interno `fc4973d` (espelho conferido). Nenhum código funcional alterado. Commits de documentação com `[skip ci]` no interno e no público.
 - CI OFICIAL (rodada única): run 38561948692 (https://github.com/Julianogdc/zafira-hub/actions/runs/38561948692) — **5/5 verdes**: Code Quality (domínio 103/103, API 825/825, web 88/88), PostgreSQL 159/159, Docker Build ✔, Publish Images ✔, Homologation Rehearsal ✔ (Browser Gates F6, F7-1b, F7-2b, F7-3b, F7-4b e **F8 70/0** PASS). **Nenhum 429**; logs mostram o PostgreSQL vindo de `ghcr.io/julianogdc/base-postgres@sha256:ca0bd484…`.
 - CUSTO: zero — pacotes públicos no GHCR, runners `ubuntu-latest`, 0 ms faturáveis, nenhuma credencial nova.
 - PUBLICAÇÃO REAL: impossível na configuração padrão (despachante desligado; inalterado).
@@ -364,7 +475,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-4a: nova tentativa do CI — 429 persistiu no Publish Images; proposta de origem das imagens-base (DEC-F8-024) — Claude
 - AUTORIZAÇÃO: DEC-F8-024 — uma única nova tentativa, só jobs com falha.
-- EXECUÇÃO: `gh run rerun --failed` no run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502). O primeiro pedido recebeu **HTTP 500 da API do GitHub** e não iniciou nada (o run continuou na tentativa 2); o pedido foi reenviado uma vez e iniciou a **tentativa 3**. Commit de documentação com `[skip ci]`.
+- EXECUÇÃO: `gh run rerun --failed` no run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502). O primeiro pedido recebeu **HTTP 500 da API do GitHub** e não iniciou nada (o run continuou na tentativa 2); o pedido foi reenviado uma vez e iniciou a **tentativa 3**. Commits de documentação com `[skip ci]` no interno e no público.
 - RESULTADO (tentativa 3): **Docker Build ✔** (passou desta vez); Code Quality ✔ e PostgreSQL ✔ (159/159) mantidos da tentativa 1; **Publish Images ✘** — o mesmo limite externo (`429 Too Many Requests` / `Data limit exceeded`) ao baixar `node:24.12.0-bookworm-slim` do registro público da Amazon; **Homologation Rehearsal não executado** (depende do Publish Images). Runners `ubuntu-latest`, 0 ms faturáveis. **5/5 não atingido; nenhuma nova tentativa**, conforme a DEC.
 - PROPOSTA: `docs/propostas/CI_ORIGEM_IMAGEM_BASE_PROPOSTA.md` — recomendada a **opção A**: espelho próprio no GHCR das quatro imagens-base (`node` da API e da web, `nginx`, `postgres`), fixadas por digest e copiadas por workflow manual; sem segredo novo, sem custo, mesmo conteúdo byte a byte. Alternativas: Docker Hub com conta (segredo novo), ECR autenticado (AWS, segredo e possível custo), só reexecutar (falhas continuam).
 - PENDÊNCIAS NOVAS: **P35** validação no Hub de imagens com mais de 30 megapixels (hoje só o provedor recusa; exige guardar as dimensões da mídia); **P36** teste PostgreSQL do limite de 25 publicações por dia (hoje coberto só no domínio).
@@ -392,7 +503,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
   - **Simulador do BrightBean** (em memória, só testes): comportamento observado na F8-0b e modos de falha (timeout após criar, retentativa do provedor, falha definitiva, 429, permissão, publicação em andamento).
   - **D-F84-1**: quatro rotas legadas de escrita do SocialPublisher respondem **410 `LEGACY_WRITE_DISABLED`** (autenticação e permissão verificadas antes; provedor não chamado); consultas mantidas. Dois testes antigos ajustados para o novo comportamento (continuam provando que o provedor não é chamado).
 - TESTES LOCAIS: typecheck API e web 0 erros; domínio **103/103** (+9); API **825/825** (+3: prova da configuração padrão — despachante e agendador não iniciam e nunca montam o gateway real); web 88/88; `lint:f6` 0 erros; build completo.
-- CI OFICIAL: run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502) — **Code Quality ✔ (domínio 103/103, API 825/825, web 88/88); PostgreSQL ✔ 159/159** (inclui os 13 cenários da F8-4a com o simulador); **Docker Build ✘ nas duas tentativas por limite externo** (`429 Too Many Requests` do registro público da Amazon ao baixar `node:24.12.0-bookworm-slim`); Publish Images e Homologation Rehearsal não executados. Runners `ubuntu-latest`, 0 ms faturáveis. **5/5 não atingido**; nova tentativa ou mudança da origem da imagem dependem de decisão. Commit de documentação com `[skip ci]`.
+- CI OFICIAL: run 38496406502 (https://github.com/Julianogdc/zafira-hub/actions/runs/38496406502) — **Code Quality ✔ (domínio 103/103, API 825/825, web 88/88); PostgreSQL ✔ 159/159** (inclui os 13 cenários da F8-4a com o simulador); **Docker Build ✘ nas duas tentativas por limite externo** (`429 Too Many Requests` do registro público da Amazon ao baixar `node:24.12.0-bookworm-slim`); Publish Images e Homologation Rehearsal não executados. Runners `ubuntu-latest`, 0 ms faturáveis. **5/5 não atingido**; nova tentativa ou mudança da origem da imagem dependem de decisão. Commits de documentação com `[skip ci]` no interno e no público.
 - NENHUMA PUBLICAÇÃO REAL POSSÍVEL NA CONFIGURAÇÃO PADRÃO: despachante desligado; sem a variável, `dispatchDue`/`reconcileDue` retornam antes de ler a caixa de saída e o gateway real nunca é montado (provado em teste unitário e no PostgreSQL); rotas legadas de escrita bloqueadas.
 - BASELINE DE CÓDIGO: `44619b3` no público (espelho `eb2836c`).
 - STATUS: F8-4a **implementada; CI 5/5 pendente (bloqueio externo); aceite técnico pendente**. F8-4b não iniciada.
@@ -410,7 +521,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b encerrada com ressalvas; contrato consolidado e proposta da F8-4 (DEC-F8-022) — Claude
 - AUTORIZAÇÃO: DEC-F8-022.
-- MÉTRICAS DO T30 (só GET, ~28 min após a publicação): chave válida e restrita; `captured_at` nulo, séries vazias, 7 indicadores com valor padrão 0; **nenhuma coleta** (esperado: coleta horária). Verificação pendente em ~2 h, ~6 h e ~20 h (P34). Commit de documentação com `[skip ci]`.
+- MÉTRICAS DO T30 (só GET, ~28 min após a publicação): chave válida e restrita; `captured_at` nulo, séries vazias, 7 indicadores com valor padrão 0; **nenhuma coleta** (esperado: coleta horária). Verificação pendente em ~2 h, ~6 h e ~20 h (P34). Commits de documentação com `[skip ci]` no interno e no público.
 - CONTRATO: `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` consolidado para revisão futura.
 - PROPOSTA DA F8-4: `docs/propostas/F8-4_PROPOSTA_EXECUCAO.md` — `ContentPublication` por versão aprovada + conta; `publication_outbox` transacional; despachante desligado por padrão com lease e leitura de estado antes de agir; idempotência por SHA-256 (upload) e por item (rascunho); validações que o BrightBean não faz; reconciliação por `externalPostId`; simulador com os comportamentos observados e modos de falha (substitui T33/T34); testes de domínio, API, PostgreSQL, simulador e Browser Gate; fatias F8-4a/F8-4b; decisões D-F84-1 a D-F84-4. **Achado:** as rotas síncronas herdadas do SocialPublisher (fase 2C2) permitem criar e agendar sem passar pela versão aprovada — a F8-4 deve restringi-las.
 - PENDÊNCIAS NOVAS: P33 limpeza dos 15 rascunhos e 17 mídias de teste e revogação da chave temporária; P34 verificação das métricas do T30.
@@ -430,7 +541,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b: avaliação técnica final, contrato do SocialPublisher e aceite da R1+ formalizado (DEC-F8-020, DEC-F8-021) — Claude
 - AUTORIZAÇÃO: DEC-F8-020 — somente leitura e análise; nenhuma chamada à API nesta etapa.
-- EXECUTADO: avaliação de T31–T34 (§16.1); capacidades obrigatórias para iniciar a F8-4 (§16.2, todas comprovadas); proposta de encerramento com ressalvas RS1–RS7 (§16.3); causa da falta de métricas do T30 pelo código (coleta horária; `next_sync_eta` = agora + 5 min sem coleta anterior) e verificação só GET em ~2 h, ~6 h e ~20 h (§16.4); contrato mínimo do adaptador em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` (§16.5); aceite da R1+ formalizado como **DEC-F8-021**. Commit de documentação com `[skip ci]`.
+- EXECUTADO: avaliação de T31–T34 (§16.1); capacidades obrigatórias para iniciar a F8-4 (§16.2, todas comprovadas); proposta de encerramento com ressalvas RS1–RS7 (§16.3); causa da falta de métricas do T30 pelo código (coleta horária; `next_sync_eta` = agora + 5 min sem coleta anterior) e verificação só GET em ~2 h, ~6 h e ~20 h (§16.4); contrato mínimo do adaptador em `docs/propostas/F8-4_CONTRATO_SOCIALPUBLISHER_BRIGHTBEAN.md` (§16.5); aceite da R1+ formalizado como **DEC-F8-021**. Commits de documentação com `[skip ci]` no interno e no público.
 - RECOMENDAÇÃO: encerrar a F8-0b com ressalvas; T31 só adaptado e só se o carrossel estiver no piloto, antes de ligar o despachante; dispensar T32 (até decisão das redes), T33 e T34 como testes reais.
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
 - STATUS: R0, R1, R1+ e T30 aceitos; **avaliação final entregue; decisão da Direção pendente**.
@@ -457,7 +568,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-13 — F8-0b: aceite definitivo do T30 e métricas pós-publicação (DEC-F8-019) — Claude
 - AUTORIZAÇÃO: DEC-F8-019 — somente GET.
 - PERMISSÕES: 3× `/me/` → [`create_posts`, `view_analytics`]; `publish_directly` removida; conta de teste conectada.
-- MÉTRICAS DO POST: 200 em 00:25, 00:35 e 00:42 UTC (até ~17 min após a publicação); `captured_at` **nulo**, séries vazias, 7 indicadores com valor padrão **0**; `next_sync_eta` móvel (00:31 → 00:39 → 00:47). **Nenhuma coleta efetiva** na janela. Métricas da conta: coletadas às 00:17 UTC, próxima em ~24 h. Commit de documentação com `[skip ci]`.
+- MÉTRICAS DO POST: 200 em 00:25, 00:35 e 00:42 UTC (até ~17 min após a publicação); `captured_at` **nulo**, séries vazias, 7 indicadores com valor padrão **0**; `next_sync_eta` móvel (00:31 → 00:39 → 00:47). **Nenhuma coleta efetiva** na janela. Métricas da conta: coletadas às 00:17 UTC, próxima em ~24 h. Commits de documentação com `[skip ci]` no interno e no público.
 - REGRA PARA A F8-5: `captured_at` nulo = sem dado ("aguardando coleta"), mesmo com `analytics_available` true e valores 0; `next_sync_eta` não é compromisso.
 - MATRIZ F8-0: §10 acrescentada (#36, #37, #38).
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
@@ -478,7 +589,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-13 — F8-0b R2/T30: Story publicada na conta de testes, sem falha e sem duplicidade (DEC-F8-018) — Claude
 - AUTORIZAÇÃO: DEC-F8-018 — somente o T30.
 - PORTÃO: após 35 s, 3× `/me/` com `create_posts`, `publish_directly`, `view_analytics`; só a conta de testes; conta sem pendências; D6 Story rascunho com 1 mídia.
-- RESULTADO: uma única escrita (`schedule` 200, `-03:00` → UTC, mesmo instante). `scheduled` → `publishing` (16 s após o horário) → **`published`** (~26 s após o horário), com `published_at`, `platform_post_id` e permalink; sem `publish_error`; **sem retentativa automática**. **Duplicidade ausente:** 1 publicado na conta (o D6), 0 agendados/`publishing`/`failed`. Métricas do post 200, `analytics_available` true, 7 indicadores com 0 e `captured_at` nulo (coleta pendente). Commit de documentação com `[skip ci]`.
+- RESULTADO: uma única escrita (`schedule` 200, `-03:00` → UTC, mesmo instante). `scheduled` → `publishing` (16 s após o horário) → **`published`** (~26 s após o horário), com `published_at`, `platform_post_id` e permalink; sem `publish_error`; **sem retentativa automática**. **Duplicidade ausente:** 1 publicado na conta (o D6), 0 agendados/`publishing`/`failed`. Métricas do post 200, `analytics_available` true, 7 indicadores com 0 e `captured_at` nulo (coleta pendente). Commits de documentação com `[skip ci]` no interno e no público.
 - ACHADO: antes da coleta o BrightBean devolve 0 nas métricas; a F8-5 deve tratar `captured_at` nulo como sem dado.
 - MATRIZ F8-0: §9 acrescentada (#1, #26, #32, #33, #36, #18/#19).
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
@@ -498,7 +609,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b: preparação da R2/T30 (DEC-F8-017) — Claude
 - AUTORIZAÇÃO: DEC-F8-017 — somente leitura e preparação.
-- LEITURAS: `/me/` × 3 → só `create_posts` (`publish_directly` removida); conta de teste conectada. D6: Story rascunho, 1 mídia, sem horário. Código do fork (`4e5bef9`): sem "publicar agora"; publicação = agendar e o publicador dispara em ~15 s; retentativas 60 s/5 min/30 min (máx. 3); o servidor nunca republica sem confirmação (prefere `failed` a duplicar). Commit de documentação com `[skip ci]`.
+- LEITURAS: `/me/` × 3 → só `create_posts` (`publish_directly` removida); conta de teste conectada. D6: Story rascunho, 1 mídia, sem horário. Código do fork (`4e5bef9`): sem "publicar agora"; publicação = agendar e o publicador dispara em ~15 s; retentativas 60 s/5 min/30 min (máx. 3); o servidor nunca republica sem confirmação (prefere `failed` a duplicar). Commits de documentação com `[skip ci]` no interno e no público.
 - PREPARADO: executor do T30 (uma única escrita — agendar D6 entre agora + 2 e + 10 min com fuso; travas testadas offline; acompanhamento de 25 min; métricas e totais ao final; permalink só no interno). Roteiro e critérios em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §13.
 - R1+: executada (DEC-F8-016); aceite técnico ainda não registrado.
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
@@ -518,7 +629,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-13 — F8-0b R1+ executada: T20–T23 aprovados, zero agendados e zero publicados (DEC-F8-016) — Claude
 - AUTORIZAÇÃO: DEC-F8-016.
 - PORTÃO: após 35 s, 3× `/me/` com permissões exatas `create_posts` + `publish_directly` e 1 conta de teste conectada; conta sem agendados/publicações; D6 e D7 em rascunho.
-- RESULTADO: T20 agendar D6 (`-03:00` → UTC, mesmo instante) 200; T21 cancelar 200 (`draft`, horário nulo); T22 cancelar de novo **409**; T23 agendar D7 200, reagendar +8 d 200 (horário atualizado), cancelar 200. **Final e após 3 min: D6 e D7 em `draft` sem horário; `scheduled` 0, `publishing` 0, `published` 0, `failed` 0.** Commit de documentação com `[skip ci]`.
+- RESULTADO: T20 agendar D6 (`-03:00` → UTC, mesmo instante) 200; T21 cancelar 200 (`draft`, horário nulo); T22 cancelar de novo **409**; T23 agendar D7 200, reagendar +8 d 200 (horário atualizado), cancelar 200. **Final e após 3 min: D6 e D7 em `draft` sem horário; `scheduled` 0, `publishing` 0, `published` 0, `failed` 0.** Commits de documentação com `[skip ci]` no interno e no público.
 - CAPACIDADES CONFIRMADAS: #17, #19, #20, #23 (pelo estado), #30. Matriz F8-0 §8 acrescentada.
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
 - STATUS: R1+ **executada; encerramento só com aceite técnico da Direção**. R2 não autorizada.
@@ -537,7 +648,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b R1+ interrompida no portão: `publish_directly` ausente (DEC-F8-015) — Claude
 - AUTORIZAÇÃO: DEC-F8-015.
-- RESULTADO: após 35 s, 3× `/me/` (200, consistentes) com permissões efetivas **[`create_posts`]**, sem `publish_directly`; conta de teste conectada. **Portão não atendido → nenhuma escrita**; T20–T23 não executados. Estado final e após 3 min: D6 e D7 em `draft` sem horário; conta com `scheduled` 0, `publishing` 0, `published` 0, `failed` 0. Commit de documentação com `[skip ci]`.
+- RESULTADO: após 35 s, 3× `/me/` (200, consistentes) com permissões efetivas **[`create_posts`]**, sem `publish_directly`; conta de teste conectada. **Portão não atendido → nenhuma escrita**; T20–T23 não executados. Estado final e após 3 min: D6 e D7 em `draft` sem horário; conta com `scheduled` 0, `publishing` 0, `published` 0, `failed` 0. Commits de documentação com `[skip ci]` no interno e no público.
 - DIAGNÓSTICO: permissão efetiva = chave ∩ papel do emissor; cache descartado (35 s e 3 leituras iguais). Hipóteses: `publish_directly` não salva na chave, ou o emissor não tem `publish_directly` no workspace (nunca apareceu desde a R0).
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
 - STATUS: R1+ **não executada (bloqueio de permissão)**; R2 não autorizada.
@@ -555,7 +666,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b: preparação da R1+ por análise de código (DEC-F8-014) — Claude
 - AUTORIZAÇÃO: DEC-F8-014 — somente leitura de código.
-- EXECUTADO: leitura do fork em `4e5bef9` (rotas de posts, serviços e modelo de composição, motor do publicador); nenhuma chamada à instância. Roteiro em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §10. Commit de documentação com `[skip ci]`.
+- EXECUTADO: leitura do fork em `4e5bef9` (rotas de posts, serviços e modelo de composição, motor do publicador); nenhuma chamada à instância. Roteiro em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`, §10. Commits de documentação com `[skip ci]` no interno e no público.
 - CONCLUSÕES: agendar e reagendar exigem `create_posts` + **`publish_directly`**; cancelar exige só `create_posts`. Cancelar devolve `scheduled` → `draft`, apaga o horário e tira o post da fila; depois de `publishing` não há cancelamento. Sem validação de horário futuro (passado publica em ~15 s). Agendar/reagendar/cancelar sem chave de idempotência, idempotentes pelo estado (repetição → 409). Agendado conta no teto diário. Revogar/expirar a chave não cancela agendados. Fluxo de aprovação do workspace pode recusar o agendamento (422).
 - ROTEIRO PROPOSTO: chave `create_posts` + `publish_directly`; Stories D6 e D7 da R1; agendar a +7 d (em `-03:00`), cancelar, cancelar de novo (409), agendar +7 d → reagendar +8 d → cancelar; executor recusa horário < agora + 6 d e qualquer operação fora dessas rotas; inventário final de agendados = 0.
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
@@ -575,7 +686,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-13 — F8-0b Fase R1: uploads e rascunhos sem publicação (DEC-F8-013) — Claude
 - AUTORIZAÇÃO: DEC-F8-013.
 - PORTÃO: 3 leituras de `/me/` consistentes; permissões exatas (`create_posts`, `upload_media`, `view_analytics`), sem `publish_directly`; conta de teste conectada.
-- EXECUÇÃO: executor temporário fora do repositório, com travas no código (só `GET`, `POST /media/`, `POST /posts/` com `action=draft` sem `scheduled_at`, `PATCH` de legenda) e parada em 5xx/401/403/429 (não ocorreu). Mídia sintética gerada localmente (System.Drawing; WebP e MP4 pelo navegador embutido, servidor local temporário em 127.0.0.1, já encerrado). Os carrosséis de 10 e 11 itens não rodaram na primeira passada por erro no executor (checagem mal escrita) e foram executados num complemento com o mesmo portão. Commit de documentação com `[skip ci]`.
+- EXECUÇÃO: executor temporário fora do repositório, com travas no código (só `GET`, `POST /media/`, `POST /posts/` com `action=draft` sem `scheduled_at`, `PATCH` de legenda) e parada em 5xx/401/403/429 (não ocorreu). Mídia sintética gerada localmente (System.Drawing; WebP e MP4 pelo navegador embutido, servidor local temporário em 127.0.0.1, já encerrado). Os carrosséis de 10 e 11 itens não rodaram na primeira passada por erro no executor (checagem mal escrita) e foram executados num complemento com o mesmo portão. Commits de documentação com `[skip ci]` no interno e no público.
 - RESULTADO: 17 uploads aceitos (JPG, PNG, WebP, MP4; "`.mov`" detectado como MP4); recusados com 422: imagem > 20 MB, > 30 MP e arquivo falso. 15 rascunhos criados (Feed, carrossel 2/10/11, Reel, Story imagem e vídeo, vídeo no Feed, PNG, WebP, legendas 2200 e 2201, idempotência, fuso); recusados com 422: story com 2 mídias e reel com imagem. Idempotência: replay com mesmo id e 422 para corpo diferente, no upload e na criação. `proposed_publish_at` com `-03:00` → UTC, mesmo instante. `PATCH` de legenda mantém rascunho. **Inventário final: 15 posts, todos `draft`; 17 mídias; nada agendado ou publicado.**
 - ACHADOS PARA A F8-4: servidor não valida máximo do carrossel nem `char_limit` na criação; deduplicação do upload por nome+tamanho; tipo detectado pelo conteúdo; vídeo passa por `pending`.
 - MATRIZ F8-0: §7 acrescentada (classes atualizadas de #6, #7, #10, #12, #13, #15, #16, #19, #22, #24, #27, #28, #29, #37, #38).
@@ -596,7 +707,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b R0 concluída: causa da divergência e leituras finais (DEC-F8-012) — Claude
 - AUTORIZAÇÃO: DEC-F8-012 — somente GET; parada em erro de autorização ou de isolamento (não ocorreu).
-- RESULTADO: `/me/` 200 (só `view_analytics`, 1 conta); `/accounts/` 200 com **a mesma conta** (também com parâmetro anti-cache; sem barra → 301); posts filtrados pela conta 200 (total 0); conta fora da allowlist 404 (**isolamento ok**); **métricas da conta 200** (`analytics_available` true); mídia 200 (0 itens, cursor). Detalhe de post, permalink e métricas de post não aplicáveis (conta sem posts). Commit de documentação com `[skip ci]`.
+- RESULTADO: `/me/` 200 (só `view_analytics`, 1 conta); `/accounts/` 200 com **a mesma conta** (também com parâmetro anti-cache; sem barra → 301); posts filtrados pela conta 200 (total 0); conta fora da allowlist 404 (**isolamento ok**); **métricas da conta 200** (`analytics_available` true); mídia 200 (0 itens, cursor). Detalhe de post, permalink e métricas de post não aplicáveis (conta sem posts). Commits de documentação com `[skip ci]` no interno e no público.
 - CAUSA DA DIVERGÊNCIA: cache da chave (com contas pré-carregadas) por até 30 s em cada processo do servidor (`apps/api_keys/services.py`, `4e5bef9`); `/me/` e `/accounts/` foram atendidos por processos com cópias diferentes logo após a correção da allowlist. Identificada pelo código e pelo desaparecimento da divergência. Para a F8-4: aguardar ≥ 30 s após alterar/revogar uma chave.
 - CAPACIDADES COM EVIDÊNCIA REAL: #10, #27, listagem de mídia, **#37**, **#38** (com isolamento). Pendentes para R2: detalhe/permalink de post e #36.
 - CONTA DE TESTE: confirmada pela Direção como conta própria de testes (registro no interno).
@@ -616,7 +727,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b R0 reexecutada: divergência entre /me/ e /accounts/ (DEC-F8-011) — Claude
 - AUTORIZAÇÃO: DEC-F8-011 — somente GET; parar em divergência.
-- RESULTADO: `/me/` 200 com permissões **[view_analytics]** e **1 conta** liberada (`instagram_login`, conectada, `char_limit` 2200, `needs_title` false, `supports_first_comment` true); `/accounts/` 200 com **0 contas**. Portão não atendido → posts, mídia e métricas **não executados**. Uma leitura adicional de `/me/` (só campos técnicos, sem nomes) confirmou a conta. Commit de documentação com `[skip ci]`.
+- RESULTADO: `/me/` 200 com permissões **[view_analytics]** e **1 conta** liberada (`instagram_login`, conectada, `char_limit` 2200, `needs_title` false, `supports_first_comment` true); `/accounts/` 200 com **0 contas**. Portão não atendido → posts, mídia e métricas **não executados**. Uma leitura adicional de `/me/` (só campos técnicos, sem nomes) confirmou a conta. Commits de documentação com `[skip ci]` no interno e no público.
 - DIAGNÓSTICO: chave correta; a instância diverge do código lido (`4e5bef9`), em que as duas rotas leem a mesma lista. Hipóteses: código implantado diferente nessa rota ou cache. F8-4 não deve depender de `/accounts/` até esclarecer.
 - CAPACIDADES COM EVIDÊNCIA REAL: #10 (limites da conta `instagram_login`) e #38 (permissão efetiva e allowlist). Pendentes: #27 com dados, #36/#37, R1/R1+/R2.
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633`).
@@ -635,7 +746,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b Fase R0: leitura com chave temporária (DEC-F8-010) — Claude
 - AUTORIZAÇÃO: DEC-F8-010 — somente GET.
-- PROCEDIMENTO: chave guardada pelo proprietário como variável de ambiente do usuário Windows (`ZAFIRA_F80B_BB_KEY`), com entrada oculta; script temporário fora do repositório que **só faz GET**, nunca imprime a chave e grava apenas códigos HTTP, nomes de campos e contagens. Commit de documentação com `[skip ci]`.
+- PROCEDIMENTO: chave guardada pelo proprietário como variável de ambiente do usuário Windows (`ZAFIRA_F80B_BB_KEY`), com entrada oculta; script temporário fora do repositório que **só faz GET**, nunca imprime a chave e grava apenas códigos HTTP, nomes de campos e contagens. Commits de documentação com `[skip ci]` no interno e no público (o registro do interno foi concluído num segundo commit, ver handoff).
 - RESULTADO: `/me/` 200 (autenticação válida); `/accounts/` 200 com **0 contas**; `/posts/` 200 (listagem com `items/limit/offset/total`, total 0; paginação por offset aceita); `/media/` 200 (listagem com cursor, 0 itens). Métricas, detalhe de post/mídia e filtro por conta **não executados** (sem alvo). Nenhum 403.
 - ACHADOS: (1) **chave sem conta na allowlist** — a conta pretendida não está vinculada; (2) **permissões efetivas** = `create_posts`, `approve_posts`, `edit_others_posts`, `view_analytics` (interseção chave ∩ emissor, pelo código), **diferente do informado (só `view_analytics`)**; sem `publish_directly` e sem `upload_media`. Nenhuma escrita tentada.
 - CAPACIDADES COM EVIDÊNCIA REAL: #27 (listagem de posts e paginação), listagem de mídia com cursor, #38 (modelo de permissão e allowlist por chave). Pendentes: #10, #36, #37 e R1/R1+/R2.
@@ -656,7 +767,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-0b: preparação da verificação ativa do BrightBean (DEC-F8-009) — Claude
 - AUTORIZAÇÃO: DEC-F8-009 — somente preparação; leitura sem credencial; nenhuma escrita, publicação, alteração de configuração, credencial ou VPS.
-- EXECUTADO: plano em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`. Diagnóstico da instância por acessos de leitura sem credencial (endereço e perfil da conta no repositório interno): aplicação responde (302), API v1 exige chave (`/api/v1/me/` → 401), OpenAPI pública versão 1.0.0 com **16 rotas idênticas** ao fork `brightbean-studio` branch `zafira-custom-v1` commit `4e5bef9` (código lido, clone temporário fora do repositório). **Contas conectadas não verificadas**: exigem chave; a chave da homologação 2C2H foi revogada e criar outra é alteração de credencial (fora da etapa). Commit de documentação com `[skip ci]`.
+- EXECUTADO: plano em `docs/propostas/F8-0b_PLANO_VERIFICACAO_BRIGHTBEAN.md`. Diagnóstico de `https://post.zafiramkt.com.br` por acessos de leitura **sem credencial**: aplicação responde (302), API v1 exige chave (`/api/v1/me/` → 401), OpenAPI pública versão 1.0.0 com **16 rotas idênticas** ao fork `brightbean-studio` branch `zafira-custom-v1` commit `4e5bef9` (código lido, clone temporário fora do repositório). **Contas conectadas não verificadas**: exigem chave; a chave da homologação 2C2H foi revogada e criar outra é alteração de credencial (fora da etapa). Commits de documentação com `[skip ci]` no interno e no público (versão pública do plano sem endereço da instância nem perfil da conta).
 - 13 CAPACIDADES NÃO VERIFICADAS: #8, #9, #12, #13, #15, #18, #19, #23, #24, #27, #28, #29, #30. Pelo código e pela OpenAPI: listagem existe (#27); busca por referência (#28) e webhooks (#29) **não existem**; não há publicação imediata, mas `scheduled_at` no passado dispara em ~15 s (#18); idempotência por chave de API com replay/422/409 (#24); cancelar devolve o agendado a rascunho e repete com 409 (#23, #30); mídia pertence ao workspace (#15); limites padrão imagem 20 MB / vídeo 1 GB (#13). Todos ainda **sem observação em execução**.
 - ACHADOS PARA A F8-4: imagens acima de 20 MB (aceitas pelo Hub até 100 MB) são recusadas pelo BrightBean por padrão; horário passado publica em ~15 s (o Hub deve recusar); teto de 25 publicações/dia por conta do Instagram; sem webhooks nem busca por referência.
 - RISCO PRINCIPAL: a conta conectada registrada é o **perfil real da agência** no Instagram e no Facebook; publicações são públicas e não removíveis pela API. Recomendado conectar conta de teste dedicada antes de qualquer teste R2.
@@ -677,7 +788,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — Registro do aceite técnico da F8-3 (DEC-F8-008) e correção da P32 — Claude
 - AUTORIZAÇÃO: aceite técnico da F8-3 pela Direção (DEC-F8-008); somente documentação, com `[skip ci]`. Sem F8-4, F8-0b, VPS, produção ou workflows no privado.
-- EXECUTADO: F8-3 marcada como **concluída** no ESTADO, no Mapa e no contrato; evidências do CI e do Browser Gate F8 registradas na DEC. **P32 corrigida** no `MAPA_MESTRE.md` público (removido o trecho repetido "`(repositório interno)` (repositório interno)" da nota de abertura da parte C2; nenhuma regra alterada). Commit de documentação com `[skip ci]`.
+- EXECUTADO: F8-3 marcada como **concluída** no ESTADO, no Mapa e no contrato; evidências do CI e do Browser Gate F8 registradas na DEC. **P32 corrigida** no `MAPA_MESTRE.md` público (removido o trecho repetido "`(repositório interno)` (repositório interno)" da nota de abertura da parte C2; nenhuma regra alterada). Commits de documentação com `[skip ci]` no interno e no público.
 - DIVERGÊNCIA REGISTRADA: o aceite foi pedido como "DEC-F8-007", número já existente; registrado como DEC-F8-008 (ver nota na DEC).
 - BASELINE DE CÓDIGO: inalterada — `38ce219` no público (espelho `d1e0633` no interno). Nenhum código alterado; nenhum run disparado.
 - PRÓXIMA MICROETAPA PREVISTA NO MAPA: **F8-0b — verificação ativa das capacidades do BrightBean** (`docs/propostas/F8-0_MATRIZ_CAPACIDADES_BRIGHTBEAN.md`, §5), pré-requisito obrigatório da F8-4. Exige instância de teste do BrightBean, credencial de escopo mínimo e **autorização expressa** (sem dados de cliente). **Não autorizada; não iniciada.**
@@ -703,7 +814,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
   - **Web**: `ContentStagesPanel` no painel de Entregas (independe do plano): quatro cartões (Arquivos recebidos, Enviados para aprovação, Aprovados pelo cliente, Publicados) e barra "Publicadas entre as recebidas" **neutra** ("Publicação ainda não integrada"); Publicados mostra "—" e "Aguardando integração da publicação", nunca 0; 2×2 em 390 px, 4 colunas a partir de 768 px; sem botões de ação.
 - REGISTROS EXISTENTES (D3): não há banco real com a F8 (nenhum deploy da F8; acesso a banco real proibido). A garantia é a verificação prévia dentro da própria migration, que **para sem modificar dados**; no CI ela rodou em banco descartável sem vínculos inconsistentes.
 - TESTES LOCAIS: typecheck contracts/domain/api/web 0 erros; domínio 94/94 (+7); API 822/822; web 88/88 (+4); `lint:f6` 0 erros; build completo. PostgreSQL e Browser Gate não executáveis nesta máquina (sem PostgreSQL/Python): validados no CI.
-- CI OFICIAL: run 38446236135 (https://github.com/Julianogdc/zafira-hub/actions/runs/38446236135) — **5/5 verdes** — domínio 94/94, API 822/822, web 88/88, PostgreSQL 145/145; 0 ms faturáveis. Browser Gate F8: **PASS, 70 verificações e 0 falhas** (cenário L completo; gates F4–F7 PASS). Somente runners `ubuntu-latest`. Runs anteriores: 38442282581 (falha no teste novo de PostgreSQL: faltava a organização na exceção de permissão; corrigido em `b2b9760`, sem alterar o código); 38443270005 (1ª tentativa: limite externo de download da imagem do PostgreSQL no registro público da Amazon, sem teste executado; reexecução única do job: PostgreSQL 145/145, Publish Images ok, Browser Gate F8 69/1 — a checagem nova de 390 px procurava o painel antes de abrir Entregas; corrigida em `38ce219`). Nenhum teste existente foi enfraquecido. Commit de documentação com `[skip ci]`.
+- CI OFICIAL: run 38446236135 (https://github.com/Julianogdc/zafira-hub/actions/runs/38446236135) — **5/5 verdes** — domínio 94/94, API 822/822, web 88/88, PostgreSQL 145/145; 0 ms faturáveis. Browser Gate F8: **PASS, 70 verificações e 0 falhas** (cenário L completo; gates F4–F7 PASS). Somente runners `ubuntu-latest`. Runs anteriores: 38442282581 (falha no teste novo de PostgreSQL: faltava a organização na exceção de permissão; corrigido em `b2b9760`, sem alterar o código); 38443270005 (1ª tentativa: limite externo de download da imagem do PostgreSQL no registro público da Amazon, sem teste executado; reexecução única do job: PostgreSQL 145/145, Publish Images ok, Browser Gate F8 69/1 — a checagem nova de 390 px procurava o painel antes de abrir Entregas; corrigida em `38ce219`). Nenhum teste existente foi enfraquecido. Commits de documentação com `[skip ci]` no interno e no público.
 - ESPECIFICAÇÃO: §9 atualizada (estágios derivados, sem gravar no enum de `DeliverablePiece`), conforme D2.
 - STATUS: F8-3 **entregue; aceite técnico pendente da Direção** (não aceita automaticamente).
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma. Depois do aceite: F8-0b antes da F8-4 (ambas não autorizadas).
@@ -720,7 +831,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — F8-3: revisão do domínio e contrato técnico (sem implementação) — Claude
 - AUTORIZAÇÃO: DEC-F8-006 — somente revisar o domínio e propor o contrato técnico; **não implementar**. Sem F8-4, VPS, produção ou workflows no privado.
-- EXECUTADO: leitura de `schema.prisma` (Content*, Approval*, Deliverable*), `content.service.ts`, `approval.service.ts`, `deliverables.service.ts/routes.ts`, escopo de cliente e papéis padrão. Contrato em `docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md`: unidade = `ContentItem`; estágios derivados na leitura (primeiro `ContentMedia` → `sentForApprovalAt` → `ApprovalDecision` APPROVED); contagem cumulativa e monotônica; reenvio/reemissão/nova versão sem duplicidade; **Publicados = `null` (NOT_INTEGRATED), nunca 0**, e barra em estado neutro; endpoint de leitura com `deliverables.view` + `content.view` + escopo de cliente; nenhuma escrita em Entregas; testes de aceite por camada e extensão do Browser Gate F8. Commit único no público com `[skip ci]`.
+- EXECUTADO: leitura de `schema.prisma` (Content*, Approval*, Deliverable*), `content.service.ts`, `approval.service.ts`, `deliverables.service.ts/routes.ts`, escopo de cliente e papéis padrão. Contrato em `docs/propostas/F8-3_CONTRATO_CONTADOR_ENTREGAS.md`: unidade = `ContentItem`; estágios derivados na leitura (primeiro `ContentMedia` → `sentForApprovalAt` → `ApprovalDecision` APPROVED); contagem cumulativa e monotônica; reenvio/reemissão/nova versão sem duplicidade; **Publicados = `null` (NOT_INTEGRATED), nunca 0**, e barra em estado neutro; endpoint de leitura com `deliverables.view` + `content.view` + escopo de cliente; nenhuma escrita em Entregas; testes de aceite por camada e extensão do Browser Gate F8. Commits no interno e no público com `[skip ci]`.
 - ACHADOS: L1 `ContentItem.deliverablePieceId` sem chave estrangeira nem unicidade; L2 `archivedAt` sem rota que o preencha; L3 a especificação §9 previa gravar os estágios no enum de `DeliverablePiece` — o contrato recomenda não gravar (D2).
 - DECISÕES PEDIDAS À DIREÇÃO: **D1** período do conteúdo (recomendado: competência do plano da peça vinculada; sem vínculo, mês do primeiro arquivo no fuso da organização); **D2** contagem derivada, sem gravar nas peças (substitui a §9); **D3** um conteúdo por peça (índice único parcial).
 - BASELINE DE CÓDIGO: inalterada — `2fd34dc` no público (espelho `b7de353` no interno). Nenhum código alterado; nenhum run disparado.
@@ -739,7 +850,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-13 — Registro do aceite técnico da F8-2 (DEC-F8-005) e correção da P31 — Claude
 - AUTORIZAÇÃO: DEC-F8-005 — registrar o aceite e o encerramento técnico da F8-2 e corrigir a P31; somente documentação, com `[skip ci]`. Sem F8-3, VPS ou produção.
-- EXECUTADO: ESTADO_ATUAL, REGISTRO e MAPA_MESTRE atualizados nos dois repositórios, respeitando o saneamento (o público continua sem informação sensível; nenhum arquivo copiado do interno para o público). `AGENTS.md` público: removida a segunda cópia, idêntica, da seção "8. Dois repositórios: público e interno" (texto e regras inalterados). Commit único no público com `[skip ci]`.
+- EXECUTADO: ESTADO_ATUAL, REGISTRO e MAPA_MESTRE atualizados nos dois repositórios, respeitando o saneamento (o público continua sem informação sensível; nenhum arquivo copiado do interno para o público). `AGENTS.md` público: removida a segunda cópia, idêntica, da seção "8. Dois repositórios: público e interno" (texto e regras inalterados). Commits: interno e público com `[skip ci]` (SHAs no histórico de cada repositório).
 - BASELINE DE CÓDIGO: inalterada — `2fd34dc` no público (espelho `b7de353` no interno). Nenhum código alterado; nenhum run disparado.
 - STATUS: **F8-2 aceita e encerrada tecnicamente.** P31 resolvida. Nova P32 (trecho repetido na nota da parte C2 do Mapa público).
 - PRÓXIMA MICROETAPA PREVISTA NO MAPA: **F8-3** — contador de Entregas por estágio (arquivo recebido → enviado para aprovação → aprovado → publicado), sem alterar a meta contratual; ajustes no painel. **Não autorizada; não iniciada.**
@@ -783,18 +894,70 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial F8-2 a F8-5, BrightBean real, deploy/produção.
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
 
+### 2026-10-13 — Publicação do pacote público (DEC-GOV-005) — Claude
+- AUTORIZAÇÃO: Direção (2026-10-13), exclusivamente a publicação do commit raiz `5870f714901d319beafad6cb986a1436be439209`. Etapas administrativas anteriores feitas pelo proprietário: original renomeado para `Julianogdc/zafira-hub-internal` (privado, Actions desativado) e `Julianogdc/zafira-hub` criado público e vazio.
+- VERIFICAÇÕES ANTES DO PUSH: repositório público vazio (0 refs); commit raiz com **0 pais**, 1 commit, **602 arquivos**; `public-guard` e `secret-scan` com 0 ocorrências.
+- AÇÕES: (1) Actions do repositório público **desativado temporariamente** (API) para que o push na `hub-2.1` não disparasse o CI antes de verificar os pacotes GHCR; (2) push **sem force** do commit raiz para `refs/heads/hub-2.1`; (3) branch padrão definida como `hub-2.1`.
+- RESULTADO: `https://github.com/Julianogdc/zafira-hub` — **1 commit** (`5870f71`), 0 pais, 602 arquivos, 0 tags, 0 runs; branch padrão `hub-2.1`; secret scanning e push protection ativos; token de workflow somente leitura; aprovação de fork para novos colaboradores. Interno privado, 4 branches (hub-2.0, hub-2.1, main, sanitize/public-tree), Actions desativado, histórico e artefatos intactos.
+- PENDENTE PARA O PRIMEIRO CI: (a) **Actions do público está DESATIVADO**; (b) permissões dos pacotes GHCR `zafira-hub-api` e `zafira-hub-web` (a ferramenta sem escopo `read:packages` não consegue verificá-las): o proprietário deve, em cada pacote (perfil Julianogdc → Packages → pacote → Package settings → Manage Actions access), adicionar `zafira-hub` com papel **Write**; sem isso o publish de imagens e o ensaio de rollback (digests fixos) falham. Depois, reativar Actions no público e autorizar o primeiro run.
+- STATUS: publicado; CI não executado; F8-2 segue com aceite pendente (CI 5/5 + Browser Gate F8). F8-3 não iniciada.
+
+### 2026-10-13 — Correções da Direção e pacote público regenerado (commit raiz definitivo) — Claude
+- AUTORIZAÇÃO: Direção (2026-10-13) aprovou as correções e a execução controlada da migração H3 na ordem: congelar, renomear para `zafira-hub-internal` (privado), desativar Actions no interno, criar `zafira-hub` público com só o commit raiz, proteções, GHCR, primeiro CI 5/5 + Browser Gate F8, confirmar zero minutos faturáveis, registrar.
+- CORREÇÕES (branch `sanitize/public-tree`, commit `e92aee3`): (1) `public-guard` passa a barrar **por nome** os arquivos exclusivamente internos (`SQL_*.sql`, `EMAIL_TEMPLATE_*.html`, ADR-017/018, auditoria/triagem, runbooks de homologação, modelo de observação da VPS, proposta C2, plano de migração, `ESTADO/REGISTRO_INTERNO`, `commit.ps1`, `regression.ps1`, `scratch-audit.js`, `docs-internal/`); (2) DEC-GOV-005 pública corrigida: **P29 = placeholder descritivo, sem credencial comprovada e sem revogação exigida**; ESTADO público coerente.
+- PACOTE REGENERADO: repositório Git local independente `C:/Projetos/zafira-hub-public-staging` (branch `hub-2.1`): **commit raiz `5870f714901d319beafad6cb986a1436be439209`, 0 pais, 1 commit, 602 arquivos**, árvore `d700bf5ae9c8806022908eca69ba566514637859` idêntica à de `e92aee3`. O raiz anterior (`3ebc8ef`) está **superado** e nunca foi publicado.
+- VALIDAÇÃO: `public-guard` 0 ocorrências (592 arquivos) e `secret-scan` 0 (529) na árvore e na exportação; **49/49** arquivos internos da `hub-2.1` injetados em cópia temporária foram barrados pela guarda; 6 nomes proibidos com conteúdo vazio barrados; nenhum valor impresso.
+- EXECUÇÃO DA MIGRAÇÃO: **bloqueada no passo 2** — a renomeação do repositório foi **negada pelo classificador de permissões do ambiente** (ação sobre recurso compartilhado); nada foi alterado no GitHub (nome, visibilidade, Actions, branches intactos). Aguardando permissão explícita do proprietário para o agente executar as ações de administração do repositório, ou execução manual pelo proprietário.
+- STATUS: pacote pronto; migração **não iniciada**. F8-3 não autorizada; F8-0b antes da F8-4; P22 e P28 bloqueiam dados reais.
+
+### 2026-10-13 — Montagem e validação do pacote público final (commit raiz único) — Claude
+- AUTORIZAÇÃO: Direção (2026-10-13) — somente montar e validar o pacote público; **nada foi renomeado, criado no GitHub, publicado, nem teve visibilidade, cobrança, VPS, produção ou CI alterados**; sem F8-3.
+- CORREÇÃO ATENDIDA: `654dfb2` tem pai (`9a5d662`) e por isso não serve como histórico único. Criado repositório Git **local independente**, fora deste (`C:\Projetos\zafira-hub-public-staging`, branch `hub-2.1`), com **um único commit raiz** `3ebc8ef032b913b06a9ea886011808d6c83fda85` — **0 pais, 1 commit, 602 arquivos** — cuja árvore (`2afbbef935135fae1b5ad43a7af1a8cbf093f6d2`) é **idêntica** à de `654dfb2` (hash de árvore igual, inclusive o bit executável de `secret-scan.sh`). Histórico original, `hub-2.1` e `sanitize/public-tree` preservados; rastreabilidade pelo vínculo árvore ↔ `654dfb2`.
+- VARREDURAS (na árvore e na exportação `git archive` do commit raiz): `public-guard` — **0 ocorrências** (592 arquivos de texto, 11 hashes na lista de negação); `secret-scan` — **0** (529 arquivos). Nenhum `.env` real, chave/certificado, `docs/historico`, `internal-bundle`, `SQL_*`, `EMAIL_TEMPLATE_*`, auditoria, triagem, runbook de infraestrutura ou ADR-017/018 na árvore.
+- TESTES NEGATIVOS (cópia temporária da exportação + arquivos reais da `hub-2.1`; valores nunca impressos): barrados — `docs/historico`, `.env` real, `.env.example` interno, runbooks com host próprio (guarda), auditoria do Postiz e credencial sintética de 40 caracteres (`secret-scan`). **LACUNA ENCONTRADA:** arquivos internos **sem** host/IP/credencial (`SQL_*.sql`, `EMAIL_TEMPLATE_*.html`) **passam** pela guarda, pois ela não tem regra por nome de arquivo (só diretórios internos e nomes de segredo). A proteção atual é que eles **não estão na árvore**; para barrar reintrodução acidental é preciso acrescentar regra por nome (SQL_*, EMAIL_TEMPLATE_*, AUDITORIA_*, TRIAGEM_*, scratch*, runbooks de homologação, ADR-017/018) — mudança que altera a árvore e **depende de decisão da Direção**.
+- TESTES E GATES PRESERVADOS: 72 arquivos de teste idênticos em nome aos da `hub-2.1`; 22 arquivos de `scripts/homologation/` (incluindo o Browser Gate F8) idênticos; workflow com os 5 jobs, só `ubuntu-latest`; a árvore pública difere da `hub-2.1` apenas pelos 44 removidos, 16 saneados e 2 novos (`public-guard.mjs`, lista de hashes).
+- DOCUMENTAÇÃO OFICIAL COMPLETA: permanece neste repositório (355 commits; `docs/historico`, `internal-bundle`, runbooks, ADRs, ESTADO/REGISTRO/MAPA integrais).
+- CORREÇÃO DO P29 (reafirmada): o valor era um **placeholder descritivo**, não credencial provada; **nenhuma revogação foi feita, nem é registrada como necessária** sem nova evidência. O texto da DEC-GOV-005 na árvore pública ainda diz que a revogação é "do proprietário (confirmação necessária)": divergência de redação (a árvore não foi alterada para manter a identidade com `654dfb2`).
+- CHECKLIST DA PUBLICAÇÃO (nada executado): (1) Direção decide a lacuna da guarda e a redação do P29; (2) aceite expresso de execução (substitui a DEC-GOV-003); (3) renomear este repositório para `zafira-hub-internal` (sem workflows ativos); (4) criar `zafira-hub` público **vazio** e enviar o commit raiz como branch padrão `hub-2.1` (o workflow só dispara nessa branch); (5) conceder ao novo repositório acesso de Actions aos pacotes GHCR `zafira-hub-api`/`zafira-hub-web` (ou renomeá-los) — o ensaio de rollback do workflow usa dois digests fixos desses pacotes e **falhará sem esse acesso**; (6) ativar secret scanning/push protection, token de workflow somente leitura e aprovação para PR de fork; (7) primeiro CI público = validação da F8-2 (inclui o Browser Gate F8 nunca executado); (8) registrar execução e atualizar ESTADO/REGISTRO nos dois repositórios.
+- STATUS: **pacote pronto e validado; aguardando decisões da Direção**. F8-2 segue com aceite pendente; F8-3 não autorizada; F8-0b antes da F8-4; P22 e P28 bloqueiam homologação com dados reais.
+
+### 2026-10-13 — Preparação da separação público/privado (passos 1 a 3) — Claude
+- AUTORIZAÇÃO: DEC-GOV-005 — somente preparação. Nada foi renomeado, criado, publicado, apagado ou reescrito; visibilidade, cobrança, VPS e produção intocados; nenhum workflow executado.
+- ENTREGA: branch `sanitize/public-tree` (1 commit `654dfb2` sobre a `hub-2.1`; `hub-2.1` preservada) com a árvore pública pronta para o commit inicial; pacote interno em `internal-bundle/` (ferramentas, ESTADO/REGISTRO internos, instruções).
+- RESULTADO: 44 arquivos saem da árvore pública (histórico, auditorias, runbooks de infraestrutura, ADR-017/018, `SQL_*`, templates, scripts locais, propostas superadas e este plano); 16 arquivos saneados; novos `scripts/ci/public-guard.mjs` e lista de negação em **hashes**; `secret-scan` ampliado (atribuição de credencial longa); versões públicas de ESTADO/REGISTRO/MAPA e `AGENTS.md` com o protocolo de dois repositórios. Varreduras da árvore e da exportação em commit único: **0 ocorrências**; typecheck, domínio 87, API 822, web 84 e build verdes.
+- **CORREÇÃO DO P29:** o valor atribuído a `POSTIZ_API_KEY` é uma frase descritiva em português (minúsculas e sublinhados, contém "chave" e "postiz", idêntica nos dois arquivos) — **placeholder, não credencial**; a varredura do histórico não achou credencial real. A afirmação anterior de "provável credencial real" fica **retificada**; a revogação não é exigida por esse achado (o proprietário confirma que nunca houve chave real ali).
+- INCOMPATIBILIDADES/RISCOS DE CI/GHCR: pacotes `zafira-hub-api` e `zafira-hub-web` pertencem ao repositório atual (conceder acesso ao novo ou renomear); padrões de endpoint padrão de Asana/Postiz agora exigem variável de ambiente (hosts `example.invalid`); primeiro CI público inclui o código da F8-2 e o Browser Gate F8 ainda não executado.
+- STATUS: **preparação concluída; aguardando aceite expresso da Direção** para a execução (passo 4 em diante). F8-2 segue aguardando CI oficial 5/5 e Browser Gate F8; F8-3 não autorizada.
+
 ### DEC-GOV-005 — Arquitetura H3: repositório público de desenvolvimento e repositório privado interno (Direção, 2026-10-13)
 - Data / responsável: 2026-10-13 / Direção, via proprietário.
 - Problema: a franquia do GitHub Actions esgotou (P30) e o repositório privado impede o uso de runners padrão gratuitos; o histórico contém informação operacional que não pode ser publicada.
-- Decisão: (1) **Adotar a arquitetura H3** do plano plano de migração (mantido no repositório interno): `Julianogdc/zafira-hub-internal` **privado** (histórico original, documentos completos e governança, **sem workflows**) e `Julianogdc/zafira-hub` **novo repositório público**, criado com **um único commit inicial** contendo apenas a árvore saneada. (2) **Substituição condicionada da DEC-GOV-003:** a DEC-GOV-003 (repositório privado) **só é substituída quando a Direção aceitar expressamente a execução**; até lá permanece vigente e nada é publicado nem renomeado. (3) **Autorizada exclusivamente a PREPARAÇÃO (passos 1 a 3 do plano):** branch de saneamento isolada, separação de documentos, saneamento de exemplos/hosts/workflow/testes, remoção do valor descritivo do P29 do conteúdo público, ampliação do `secret-scan` e lista de negação, versões públicas de ESTADO/REGISTRO/MAPA, instruções para dois repositórios, testes locais sem disparar Actions. (4) **Não autorizado:** renomear, criar, publicar, alterar visibilidade ou cobrança, reescrever histórico, apagar artefatos/commits/documentos oficiais, alterar VPS/produção/credenciais, iniciar a F8-3. (5) **P29 retificado:** o valor encontrado era um **placeholder descritivo**, não uma credencial comprovada; **nenhuma revogação é exigida por esse achado** (só seria reavaliada com nova evidência). O Postiz não deve ser acessado sem autorização.
+- Decisão: (1) **Adotar a arquitetura H3** do plano `docs/propostas/MIGRACAO_REPOSITORIO_PUBLICO_PLANO.md`: `Julianogdc/zafira-hub-internal` **privado** (histórico original, documentos completos e governança, **sem workflows**) e `Julianogdc/zafira-hub` **novo repositório público**, criado com **um único commit inicial** contendo apenas a árvore saneada. (2) **Substituição condicionada da DEC-GOV-003:** a DEC-GOV-003 (repositório privado) **só é substituída quando a Direção aceitar expressamente a execução**; até lá permanece vigente e nada é publicado nem renomeado. (3) **Autorizada exclusivamente a PREPARAÇÃO (passos 1 a 3 do plano):** branch de saneamento isolada, separação de documentos, saneamento de exemplos/hosts/workflow/testes, remoção da possível credencial do P29 do conteúdo público, ampliação do `secret-scan` e lista de negação, versões públicas de ESTADO/REGISTRO/MAPA, instruções para dois repositórios, testes locais sem disparar Actions. (4) **Não autorizado:** renomear, criar, publicar, alterar visibilidade ou cobrança, reescrever histórico, apagar artefatos/commits/documentos oficiais, alterar VPS/produção/credenciais, iniciar a F8-3. (5) A **revogação da credencial do P29 é do proprietário** (confirmação necessária); o Postiz não deve ser acessado sem autorização.
 - Alternativas consideradas: H1 (abrir o atual), H2 (reescrever o atual), H3b (histórico saneado commit a commit) — ver o plano.
 - Impacto: governança (fonte canônica passa a ter versão pública saneada e versão interna completa), CI (runners gratuitos), agentes (dois diretórios).
 - Revisão: no aceite da execução pela Direção.
 
-### 2026-10-13 — Plano de separação em repositório público e privado
-- Entrada **interna** (INT-002): detalhes de segurança e infraestrutura mantidos no repositório interno e omitidos desta versão pública.
-### 2026-10-13 — Auditoria de exposição e alternativas para o GitHub Actions
-- Entrada **interna** (INT-001): detalhes de segurança e infraestrutura mantidos no repositório interno e omitidos desta versão pública.
+### 2026-10-13 — Plano de separação: repositório público de desenvolvimento + repositório privado interno — Claude
+- AUTORIZAÇÃO: decisão da Direção (2026-10-13) sobre a arquitetura `zafira-hub` público e `zafira-hub-internal` privado — **somente planejamento**. Nada foi criado, renomeado, movido, apagado, reescrito ou publicado; visibilidade, cobrança e workflows intactos.
+- ENTREGA: `docs/propostas/MIGRACAO_REPOSITORIO_PUBLICO_PLANO.md` (interno): classificação dos arquivos (privados, públicos com saneamento, públicos sem alteração), tratamento do histórico (**recomendado H3: renomear o atual para `zafira-hub-internal` preservando tudo e criar o novo `zafira-hub` público com a árvore saneada em um commit**), acesso dos agentes (dois diretórios lado a lado, sem submódulo, regra `INT-<n>`), CI/Browser Gates no público (workflow só usa `ubuntu-latest`; ajustes de permissões, forks e GHCR), custos residuais, roteiro de 10 passos (~1,5 a 2 dias úteis), riscos, reversão e critérios de validação.
+- PENDENTE DE AUTORIZAÇÃO DA DIREÇÃO: DEC que substitui a DEC-GOV-003; revogação da chave P29 (imediata); execução do roteiro. F8-2 segue aguardando CI oficial 5/5 e Browser Gate F8; F8-3 não autorizada.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
+### 2026-10-13 — Auditoria de exposição pública e alternativas para o GitHub Actions — Claude
+- AUTORIZAÇÃO: pedido da Direção (2026-10-13) — somente auditar e comparar; **nada foi alterado** (visibilidade, repositórios, cobrança, limites, workflows, código). Nenhum valor de credencial foi impresso.
+- SITUAÇÃO OFICIAL DA F8-2: **aceite técnico PENDENTE** (não reprovada): suspenso até CI oficial 5/5 do código corrigido (`2482ba1` ou baseline equivalente) e execução bem-sucedida do Browser Gate F8. Sem reconstrução, sem mudança de escopo, sem F8-3.
+- AUDITORIA DO REPOSITÓRIO (370 commits, 3 branches, 11 MB; visibilidade atual PRIVADA; 0 forks; 880 artefatos de Actions):
+  - **Arquivos sensíveis por nome:** nenhum `.env` real, chave `.pem/.key/.p12`, dump ou credencial versionado em todo o histórico (só `.env.example`).
+  - **Padrões de segredo em todo o histórico (diffs):** asana/github/aws/slack/google/sk-: **0**; JWT: só em testes (`postiz.test`, `compositor_postiz.test`); chave privada: 2 ocorrências em teste (`financial_foundation.test`); URL de banco com senha: workflow de CI, exemplos de ambiente e allowlist (valores de ensaio); atribuições genéricas: 35, todas em testes, mocks de gate, workflow de CI ou exemplos.
+  - **ACHADO RELEVANTE (P29):** um valor de 37 caracteres, **sem marca de teste**, atribuído a `POSTIZ_API_KEY`, está em `apps/api/.env.example` e em `docs/AUDITORIA_TECNICA_POSTIZ.md` — **ainda presente no HEAD** e no histórico desde 12–13/09/2026. Provável credencial real do Postiz legado (instância parada). O `secret-scan` do CI **não detecta** esse formato. Como o repositório foi público até 10/10 (DEC-GOV-003), o valor deve ser **considerado exposto**: revogar/rotacionar mesmo sem uso e ajustar o exemplo e o documento.
+  - **Informação de infraestrutura e segurança nos documentos:** nomes de domínio do Postiz/BrightBean (3 hosts), 1 endereço IP, rotas de backup/VPS/EasyPanel (ADRs, runbooks de homologação, `docs/historico`), pendências de segurança abertas (P2, P9, P11, P12, P22, P27 com 20 vulnerabilidades altas em dependências) e vulnerabilidades do Hub 2.0 em produção citadas nos registros; arquivos `SQL_*.sql` herdados do Hub 1/2.0 (políticas RLS e correções).
+  - **Workflow:** `pull_request` na `hub-2.1` e `workflow_dispatch`; usa só `GITHUB_TOKEN` (publica imagens no GHCR com `packages: write`); valores de ensaio fixos no YAML; 880 artefatos (capturas e relatórios com dados fictícios) e logs de runs anteriores ficariam **visíveis ao público** se o repositório fosse aberto.
+- ALTERNATIVAS (custo × risco): (1) **tornar público o repositório principal:** minutos ilimitados, mas expõe de novo todo o histórico, a infraestrutura e as pendências de segurança, os logs/artefatos dos runs, reverte a DEC-GOV-003 e exige antes revogar a chave do Postiz, sanear documentos e possivelmente reescrever o histórico (invalida clones e runs); **maior risco**. (2) **repositório público separado só para CI:** o CI precisa do código — expõe o mesmo código do HEAD (e o que o espelho incluir), exige sincronização e duplica governança; só reduz a exposição se for um espelho **sem histórico e sem `docs/`**; **custo operacional alto e ganho de segurança parcial**. (3) **pagar o excedente (limite de gasto):** minutos Linux a ~US$ 0,008; o excedente do mês (≈ 280 min) custa ≈ US$ 2 e cada run completo ≈ US$ 0,20; exige método de pagamento válido (o aviso do GitHub fala em pagamento falho/limite de gasto); **menor risco e menor esforço**. (4) **aguardar a renovação mensal** (franquia volta em 01/11): custo zero, mas bloqueia 18 dias. (5) **runner próprio** (gratuito para repositório privado): exige máquina com Docker/Python e manutenção; risco de executar CI na máquina do proprietário. (6) **reduzir o consumo** (R1–R7 do diagnóstico: `paths-ignore`, cancelamento de runs, cache de camadas, sem build duplicado, gate condicional): ~70–80% menos minutos sem remover teste; **custo zero**, complementar a qualquer opção.
+- RECOMENDAÇÃO: **(3) + (6)**: definir um limite de gasto pequeno (ex.: US$ 5–10) e corrigir o método de pagamento — custo mensal de poucos dólares — e aplicar as otimizações de CI; **manter o repositório privado**. Tornar público só como último recurso, depois de: revogar a chave (P29), sanear `apps/api/.env.example`/documentos, decidir sobre `docs/historico`, `SQL_*.sql` e documentos de infraestrutura, apagar logs/artefatos antigos e registrar DEC que substitua a DEC-GOV-003.
+- PRÓXIMO PASSO QUE DEPENDE DA DIREÇÃO: escolher a opção (recomendada: 3 + 6) e, se (3), o proprietário ajustar pagamento/limite em Settings → Billing; em seguida a F8-2 é retomada (CI oficial do `2482ba1`, Browser Gate F8, correções sem enfraquecer testes, evidências para o aceite). **Independente do Actions: revogar/rotacionar a chave do P29.**
+- PROIBIÇÕES ATUAIS: as do `ESTADO_ATUAL`; em especial alterar visibilidade, criar repositórios, alterar cobrança/limites, executar workflows, F8-3 a F8-5, F8-0b antes da F8-4.
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
+
 ### 2026-10-13 — F8-2 — Aprovação do cliente por link seguro — Claude
 - AUTORIZAÇÃO: DEC-F8-004 — exclusivamente a F8-2 (registrada antes do código, `7386c15`). Não iniciadas: F8-3 a F8-5; F8-0b não executada. Sem BrightBean/Asana/clientes reais, S3, VPS, produção ou cobrança.
 - BASELINE (commits): `788dad3` (F8-2) e `2482ba1` (correção do segredo efêmero fora de produção).
@@ -1162,7 +1325,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-12 — F7-1a — Construtor de onboarding: modelo de dados, regras, RBAC, API e testes — Claude
 - AUTORIZAÇÃO: DEC-F7-005 — somente F7-1a. Não iniciadas: F7-1b (telas), F7-2 a F7-4, passos 2 a 4 da P27. Sem deploy e sem produção.
 - BASELINE (commit): `fc8ddb3` (contratos, domínio, permissões) e `5a604e8` (migration, API, teste de integração); especificação aprovada em `9d6bfce`.
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- CI OFICIAL: run 38272170671 (https://github.com/Julianogdc/zafira-hub/actions/runs/38272170671) — **5/5 verdes**: domínio 51/51, API 818/818, web 51/51, PostgreSQL **57/57** (inclui 14 verificações novas do onboarding); Browser Gates F4, F5 e F6 (33/33) seguem passando; audit de produção na linha de base (0 críticas, 20 altas).
 - ENTREGUE: 7 tabelas (`organization_functions`, `organization_function_members`, `onboarding_templates`, `onboarding_template_versions`, `onboarding_step_definitions`, `onboarding_step_dependencies`, `onboarding_events`) e migration `20261012030000` que **não cria nenhuma linha**; contratos Zod com catálogo **fechado** de condições (B1); regras de domínio (integridade do rascunho, validação de publicação, ciclo, ordem estável, cópia com `stepKey` preservado, dias úteis); 7 permissões `onboarding.*` com padrões por papel; API de modelos, versões e funções (prefixos `/` e `/api`) com trava do modelo, `expectedUpdatedAt`, evento e AuditLog.
 - EVIDÊNCIAS (teste `onboarding-postgres.test.ts`, banco descartável real, passou 2× seguidas no mesmo banco):
   - **Migration sem dados:** as 7 tabelas estão vazias logo após migrar.
@@ -1212,11 +1375,11 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - AUTORIZAÇÃO: Direção, via proprietário — remover só código morto e dependências sem consumidores (jspdf/exportUtils, axios, TiptapEditor e dependências associadas); reconfirmar referências antes; passos 2, 3 e 4 **não** autorizados; preservar a possibilidade de PDF financeiro na F10; sem produção.
 - RECONFIRMAÇÃO: `git grep` no repositório inteiro (exceto docs e lockfile), incluindo importações dinâmicas, `require`, `import.meta.glob`, configuração do Vite e nomes de componente: **nenhum consumidor** além dos próprios arquivos mortos e do `package.json`.
 - FEITO (`65b390e`): removidos `apps/web/src/lib/exportUtils.ts` e `apps/web/src/components/projects/TiptapEditor.tsx`; removidas as dependências `jspdf`, `axios`, `@tiptap/react`, `@tiptap/starter-kit`, `@tiptap/extension-link`, `@tiptap/extension-placeholder`, `@tiptap/extension-underline` (100 pacotes na árvore; lockfile com 6 inserções e ~1.200 remoções). `html2canvas` foi mantida (sem aviso e sem uso; não estava na lista) — candidata a remoção futura.
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- ANTES × DEPOIS (`npm audit --omit=dev`): **33 → 23** — críticas **1 → 0**, altas **25 → 20**, moderadas **7 → 3**. `jspdf`, `axios`, `@tiptap/core`, `prosemirror-view` e `linkify-it` saíram da lista. Linha de base do CI atualizada (0 críticas, 20 altas).
 - VALIDAÇÃO LOCAL: `typecheck:web` 0 erros; `test:web` 51/51; `lint:f6` 0 erros; `build:web` ok e **sem** as bibliotecas no bundle; árvore de dependências íntegra. API e domínio não importam nada removido. Resultado do CI oficial: ver entrada abaixo, quando houver.
 - CI OFICIAL: run 38266680937 (https://github.com/Julianogdc/zafira-hub/actions/runs/38266680937) — **5/5 verdes** em `65b390e`: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43, Browser Gates F4 e F5 PASS e **F6 33/33 PASS**; relatório de audit no CI: críticas 0, altas 20 (= linha de base).
-- Detalhe de segurança omitido da versão pública (ver registro interno).
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- NÃO FEITO (por regra): passos 2 (react-router), 3 (`npm audit fix`) e 4 (Tailwind) da P27; nenhuma alteração em produção.
+- P27 permanece **aberta**: 20 altas restantes (react-router-dom, prisma/CLI, ferramentas de build e transitivas). Critério de saída inalterado.
 
 ### DEC-F7-001 — Fonte principal dos eventos: Google Calendar (D1, opção C)
 - Data / responsável: 2026-10-12 / Direção, via proprietário.
@@ -1266,7 +1429,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - CONTEXTO: o Antigravity ficou sem uso no meio da sessão; o proprietário pediu a Claude que retomasse de onde ele parou. O último CI do Antigravity (run 38205658587, `ab16e18`) tinha falhado no gate F6 com 32/33.
 - BASELINE (commit): `75f2112`. Commits desta retomada: `5ee7661` (gate), `75f2112` (qualidade), `aef3149` (documentação e proposta do Mapa C2). Commits anteriores da etapa: `43a1398`, `ee87f4d`, `c2ca05f` (Claude); `8072ec9`, `755a9f9` (Antigravity).
 - DIAGNÓSTICO: a única falha (cenário F, "contagem sobe para 3 só ao postar") era do teste: o gate esperava o texto "Postada", que também aparece no botão "Marcar como postada", e lia o indicador antes da resposta da API. Correção: espera pelo selo exato e espera ativa do indicador.
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- QUALIDADE (P13): 4 `catch (err: any)` de `Projetos.tsx` tipados; `npm run lint:f6` bloqueante no job Code Quality (0 erros; 6 avisos); `scripts/ci/npm-audit-report.mjs` gera relatório de vulnerabilidades de produção e avisa acima da linha de base `scripts/ci/npm-audit-baseline.json` (1 crítica, 25 altas). O audit não bloqueia porque novas falhas em bibliotecas antigas quebrariam o CI sem mudança de código; a correção ampla vira **P27** (decisão do proprietário).
 - MAPA C2 (P3, DEC-F6-005): proposta em `docs/propostas/MAPA_MESTRE_C2_PROPOSTA.md` — critérios de pronto/concluído, Browser Gate por fase, correspondência v1.1 → C1, critérios de aceite e portões F7–F18, segurança, testes, observabilidade, migração, decisões pendentes e duas lacunas (Dashboards finais e Identidade visual sem fase no C1). **Não é oficial** até aprovação.
 - CI/EVIDÊNCIA: run 38262704358 (https://github.com/Julianogdc/zafira-hub/actions/runs/38262704358) — **5/5 verdes**: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43, lint F6 0 erros, audit na linha de base, Browser Gate F4 PASS, F5 PASS e **F6 33/33 PASS**.
 - PORTÃO DA F6: avaliação item a item em `docs/ESTADO_ATUAL.md`; único ponto parcial é "carga de trabalho" (por filtro/agrupamento por responsável, sem painel dedicado).
@@ -1287,7 +1450,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - COMMITS: `43a1398` (fuso por organização, DEC-F6-005/P15), `ee87f4d` (botões de visualização quebram linha em 390 px — "Entregas" ficava fora da tela no celular), `c2ca05f` (Browser Gate F6 no CI: Asana simulado somente leitura, seed F6, cenários A–J).
 - EVIDÊNCIA LOCAL: domínio 41/41, API 818/818, web 51/51, PostgreSQL 43/43 em banco novo; ensaio local das verificações de API do gate 17/17 (Asana simulado + banco no formato do CI) e fluxo de tela conferido no navegador. O gate em Python só roda no CI (não há Python local).
 - CI: run 38202110078 disparado para `c2ca05f` — **resultado ainda não conferido**. Se o gate F6 falhar, ajustar seletores em `scripts/homologation/projects-browser-gate.py` pelos artefatos `f6-projects-browser-*`.
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- FALTA: (3) qualidade — corrigir os 4 `catch (err: any)` de `Projetos.tsx`, lint bloqueante do código F6 no CI e relatório de `npm audit` (33 vulnerabilidades de produção: 1 crítica `jspdf`, 25 altas — correção ampla vira P27, decisão do proprietário); (4) rascunho PROPOSTA do Mapa C2 em `docs/propostas/` (DEC-F6-005); depois handoff, CI 5/5 e submissão do portão F6 ao proprietário.
 
 ### DEC-F6-005 — Fuso horário por organização e rascunho do Mapa C2 (F6-IMP.9)
 - Data / responsável: 2026-10-12 / proprietário (respostas diretas na conversa com Claude, ao autorizar a F6-IMP.9).
@@ -1557,7 +1720,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
   - CI (`.github/workflows/foundation-ci.yml`): passos `Secret Scan (Repository)`, `Typecheck Web`, varredura do bundle no `Bundle Safety Scan`, `API Image Secret Files Scan`, e laço de até 5 tentativas no `docker pull postgres:16` da homologação.
   - `scripts/ci/secret-scan.sh` (modos `repo` e `dir`; imprime só arquivo, linha e tipo) e `scripts/ci/secret-scan-allowlist.txt` (valores fictícios justificados).
   - `asana-resource-scope.test.ts`: testes 11 a 14 sobre as 8 rotas de leitura (404 fora da carteira, 401 sem login, 403 sem `projects.view`, 404 entre organizações).
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- LIMITES/LACUNAS: o detector usa padrões próprios (não é uma ferramenta dedicada como gitleaks) e exclui arquivos de teste; não há testes de frontend (P14); lint e `npm audit` seguem fora do CI (P13); a senha padrão do compose de referência ficou registrada como P12. HTML do Asana: confirmado por inspeção que nenhuma tela ativa injeta HTML vindo do Asana (o único `dangerouslySetInnerHTML` restante é o CSS interno de `ui/chart.tsx`, inalcançável).
 - PRÓXIMA MICROETAPA AUTORIZADA: F6-RO.2 (sob DEC-GOV-004).
 - PROIBIÇÕES ATUAIS: ver `docs/ESTADO_ATUAL.md`.
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO.
@@ -1602,7 +1765,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### DEC-GOV-003 — Repositório privado
 - Data / responsável: 2026-10-10 / proprietário (Juliano Guerrero).
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- Problema: o repositório `Julianogdc/zafira-hub` era público; levar a governança para o Git publicaria IP da VPS, caminhos de backup, detalhes de infraestrutura e vulnerabilidades em aberto (algumas também presentes no Hub 2.0 em produção).
 - Decisão: tornar o repositório privado. Executado pelo proprietário em 10/10/2026; confirmado (API pública do GitHub passou a responder 404).
 - Alternativas consideradas: manter público e publicar só documentos sanitizados (descartada: o próximo agente perderia contexto de segurança).
 - Impacto: verificar se algum serviço (EasyPanel, GHCR) baixava imagens ou código sem autenticação. Tudo o que já foi público antes desta data (código, ADRs, logs de CI) deve ser considerado exposto.
@@ -1642,9 +1805,9 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-10 — Avaliação dos commits 7ea5143 e a752773 — Direção
 - `7ea5143` (F6-IMP.3B.2A, CI #115 5/5 SUCCESS): executado e **NÃO ACEITO**. Corrigiu as chaves planas de capacidade e com isso **ligou a escrita no Asana na tela** para quem tem `deliverables.plan` (Admin e Gestor por padrão), contrariando DEC-ASANA-001.
-- Detalhe de segurança omitido da versão pública (ver registro interno).
+- `a752773` (SEC-ASANA.1, CI #116 5/5 SUCCESS): removeu a leitura de token Asana pelo navegador e endureceu `.dockerignore`/`.gitignore`. Parecer independente do Claude: **aceitar com ressalvas**. Não é aceite de produto e não autoriza escrita. Ressalvas pendentes:
   1. inserir e comprovar varredura de segredos no CI;
-  2. Detalhe de segurança omitido da versão pública (ver registro interno).
+  2. investigar a possível exposição histórica do token Asana (builds antigos publicados) e registrar o resultado.
 - O proprietário revogou o token pessoal "Zafira HUB DEV" no Asana (declarado, não verificado tecnicamente).
 
 ---
