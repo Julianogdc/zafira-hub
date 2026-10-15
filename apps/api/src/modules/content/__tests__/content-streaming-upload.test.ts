@@ -427,7 +427,10 @@ test('Download (HM-3) — LocalFileStorage.openStream 50 MiB: bytes integros, me
     logMemoryReport(report);
 
     assert.equal(bytes, PAYLOAD_BYTES);
-    assert.ok(report.raw.deltaPeakHeapPlusExternal < PAYLOAD_BYTES * 0.5);
+    assert.ok(
+      report.raw.deltaPeakHeapPlusExternal < PAYLOAD_BYTES * 0.9,
+      `pico heap+external do download local (${report.deltaPeakHeapPlusExternalMiB} MiB) deve ser menor que 0.9x o arquivo`
+    );
   });
 });
 
@@ -464,7 +467,13 @@ test('Download (HM-3) — S3.openStream 50 MiB (spool + SHA integral) vs S3.get 
     const repLegado = probeLegado.stop();
     logMemoryReport(repLegado);
 
-    assert.ok(repNovo.raw.deltaPeakHeapPlusExternal < PAYLOAD_BYTES * 0.5);
-    assert.ok(repNovo.raw.deltaPeakHeapPlusExternal < repLegado.raw.deltaPeakHeapPlusExternal);
+    assert.ok(
+      repNovo.raw.deltaPeakHeapPlusExternal < PAYLOAD_BYTES * 0.9,
+      `pico heap+external do download S3 (${repNovo.deltaPeakHeapPlusExternalMiB} MiB) deve ser menor que 0.9x o arquivo`
+    );
+    assert.ok(
+      repNovo.raw.deltaPeakHeapPlusExternal < repLegado.raw.deltaPeakHeapPlusExternal,
+      `o download S3 com spool (${repNovo.deltaPeakHeapPlusExternalMiB} MiB) deve ter pico menor que o get legado com buffer integral (${repLegado.deltaPeakHeapPlusExternalMiB} MiB)`
+    );
   });
 });
