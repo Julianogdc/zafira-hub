@@ -36,6 +36,22 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-15 — H4-A: Auditoria dos Dados Sintéticos e Planejamento da Massa Navegável — Antigravity
+- BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
+- CI/EVIDÊNCIA: Execução exclusivamente documental. Sem acesso remoto nem execução de seeds nesta sessão. Auditoria dos scripts de seed (`seed.ts`, `seed-multiorg-gate.mjs`, `seed-f6-gate.mjs`, `seed-f7-gate.mjs`, `seed-f7-exec-gate.mjs`), fixtures dos Browser Gates F4 a F8 e modelos Prisma. `secret-scan` 0 credenciais suspeitas em 568 arquivos (público); `public-guard` aprovado com 0 ocorrências operacionais no público.
+- STATUS: concluído (documental; H4-B pendente de autorização da Direção Técnica e do proprietário)
+- O QUE MUDOU:
+  1. `docs/REGISTRO.md` e `docs/ESTADO_ATUAL.md`: registrados DEC-HML-012, conclusão do inventário da massa sintética, mapeamento de lacunas dos módulos, diretrizes de segurança (trava anti-produção, domínios fictícios, isolamento multi-tenant), proposta arquitetural da H4-B e encerramento de sessão ativa.
+- LIMITES/LACUNAS:
+  - Implementação de código da H4-B não iniciada nesta microetapa (objeto de autorização futura).
+  - Massa persistente para Conteúdos F8, Onboarding F7 e Calendário F7-3 ainda dependem da construção dos módulos da H4-B.
+  - Nenhum seed executado contra bancos físicos nesta sessão.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar parecer da Direção Técnica sobre a H4-A e autorização formal da H4-B pelo proprietário).
+- PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem acesso a infraestrutura remota, sem alteração de DNS/domínio, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
 ### 2026-10-15 — H7: Consolidação Documental de Capacidade e Decisão de Risco — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: Execução exclusivamente documental. Sem acesso remoto nem medições nesta sessão. Auditoria das evidências existentes e salvaguardas de governança. `secret-scan` 0 credenciais suspeitas em 568 arquivos (público); `public-guard` 0 detecções operacionais em 662 arquivos.
@@ -97,6 +113,21 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
+### DEC-HML-012 — Autorização Exclusiva da Auditoria Preparatória H4-A (Inventário e Planejamento da Massa Sintética) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Proprietário e Direção Técnica.
+- Problema: preparar a homologação navegável H4 aproveitando ao máximo as fixtures e scripts sintéticos existentes nos gates de CI e homologation rehearsal, para permitir que o proprietário navegue pelo Hub 2.1 em ambiente de homologação com dados fictícios e sem integrações reais, realizando o inventário minucioso dos dados existentes, identificando lacunas em relação aos fluxos de tela, analisando as salvaguardas de segurança (anti-produção, sanitização e idempotência) e desenhando a arquitetura de execução da H4-B sem alterar código da aplicação nem executar seeds nesta sessão.
+- Decisão: (1) **Autorização exclusiva da auditoria preparatória H4-A (Inventário e Planejamento da Massa Sintética)** com as seguintes diretrizes:
+  1. Examinar e inventariar: `apps/api/prisma/seed.ts`, `scripts/homologation/seed-multiorg-gate.mjs`, `scripts/homologation/seed-f6-gate.mjs`, `scripts/homologation/seed-f7-gate.mjs`, `scripts/homologation/seed-f7-exec-gate.mjs`, scripts dos Browser Gates F4 a F8 e modelos Prisma correspondentes.
+  2. Mapear cobertura e lacunas para demonstração de: Dashboard, Clientes e Cliente 360, Organizações e usuários de diferentes papéis, Equipes, projetos e entregas, Onboarding e calendário, Conteúdos, aprovações e agenda editorial, e Integrações explicitamente desconectadas.
+  3. Separar fixtures temporárias/efêmeras de testes automatizados de dados estruturados para demonstração navegável e persistente.
+  4. Analisar segurança e propor mecanismos para a futura H4-B: banco descartável/staging, proibição de dados/tokens reais, descarte do seed administrativo legado como base de homologação, preservação do isolamento multi-tenant (duas organizações sintéticas), escopo de deleção restrito ao namespace sintético, travas explícitas anti-produção e sequência correta de execução pós-migrações e bootstrap RBAC.
+  5. Elaborar proposta objetiva da implementação H4-B e definir critérios de aceite automatizados e de navegação humana para a homologação.
+  (2) **Proibições estritas mantidas:** proibido executar seeds contra bancos reais; proibido acessar infraestrutura remota; proibido criar bancos ou credenciais reais; proibido executar deploy; proibido alterar código da aplicação nesta microetapa; proibido iniciar a implementação H4-B sem autorização prévia; proibido alterar H7 ou liberar homologação física; proibido habilitar integrações ou publicações reais.
+- Alternativas consideradas: iniciar diretamente a implementação dos scripts de seed (rejeitado por violar o isolamento e planejamento prévio das fixtures sintéticas).
+- Impacto: documentação de governança em `docs/ESTADO_ATUAL.md` e `docs/REGISTRO.md`.
 
 ---
 
