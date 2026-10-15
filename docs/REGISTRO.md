@@ -36,6 +36,29 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-15 — HM-4b: Modo Desconectado e Inicialização Resiliente do BrightBean (H6) — Antigravity
+- BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
+- CI/EVIDÊNCIA: run 38747057275 (https://github.com/Julianogdc/zafira-hub/actions/runs/38747057275), 5/5 SUCCESS; API: 925/925 (46 suites, incl. `brightbean-disconnected.test.ts` 8/8), Web: 102/102, Domain: 123/123, PostgreSQL: 208/208 (duas rodadas), Docker Build Gate OK, Publish Images GHCR OK, Homologation Rehearsal Browser Gates F4 a F8 PASS (F8 125/0, rollback/redeploy OK); Secret Scan OK; Public Guard OK.
+- STATUS: pendente de aceite (aguardando auditoria independente da Direção Técnica)
+- O QUE MUDOU:
+  1. `brightbean.config.ts`: `resolveBrightBeanApiUrl` atualizada para suportar modo desconectado em `NODE_ENV=production` retornando `null` quando `PUBLICATION_DISPATCH_ENABLED` e `PUBLICATION_METRICS_ENABLED` estão desligados, eliminando o bloqueio de importação de `app.ts` e proibindo qualquer fallback sintético ou localhost em produção (Regras A e B); fail-closed estrito mantido caso publicação ou métricas sejam ativadas sem URL (Regra E).
+  2. `brightbean.provider.ts`: `BrightBeanProvider` agora suporta inicialização desacoplada em modo desconectado (`apiBaseUrl: null`), expõe `isConfigured(): boolean`, retorna `{ connected: false, provider: 'BRIGHTBEAN' }` em `getStatus` e falha fechado de forma controlada (`BrightBeanProviderError` com código `BRIGHTBEAN_DISCONNECTED` e status 503) em qualquer operação de escrita/leitura remota, garantindo zero conexões HTTP externas (Regras D e F).
+  3. `brightbean.connector.ts`: `testConnection` reconhece modo desconectado com mensagem clara e status `connected: false` sem lançar erro 500 nem disparar requisição remota.
+  4. `social-publisher.service.ts`: `getStatus` retorna `{ connected: false, provider: 'BRIGHTBEAN' }` no modo desconectado; métodos operacionais falham com erro controlado 503 `BRIGHTBEAN_DISCONNECTED`.
+  5. `social-publisher.routes.ts`: `handleError` aprimorado para tratar `BrightBeanProviderError` e erros tipados com `statusCode` e `code`, eliminando erros 500 inesperados.
+  6. `startup-validator.ts`: seção 5.3 ampliada para validar fail-closed tanto em `PUBLICATION_DISPATCH_ENABLED=true` quanto em `PUBLICATION_METRICS_ENABLED=true` (Regra E), mantendo o validador aprovado na HM-4a (Regra C).
+  7. `publication-gateway.ts`: `resolveBrightBeanGateway` exige explicitamente `resolveBrightBeanApiUrl(process.env, { required: true })`, falhando fechado antes de despachar publicações reais.
+  8. Suítes de teste: nova suíte focada com 8 testes em `brightbean-disconnected.test.ts`, cobertura ampliada em `startup-validator.test.ts` e `social-hardening.test.ts`.
+- LIMITES/LACUNAS:
+  - Homologação física com Cloudflare R2 real permanece pendente (HM-5/HM-6).
+  - Subdomínio de homologação dedicado permanece apenas planejado (não configurado nesta sessão).
+  - Credenciais e contas externas continuam não conectadas.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar auditoria independente da Direção Técnica para HM-4b).
+- PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
 ### DEC-HML-007 — Autorização exclusiva da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6) (Direção, 2026-10-15)
 - Data / responsável: 2026-10-15 / Proprietário e Direção Técnica.
 - Problema: na preparação para homologação sintética sem simuladores ou serviços externos (em ambiente de homologação dedicado), o carregamento de `app.ts` invoca `resolveBrightBeanApiUrl()`, que impede a inicialização da API em `NODE_ENV=production` quando `BRIGHTBEAN_API_URL` está ausente, mesmo com publicação e métricas desativadas (`PUBLICATION_DISPATCH_ENABLED=false` e `PUBLICATION_METRICS_ENABLED=false`).
