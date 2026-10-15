@@ -48,23 +48,97 @@ test('startup-validator (HM-4a) — configuração válida de homologação/prod
   assert.equal(result.warnings.length, 0);
 });
 
-test('startup-validator (HM-4a) — perfil isolado de smoke test do CI (CI_SMOKE_TEST) é aceito com warnings', () => {
-  const smokeEnv = {
+test('startup-validator (HM-4a) — CI_SMOKE_TEST ou ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE não permitem bypass em NODE_ENV=production', () => {
+  const base = createValidProductionEnv();
+
+  // 1. CI_SMOKE_TEST=true sem storage S3 deve falhar estritamente
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        FILE_STORAGE_DRIVER: '',
+        CI_SMOKE_TEST: 'true',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /FILE_STORAGE_DRIVER é obrigatório em ambiente de produção\/homologação/);
+      return true;
+    }
+  );
+
+  // 2. ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE=true sem storage S3 deve falhar estritamente
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        FILE_STORAGE_DRIVER: '',
+        ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE: 'true',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /FILE_STORAGE_DRIVER é obrigatório em ambiente de produção\/homologação/);
+      return true;
+    }
+  );
+
+  // 3. CI_SMOKE_TEST=true sem INTEGRATION_ENCRYPTION_KEY deve falhar estritamente
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        INTEGRATION_ENCRYPTION_KEY: undefined,
+        CI_SMOKE_TEST: 'true',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /INTEGRATION_ENCRYPTION_KEY é obrigatória no perfil de homologação\/produção/);
+      return true;
+    }
+  );
+
+  // 4. CI_SMOKE_TEST=true sem APPROVAL_MEDIA_SECRET deve falhar estritamente
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        APPROVAL_MEDIA_SECRET: undefined,
+        CI_SMOKE_TEST: 'true',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /APPROVAL_MEDIA_SECRET é obrigatória no perfil de homologação\/produção/);
+      return true;
+    }
+  );
+});
+
+test('startup-validator (HM-4a) — configuração sintética de teste do CI (S3 fictício HTTPS e chaves exclusivas) é aceita', () => {
+  const syntheticSmokeEnv = {
     NODE_ENV: 'production',
-    CI_SMOKE_TEST: 'true',
     PORT: '3001',
-    COOKIE_SECRET: 'smoke-test-dummy-cookie-secret-32-chars-long',
-    JWT_SECRET: 'smoke-test-dummy-jwt-secret-at-least-32-chars',
-    HUB_INTERNAL_API_KEY: 'smoke-test-dummy-internal-api-key-12345',
+    COOKIE_SECRET: 'ci-smoke-cookie-secret-min-32-chars-long',
+    JWT_SECRET: 'ci-smoke-jwt-secret-min-32-chars-length',
+    HUB_INTERNAL_API_KEY: 'ci-smoke-internal-api-key-min-32-chars',
+    INTEGRATION_ENCRYPTION_KEY: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90',
+    APPROVAL_MEDIA_SECRET: 'ci-smoke-approval-media-key-min-32-chars',
+    CALENDAR_IDENTITY_HMAC_KEY: 'ci-smoke-calendar-hmac-key-min-32-chars',
+    FILE_STORAGE_DRIVER: 's3',
+    FILE_STORAGE_S3_BUCKET: 'ci-smoke-synthetic-bucket',
+    FILE_STORAGE_S3_ENDPOINT: 'https://s3.ci-smoke.synthetic.internal',
+    FILE_STORAGE_S3_REGION: 'auto',
+    FILE_STORAGE_S3_ACCESS_KEY_ID: 'ci-smoke-synthetic-access-key-id',
+    FILE_STORAGE_S3_SECRET_ACCESS_KEY: 'ci-smoke-synthetic-secret-key-32ch',
     BRIGHTBEAN_API_URL: 'http://brightbean-mock:8000/api/v1',
     DATABASE_URL: 'postgresql://smoke:smoke@localhost:5432/smoke?schema=public',
   };
 
-  const result = validateStartupEnvironment({ env: smokeEnv });
+  const result = validateStartupEnvironment({ env: syntheticSmokeEnv });
   assert.equal(result.valid, true);
   assert.equal(result.errors.length, 0);
-  assert(result.warnings.length > 0);
-  assert(result.warnings.some((w) => w.includes('CI_SMOKE_TEST=true')));
 });
 
 test('startup-validator (HM-4a) — rejeita segredos obrigatórios ausentes em produção', () => {
@@ -279,12 +353,13 @@ test('startup-validator (HM-4a) — validação de STORAGE: ausente, desconhecid
     }
   );
 
-  // 2. FILE_STORAGE_DRIVER com valor desconhecido (ex: 'ftp' ou 'custom')
+  // 2. FILE_STORAGE_DRIVER com valor desconhecido (ex: 'ftp' ou 'custom') — não reproduz o valor bruto
   assert.throws(
     () => validateStartupEnvironment({ env: { ...base, FILE_STORAGE_DRIVER: 'ftp' } }),
     (err: any) => {
       assert(err instanceof StartupValidationError);
-      assert.match(err.message, /FILE_STORAGE_DRIVER desconhecido: 'ftp'/);
+      assert.match(err.message, /FILE_STORAGE_DRIVER possui valor inválido ou desconhecido/);
+      assert.equal(err.message.includes('ftp'), false);
       return true;
     }
   );

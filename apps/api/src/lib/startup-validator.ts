@@ -8,11 +8,11 @@ import { URL } from 'node:url';
  *  - Chaves criptográficas em formato inadequado ou reutilizadas entre domínios diferentes (segregação estrita);
  *  - Driver de armazenamento inseguro (FILE_STORAGE_DRIVER=local ou drivers desconhecidos são terminantemente proibidos em produção);
  *  - Driver S3 sem credenciais completas ou com endpoints HTTP inseguros (sem TLS);
- *  - Armazenamento não configurado sem a exceção explícita de teste isolado do CI;
+ *  - Ausência de S3 ou chaves criptográficas em qualquer perfil de produção (sem exceções de runtime por flag de smoke);
  *  - Variáveis condicionais ativadas sem suas dependências de segurança;
  *
  * REGRA ABSOLUTA DE SEGURANÇA:
- *  - NENHUM valor de segredo ou credencial deve ser impresso em mensagens de erro ou logs.
+ *  - NENHUM valor de segredo, credencial ou valor desconhecido bruto deve ser impresso em mensagens de erro ou logs.
  */
 
 export class StartupValidationError extends Error {
@@ -34,7 +34,6 @@ export interface StartupValidationResult {
 export interface StartupValidationOptions {
   env?: NodeJS.ProcessEnv;
   strictProduction?: boolean;
-  isSmokeTest?: boolean;
 }
 
 /** Conjunto de valores conhecidos de desenvolvimento, testes e exemplos que NUNCA devem ser aceitos em produção. */
@@ -143,11 +142,6 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     return { valid: true, errors: [], warnings: [] };
   }
 
-  // Exceção estrita e explícita para perfil isolado de teste do CI (smoke test de container Docker)
-  const isSmokeTest =
-    options?.isSmokeTest ??
-    (env.CI_SMOKE_TEST === 'true' || env.ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE === 'true');
-
   // ============================================================================
   // 1. SEGREDOS CRIPTOGRÁFICOS DE PRODUÇÃO / HOMOLOGAÇÃO
   // ============================================================================
@@ -171,8 +165,6 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     if (!encKeyCheck.valid) {
       errors.push(`INTEGRATION_ENCRYPTION_KEY inválida: ${encKeyCheck.reason}.`);
     }
-  } else if (isSmokeTest) {
-    warnings.push('INTEGRATION_ENCRYPTION_KEY ausente: tolerada exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).');
   } else {
     errors.push('INTEGRATION_ENCRYPTION_KEY é obrigatória no perfil de homologação/produção com gerenciamento de credenciais.');
   }
@@ -184,8 +176,6 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     if (approvalCheck.weak) {
       errors.push(`APPROVAL_MEDIA_SECRET inválido: ${approvalCheck.reason}.`);
     }
-  } else if (isSmokeTest) {
-    warnings.push('APPROVAL_MEDIA_SECRET ausente: tolerada exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).');
   } else {
     errors.push('APPROVAL_MEDIA_SECRET é obrigatória no perfil de homologação/produção com aprovações (exige chave própria dedicada, proibindo fallback).');
   }
@@ -254,18 +244,14 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
   const storageDriver = (env.FILE_STORAGE_DRIVER ?? '').trim().toLowerCase();
 
   if (storageDriver === 'local') {
-    // Proibição absoluta em produção/homologação, mesmo em perfil de teste
+    // Proibição absoluta em produção/homologação
     errors.push("FILE_STORAGE_DRIVER 'local' é terminantemente proibido em ambiente de produção/homologação. Utilize 's3'.");
   } else if (storageDriver !== 's3' && storageDriver !== '') {
-    // Rejeição de drivers desconhecidos ou inválidos
-    errors.push(`FILE_STORAGE_DRIVER desconhecido: '${storageDriver}'. Valores suportados em produção/homologação: 's3'.`);
+    // Rejeição de drivers desconhecidos ou inválidos (sem reproduzir o valor informado)
+    errors.push("FILE_STORAGE_DRIVER possui valor inválido ou desconhecido. Valores suportados em produção/homologação: 's3'.");
   } else if (storageDriver === '') {
-    // Ausente: em perfil isolado de smoke test (CI) emite warning; em homologação/produção falha explicitamente
-    if (isSmokeTest) {
-      warnings.push("FILE_STORAGE_DRIVER ausente: armazenamento não configurado permitido exclusivamente pelo perfil isolado de smoke test (CI_SMOKE_TEST=true).");
-    } else {
-      errors.push("FILE_STORAGE_DRIVER é obrigatório em ambiente de produção/homologação e deve ser configurado como 's3' com as respectivas credenciais.");
-    }
+    // Ausente: sempre obrigatório em produção/homologação
+    errors.push("FILE_STORAGE_DRIVER é obrigatório em ambiente de produção/homologação e deve ser configurado como 's3' com as respectivas credenciais.");
   } else if (storageDriver === 's3') {
     // Validação estrita e detalhada da configuração S3
     const bucket = (env.FILE_STORAGE_S3_BUCKET ?? '').trim();
