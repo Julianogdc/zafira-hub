@@ -36,6 +36,32 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### DEC-HML-006 — Aceite técnico definitivo da HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Direção Técnica, via proprietário.
+- Problema: auditar e homologar tecnicamente a microetapa HM-4a (H5), garantindo que a aplicação inicialize apenas com credenciais e chaves criptográficas seguras, sem segredos reutilizados entre domínios, com obrigatoriedade estrita de driver S3 em produção, remoção de qualquer bypass de runtime (`CI_SMOKE_TEST`, `ALLOW_UNCONFIGURED_STORAGE_IN_SMOKE`), sanitização de mensagens de erro e compatibilidade com os containers de teste do CI mediante configuração sintética válida.
+- Decisão: (1) **Aceite técnico definitivo da microetapa HM-4a (Perfil de Ambiente e Validação de Inicialização Segura — H5)**, com evidências:
+  - Baseline de código pública: `f0be88f` (`fix(security): HM-4a elimina bypasses de runtime e exige S3 e chaves sinteticas no CI`);
+  - Baseline de código interna: `b97062f` (mesmo commit espelhado);
+  - CI oficial consolidado: run 38687981804 (https://github.com/Julianogdc/zafira-hub/actions/runs/38687981804), **5/5 SUCCESS**;
+  - Testes de domínio: 123/123 aprovados;
+  - Testes de API: 916/916 aprovados em 46 suites (incluindo suíte de 16 testes em `startup-validator.test.ts`);
+  - Testes do Web: 102/102 aprovados;
+  - PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco (`test:integration:db`);
+  - Docker Build Gate: aprovado com container smoke e reverse proxy usando configuração sintética completa;
+  - Publish Images: aprovado com publicação no GHCR e validação por digest pull;
+  - Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4 e **F8 (125 aprovados, 0 falhas)**, staging smoke tests, mecânica de rollback e redeploy com par de imagens de staging;
+  - Requisitos de segurança auditados e confirmados: eliminação definitiva de bypasses de runtime; exigência universal de S3 em `NODE_ENV=production`; chaves dedicadas (`INTEGRATION_ENCRYPTION_KEY`, `APPROVAL_MEDIA_SECRET`); matriz exaustiva de segregação de segredos sem vazamento nos logs; sanitização estrita da mensagem de driver desconhecido sem reproduzir valor bruto.
+  (2) **Esclarecimentos não bloqueantes registrados obrigatoriamente:**
+  - *Exigibilidade condicional de certas chaves:* `HUB_INTERNAL_API_KEY` (segredo de máquina) e `CALENDAR_IDENTITY_HMAC_KEY` possuem exigibilidade condicional no código atual — se fornecidas são estritamente validadas, sendo a chave HMAC obrigatória caso `GOOGLE_CALENDAR_SYNC_SCHEDULE_ENABLED="true"`.
+  - *Homologação física com Cloudflare R2 real:* a validação física com bucket e credenciais reais da Cloudflare permanece pendente, programada para as etapas de homologação física (HM-5/HM-6).
+  - *Modo desconectado do BrightBean:* o tratamento para subida resiliente da API mesmo sem dependência da URL do BrightBean pertence ao escopo da microetapa **HM-4b**.
+  (3) Proibido: modificar código ou testes sem autorização, iniciar HM-4b ou HM-4c, acessar VPS, EasyPanel, Cloudflare ou DNS, criar credenciais ou buckets reais, executar deploy ou habilitar integrações/publicações reais.
+- Alternativas consideradas: manter bypass via flag em runtime (rejeitado pela Direção Técnica por risco de ativação acidental em ambiente físico).
+- Impacto: módulos `startup-validator.ts`, `server.ts`, `.env.example`, `.github/workflows/foundation-ci.yml` e suítes de teste.
+- Revisão: na autorização e execução da HM-4b.
+
+---
+
 ### 2026-10-15 — HM-4a (Correção Final Pré-Aceite — H5) — Antigravity
 - BASELINE (commit): pública `f0be88f` | interna `b97062f`
 - CI/EVIDÊNCIA: run 38687981804 (https://github.com/Julianogdc/zafira-hub/actions/runs/38687981804) — **5/5 SUCCESS** (Code Quality and Tests: 916/916 testes de API aprovados em 46 suites, 102/102 Web, 123/123 Domain, Secret Scan e Public Guard OK; PostgreSQL Integration Gate: 208/208 em duas rodadas consecutivas no mesmo banco com migrações e RBAC bootstrap; Docker Build Gate: container smoke e reverse proxy OK; Publish Images: imagens publicadas no GHCR e validadas por digest pull; Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4, F8 PASS [125/0], staging smoke tests OK, rollback e redeploy OK).
