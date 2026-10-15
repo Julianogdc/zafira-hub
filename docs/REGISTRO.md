@@ -38,7 +38,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ### 2026-10-14 — Execução da HM-3 (Ajuste complementar final de auditoria: eliminação de leitura integral em ensureImageDimensions por stream limitado sem storage.get) — Antigravity
 - BASELINE (commit): `0910051` no público `Julianogdc/zafira-hub` (espelho no interno: `f2d97e9`).
-- CI/EVIDÊNCIA: testes locais 1.125/1.125 aprovados (API 900/900 em 46 suites; Web 102/102; Domain 123/123; typechecks de contracts, domain, api e web 100% OK; monorepo build 100% OK). Testes focados do módulo: `image-head.test.ts` 18/18 aprovados; `content-streaming-upload.test.ts` 11/11 aprovados; testes de storage e publication 30/30 aprovados. Validação oficial pelo CI consolidado no GitHub Actions.
+- CI/EVIDÊNCIA: run 38665559755 (https://github.com/Julianogdc/zafira-hub/actions/runs/38665559755) **5/5 SUCCESS** (Code Quality and Tests: API 900/900 em 46 suites, Web 102/102, Domain 123/123; PostgreSQL Integration Gate: 208/208 em duas execuções consecutivas no mesmo banco; Docker Build Gate; Publish Images GHCR; Homologation Rehearsal: Browser Gates F4–F8, F8 125/0). Testes locais 1.125/1.125 aprovados (`image-head.test.ts` 18/18; `content-streaming-upload.test.ts` 11/11; storage/publication 30/30; 4 typechecks e monorepo build 100% OK).
 - STATUS: concluído pela engenharia, submetido para decisão formal de aceite DEC-HML-004.
 - O QUE MUDOU:
   1. **Eliminação de leitura integral em `ensureImageDimensions` (`content.service.ts`):**

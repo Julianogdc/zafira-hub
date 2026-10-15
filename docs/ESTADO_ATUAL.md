@@ -10,7 +10,7 @@
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
 | **Baseline de código** | `0910051` no público `Julianogdc/zafira-hub` — HM-3: eliminação integral de leitura por storage.get() em ensureImageDimensions, leitura limitada a 1 MiB via streaming (readImageDimensionsFromStorage), cleanup garantido, bloqueio de contorno pós-upload e suíte de 18 testes em image-head.test.ts (espelho no interno: `f2d97e9`; workflows e .env.example com diferenças intencionais preservadas) |
-| Situação da baseline | **Testes locais 1.125/1.125 aprovados** (API 900/900 em 46 suites; Web 102/102; Domain 123/123; 4 typechecks e build aprovados); aguardando validação consolidada no CI oficial do GitHub Actions para conclusão do aceite formal DEC-HML-004. |
+| Situação da baseline | **CI oficial consolidado 5/5** no run 38665559755 (https://github.com/Julianogdc/zafira-hub/actions/runs/38665559755): Code Quality and Tests (API 900/900 em 46 suites, Web 102/102, Domain 123/123, Secret Scan e Public Guard OK), **PostgreSQL Integration Gate 208/208 em duas execuções consecutivas no mesmo banco**, Docker Build Gate, Publish Images (GHCR) e Homologation Rehearsal (Browser Gates F5–F8 PASS, F8 125/0). **HM-3 100% concluída e pronta para emissão da DEC-HML-004.** |
 
 "Baseline de código" é o último commit que alterou código. Commits posteriores que só mudam `docs/`, `AGENTS.md`, `CLAUDE.md` ou `GEMINI.md` são esperados. A verificação está em `AGENTS.md`.
 
