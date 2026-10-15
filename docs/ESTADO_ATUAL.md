@@ -6,7 +6,7 @@
 
 | Campo | Valor |
 |---|---|
-| Última atualização | 2026-10-15 — Antigravity — **Aceite técnico definitivo da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6)** pela Direção Técnica (DEC-HML-008). HM-1, HM-2, HM-3, HM-4a e HM-4b aceitas definitivamente (DEC-HML-002, DEC-HML-003, DEC-HML-004, DEC-HML-006, DEC-HML-008). Fase 8 não encerrada (Portão F8 aberto; F8-5e não autorizada). Próximo passo: autorização formal da próxima etapa pelo proprietário. |
+| Última atualização | 2026-10-15 — Antigravity — **Entrega da microetapa HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação)** autorizada por DEC-HML-009, pendente de auditoria e aceite técnico da Direção Técnica. HM-1, HM-2, HM-3, HM-4a e HM-4b aceitas definitivamente (DEC-HML-002, DEC-HML-003, DEC-HML-004, DEC-HML-006, DEC-HML-008). |
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
 | **Baseline de código** | `4feacac` no público `Julianogdc/zafira-hub` — HM-4b: modo desconectado e inicialização resiliente do BrightBean (H6), boot em produção sem dependência de URL com publicação/métricas desligadas, zero chamadas de rede no modo desconectado, tratamento de erros 503 controlados sem erro 500, fail-closed estrito mantido quando publicação/métricas estiverem ativadas sem URL, nova suíte com 8 testes e 925 testes de API aprovados (espelho no interno: `fb651a0`) |
@@ -36,13 +36,13 @@
 | **F6 (IMP.1–9, RO.0–2)** | ✅ **encerrada** (ressalva → F15) |
 | F7 — Onboarding e Agenda | ✅ **encerrada funcionalmente em 2026-10-12** (DEC-F7-018), com ressalvas (P22, P28, sem homologação real de Calendar/n8n) |
 | **F8 — Conteúdos** | 🟡 F8-0 a F8-3 aceitas; F8-0b encerrada com ressalvas; F8-4a, F8-4b, F8-5a a F8-5d e **F8-5p aceitas** (DEC-F8-026/028/030/032); Portão F8 aberto; F8-5e não autorizada; **Fase 8 não encerrada** |
-| **Homologação (HM)** | 🟡 **HM-1, HM-2, HM-3, HM-4a e HM-4b aceitas definitivamente**; HM-4c, HM-5, HM-6 e H7 a H9 pendentes |
+| **Homologação (HM)** | 🟡 **HM-1, HM-2, HM-3, HM-4a e HM-4b aceitas definitivamente**; HM-4c pendente de aceite; HM-5, HM-6 e H7 a H9 pendentes |
 | F9–F18 | ⬜ pendentes (critérios e portões no Mapa, parte C2) |
 
 ## Próximo passo concreto
 
 0. **P29 retificado:** o valor era placeholder descritivo; **sem revogação registrada ou exigida** sem nova evidência.
-1. **Proprietário: autorização formal da próxima etapa de homologação (ex.: HM-4c, HM-5 ou alinhamento técnico).**
+1. **Direção Técnica: auditoria independente e parecer de aceite da microetapa HM-4c.**
 3. **Direção decide as recomendações de economia do CI R1–R7** (`docs/REGISTRO.md`, entrada de 2026-10-12): estimativa de consumo de 2.276 min nos últimos 100 runs; 59% dos runs foram de documentação. **Conferir o saldo no painel de cobrança antes de qualquer run completo.**
 4. **Antes de qualquer ambiente real:** `rbac:bootstrap` (**P22**); `N8N_ALLOWED_HOSTS`/`N8N_CALLBACK_BASE_URL`; despachante n8n, agendador do Calendar e do espelho do Asana **desligados** até medir capacidade e haver autorização.
 5. **P28 — exclusão de cliente, retenção e privacidade:** avaliar proposta `docs/propostas/F7-2_RETENCAO_EXCLUSAO_CLIENTE_PROPOSTA.md` antes de dados reais.
@@ -60,7 +60,7 @@
 | P8 | Verificar se EasyPanel/GHCR dependiam do repositório público (DEC-GOV-003) | próximo deploy |
 | P9 | Possíveis tokens Asana antigos na tabela `profiles` do Supabase legado | aceite final da trilha Asana |
 | P11 | Token de desenvolvimento (`ASANA_DEV_PAT`/`ASANA_ACCESS_TOKEN`, só fora de produção) e conexões existentes mantêm os direitos que já tinham | revisão de credenciais antes da F18 |
-| P12 | `deploy/homologation/docker-compose.reference.yml` tem senha PADRÃO de exemplo no `DATABASE_URL`; precisa ser sempre sobrescrita no ambiente | primeiro deploy de homologação |
+| P12 | ~~`deploy/homologation/docker-compose.reference.yml` tem senha PADRÃO de exemplo~~ **resolvida no pacote (2026-10-15, HM-4c, DEC-HML-009):** senhas padrão e credenciais inseguras eliminadas do compose de referência; variáveis obrigatórias e seguras exigidas explicitamente conforme o startup-validator | — |
 | P13 | Lint **completo** do web com erros em módulos legados e lint da API não configurado (código F6 já é bloqueante no CI). **Critério:** `npm run lint` do web com 0 erros e lint da API configurado e no CI. **Prazo proposto:** zerar o legado por módulo à medida que for tocado e concluir **antes do encerramento da F8**; limite absoluto: antes da F18 | F8 / F18 |
 | P18 | ~~`rbac-postgres.test.ts` falha nos testes P e Q se rodado duas vezes~~ **resolvida (2026-10-14, HM-1/H3, DEC-HML-001):** o arquivo restaura o estado-base de `ci-org-a`/`ci-org-b` antes de rodar (só o que ele altera, depois das travas), a permissão do teste M é restaurada em `finally`, P ficou escopado aos próprios registros e Q restaura a configuração; guarda única `lib/test-database-guard.ts` (nome exato `zafira_hub_ci`, host local, organizações `ci-*`); o CI roda `test:integration:db` duas vezes no mesmo banco (run 38615589824). Aceita (DEC-HML-002) | — |
 | P19 | `store/usePerformanceStore.ts` (legado) ainda contém gerador de dados de exemplo, não usado por padrão | revisão do módulo de Performance |

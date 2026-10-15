@@ -1,8 +1,19 @@
 # ==============================================================================
 # ZAFIRA HUB 2.1 — DOCKER COMPOSE DE REFERÊNCIA PARA HOMOLOGAÇÃO / REHEARSAL
 # ==============================================================================
-# FINALIDADE: Arquivo de referência técnica e execução de ensaios locais / CI.
-#             A topologia final na VPS poderá ser adaptada para EasyPanel.
+# FINALIDADE: Arquivo de referência técnica para deployment reproduzível em homologação.
+#             Endereço planejado de homologação: https://<subdominio-de-homologacao-dedicado>
+#             (o endereço permanece planejado e NÃO deve ser configurado nesta sessão).
+#
+# REGRAS DE SEGURANÇA E CONFORMIDADE:
+#   1. Zero senhas ou URLs padrão inseguras (DEC-HML-009 / P12 resolvida).
+#   2. Variáveis obrigatórias exigidas explicitamente conforme o startup-validator (HM-4a/HM-4b).
+#   3. Armazenamento S3 privado com HTTPS obrigatório em produção/homologação (Cloudflare R2).
+#   4. Segregação estrita de segredos criptográficos dedicados.
+#   5. Todas as integrações, sincronizadores e coletores desligados por padrão (false).
+#   6. PostgreSQL e API sem exposição direta de portas ao host/internet (somente rede interna).
+#   7. Imagens referenciadas exclusivamente por digests imutáveis (@sha256:<64 hex>).
+#   8. Limites definitivos de CPU e RAM não fixados aqui (objeto da etapa H7).
 # ==============================================================================
 
 version: '3.8'
@@ -13,9 +24,9 @@ services:
     container_name: zafira-hub-postgres-hml
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_staging_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-zafira_hub_21_staging}
+      POSTGRES_USER: "${POSTGRES_USER:-postgres}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD com senha forte e exclusiva no ambiente de homologacao}"
+      POSTGRES_DB: "${POSTGRES_DB:-zafira_hub_21_staging}"
     volumes:
       - zafira_hub_21_staging_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,11 +34,12 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # PostgreSQL acessível estritamente através da rede privada interna (sem portas publicadas)
     networks:
       - zafira-hub-hml-net
 
   api:
-    image: ${API_IMAGE_REF}
+    image: "${API_IMAGE_REF:?Defina API_IMAGE_REF com digest imutavel (ghcr.io/julianogdc/zafira-hub-api@sha256:...)}"
     container_name: zafira-hub-api-hml
     restart: unless-stopped
     depends_on:
@@ -36,15 +48,40 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres_staging_secret@postgres:5432/zafira_hub_21_staging?schema=public}
-      COOKIE_SECRET: ${COOKIE_SECRET}
-      JWT_SECRET: ${JWT_SECRET}
-      HUB_INTERNAL_API_KEY: ${HUB_INTERNAL_API_KEY}
+      # Conexão segura com a base de dados dedicada de homologação (nunca apontar para produção)
+      DATABASE_URL: "${DATABASE_URL:?Defina DATABASE_URL com credencial segura e base dedicada de homologacao}"
+
+      # Segredos criptográficos obrigatórios e mutuamente exclusivos (HM-4a)
+      COOKIE_SECRET: "${COOKIE_SECRET:?Defina COOKIE_SECRET com pelo menos 32 caracteres aleatorios de alta entropia}"
+      JWT_SECRET: "${JWT_SECRET:?Defina JWT_SECRET com pelo menos 32 caracteres aleatorios de alta entropia}"
+      INTEGRATION_ENCRYPTION_KEY: "${INTEGRATION_ENCRYPTION_KEY:?Defina INTEGRATION_ENCRYPTION_KEY com 64 hexadecimais (32 bytes) para AES-256-GCM}"
+      APPROVAL_MEDIA_SECRET: "${APPROVAL_MEDIA_SECRET:?Defina APPROVAL_MEDIA_SECRET com pelo menos 32 caracteres aleatorios dedicados}"
+
+      # Segredos opcionais / condicionais
+      HUB_INTERNAL_API_KEY: "${HUB_INTERNAL_API_KEY:-}"
+      CALENDAR_IDENTITY_HMAC_KEY: "${CALENDAR_IDENTITY_HMAC_KEY:-}"
+
+      # Driver de armazenamento S3-compatível privado obrigatório (HM-2 / HM-3 / HM-4a)
+      FILE_STORAGE_DRIVER: s3
+      FILE_STORAGE_S3_BUCKET: "${FILE_STORAGE_S3_BUCKET:?Defina FILE_STORAGE_S3_BUCKET para homologacao}"
+      FILE_STORAGE_S3_REGION: "${FILE_STORAGE_S3_REGION:-auto}"
+      FILE_STORAGE_S3_ENDPOINT: "${FILE_STORAGE_S3_ENDPOINT:?Defina FILE_STORAGE_S3_ENDPOINT com protocolo HTTPS}"
+      FILE_STORAGE_S3_ACCESS_KEY_ID: "${FILE_STORAGE_S3_ACCESS_KEY_ID:?Defina FILE_STORAGE_S3_ACCESS_KEY_ID}"
+      FILE_STORAGE_S3_SECRET_ACCESS_KEY: "${FILE_STORAGE_S3_SECRET_ACCESS_KEY:?Defina FILE_STORAGE_S3_SECRET_ACCESS_KEY}"
+
+      # Integrações externas, despachantes e agendadores desligados por padrão (HM-4b / regras de isolamento)
+      PUBLICATION_DISPATCH_ENABLED: "false"
+      PUBLICATION_METRICS_ENABLED: "false"
+      GOOGLE_CALENDAR_SYNC_SCHEDULE_ENABLED: "false"
+      ASANA_MIRROR_SCHEDULE_ENABLED: "false"
+      N8N_DISPATCH_ENABLED: "false"
+      N8N_AUTOMATION_DISPATCH_ENABLED: "false"
+    # API acessível estritamente através da rede privada interna pelo Web Nginx (sem portas publicadas)
     networks:
       - zafira-hub-hml-net
 
   web:
-    image: ${WEB_IMAGE_REF}
+    image: "${WEB_IMAGE_REF:?Defina WEB_IMAGE_REF com digest imutavel (ghcr.io/julianogdc/zafira-hub-web@sha256:...)}"
     container_name: zafira-hub-web-hml
     restart: unless-stopped
     depends_on:
@@ -53,7 +90,7 @@ services:
       API_UPSTREAM: http://api:3001
       NGINX_ENVSUBST_FILTER: API_UPSTREAM
     ports:
-      # Porta publicada estritamente para ensaios locais e testes de smoke
+      # Ponto único de entrada: porta mapeada para proxy reverso da VPS (Traefik/EasyPanel) ou ensaios locais
       - "${WEB_PORT:-8082}:80"
     networks:
       - zafira-hub-hml-net

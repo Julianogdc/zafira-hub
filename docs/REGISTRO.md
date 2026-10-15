@@ -36,6 +36,29 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-15 — HM-4c: Atualização do Pacote de Homologação e Runbooks de Implantação — Antigravity
+- BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
+- CI/EVIDÊNCIA: Validação estrutural do Compose aprovada via `js-yaml` (serviços postgres, api, web; isolamento de portas sem exposição de Postgres/API; variáveis obrigatórias e segregação estrita); 16/16 testes unitários do `startup-validator` aprovados em 693ms; `secret-scan` 0 credenciais suspeitas em 616 arquivos (interno) e 568 arquivos (público); `public-guard` 0 informações operacionais detectadas em 662 arquivos no repositório público.
+- STATUS: pendente de aceite (aguardando auditoria independente da Direção Técnica)
+- O QUE MUDOU:
+  1. `deploy/homologation/docker-compose.reference.yml`: eliminadas senhas e defaults inseguros (`postgres_staging_secret`, resolvendo P12); adicionadas variáveis obrigatórias do `startup-validator` (HM-4a/HM-4b); isolamento de rede reforçado (PostgreSQL e API sem portas mapeadas ao host; apenas Nginx Web mapeia porta para tráfego/proxy reverso); imagens exigidas exclusivamente por digests SHA-256; integrações, despachantes e coletores desligados por padrão (`false`); limites de CPU/RAM provisórios não fixados (objeto de H7).
+  2. `deploy/homologation/homologation.env.example`: atualizado com todas as variáveis obrigatórias do `startup-validator` e integrador de storage S3 privado (Cloudflare R2); uso do padrão canônico de placeholders seguros (`"CHANGE_ME"`, `postgresql://user:pass@...`) sem vazamento de segredos reais e em conformidade estrita com o `secret-scan`.
+  3. `deploy/homologation/README.md`: atualizada contagem de migrações para 35 migrações do Prisma; documentados os princípios de segurança, subdomínio planejado, modo desconectado, isolamento e permissões RBAC (`rbac:bootstrap --check`).
+  4. Runbooks operacionais atualizados no repositório interno com 35 migrações, variáveis da HM-4a/HM-4b, isolamento de rede, verificação P22/RBAC, dados sintéticos (P28) e lista de pendências futuras para implantação física.
+  5. `docs/ESTADO_ATUAL.md` e `docs/REGISTRO.md`: registrados DEC-HML-009, resolução no pacote da pendência P12 e encerramento de sessão ativa.
+- LIMITES/LACUNAS:
+  - Subdomínio de homologação dedicado permanece apenas planejado (não configurado nesta sessão).
+  - Limites de CPU/RAM e topologia na VPS permanecem pendentes da etapa H7.
+  - Credenciais reais e provisionamento de bucket Cloudflare R2 permanecem pendentes da etapa H8.
+  - Testes com dados sintéticos permanecem pendentes da etapa H4 (P28).
+  - Ensaio de backup e restauração permanece pendente da etapa H9.
+  - Smoke test físico em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL` e publicação/métricas desligadas permanece pendente pré-deploy físico.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar auditoria independente da Direção Técnica para HM-4c).
+- PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
 ### 2026-10-15 — HM-4b: Modo Desconectado e Inicialização Resiliente do BrightBean (H6) — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: run 38747057275 (https://github.com/Julianogdc/zafira-hub/actions/runs/38747057275), 5/5 SUCCESS; API: 925/925 (46 suites, incl. `brightbean-disconnected.test.ts` 8/8), Web: 102/102, Domain: 123/123, PostgreSQL: 208/208 (duas rodadas), Docker Build Gate OK, Publish Images GHCR OK, Homologation Rehearsal Browser Gates F4 a F8 PASS (F8 125/0, rollback/redeploy OK); Secret Scan OK; Public Guard OK.
@@ -56,6 +79,21 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
+### DEC-HML-009 — Autorização exclusiva da microetapa HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Proprietário e Direção Técnica.
+- Problema: preparar o pacote técnico de homologação (`deploy/homologation/`) e os runbooks operacionais correspondentes para permitir uma futura implantação segura, isolada e reproduzível do Zafira Hub 2.1 em ambiente de homologação (em subdomínio de homologação dedicado, não a ser configurado nesta sessão), eliminando senhas e credenciais padrão inseguras, exigindo variáveis obrigatórias em conformidade com o `startup-validator` (HM-4a/HM-4b), mantendo integrações desligadas por padrão, corrigindo referências desatualizadas (como 14 para 35 migrações, Postiz e baselines antigas) e preservando informações operacionais privadas exclusivamente no repositório interno.
+- Decisão: **Autorização exclusiva da execução da microetapa HM-4c (Atualização do Pacote de Homologação e Runbooks de Implantação)** com as seguintes diretrizes:
+  1. Atualizar `deploy/homologation/docker-compose.reference.yml`: eliminar senhas/URLs de banco padrão inseguras; exigir explicitamente variáveis obrigatórias do `startup-validator` (S3 privado, chaves criptográficas dedicadas); manter integrações, agendadores e despachantes desligados por padrão; manter PostgreSQL e API sem exposição direta de portas ao host; utilizar referências imutáveis de imagem por digest; não fixar topologia ou limites definitivos de CPU/RAM antes da H7.
+  2. Atualizar `deploy/homologation/homologation.env.example` e `README.md` com exemplos e instruções seguras sem credenciais reais utilizáveis.
+  3. Revisar os 4 runbooks operacionais (`homologation-deployment-runbook.md`, `homologation-readiness.md`, `homologation-final-gate.md`, `homologation-backup-and-rollback.md`) corrigindo referências desatualizadas (35 migrações, descontinuação/substituição do Postiz pelo BrightBean desacoplado, baselines atuais `4feacac`/`fb651a0` e CI run 38747057275, regras HM-4a/HM-4b) mantendo-os exclusivamente no repositório interno.
+  4. Incorporar ao planejamento do subdomínio planejado: DNS e HTTPS, proxy reverso same-origin, cookies seguros (`Secure`, `HttpOnly`, `SameSite`), controle de acesso, banco isolado `zafira_hub_21_staging`, armazenamento R2 privado, verificação P22 (`rbac:bootstrap --check`), dados exclusivamente sintéticos (P28) e mecânica de backup/rollback.
+  5. Registrar obrigatoriamente como pendências futuras: H4 (dados sintéticos), H7 (capacidade e topologia da VPS), H8 (credenciais reais de homologação), H9 (backup e restauração), validação com Cloudflare R2 real e smoke test físico em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL` com publicação/métricas desligadas.
+  6. Proibições estritas: não acessar VPS, EasyPanel, Cloudflare ou DNS; não realizar deploy físico; não executar migrations; não criar bancos, buckets ou credenciais reais; não iniciar HM-5, HM-6, H4 ou H7–H9; não alterar código da aplicação, testes, workflows, Hub 1.0, main ou hub-2.0.
+- Alternativas consideradas: manter o compose legado com senha de exemplo (rejeitado por violar a pendência P12 e o princípio de fail-closed seguro).
+- Impacto: pacote `deploy/homologation/`, runbooks operacionais em `docs/operations/`, documentação de estado e registro.
 
 ---
 
