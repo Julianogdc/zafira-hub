@@ -95,6 +95,13 @@ export class SocialPublisherService {
     ctx: SocialPublisherContext;
     connection: any;
   }> {
+    if ((this.provider as any)?.isConfigured && !(this.provider as any).isConfigured()) {
+      throw new SocialPublisherServiceError(
+        'BRIGHTBEAN_DISCONNECTED',
+        'Provedor BrightBean está em modo desconectado (URL de integração não configurada).',
+        503
+      );
+    }
     const connection = await this.resolveBrightBeanConnection(organizationId);
     return {
       ctx: {
@@ -127,6 +134,12 @@ export class SocialPublisherService {
    * Obtém status da integração BrightBean.
    */
   async getStatus(organizationId: string): Promise<SocialPublisherStatus> {
+    if ((this.provider as any)?.isConfigured && !(this.provider as any).isConfigured()) {
+      return {
+        connected: false,
+        provider: 'BRIGHTBEAN',
+      };
+    }
     const { ctx } = await this.getProviderContext(organizationId);
     return this.provider.getStatus(ctx);
   }

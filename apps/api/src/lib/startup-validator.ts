@@ -333,16 +333,25 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     }
   }
 
-  // 5.3 Despachante de Publicação Social
-  if (env.PUBLICATION_DISPATCH_ENABLED === 'true') {
+  // 5.3 Publicação Social e Coleta de Métricas
+  const pubDispatch = env.PUBLICATION_DISPATCH_ENABLED === 'true';
+  const pubMetrics = env.PUBLICATION_METRICS_ENABLED === 'true';
+
+  if (pubDispatch || pubMetrics) {
     const bbUrl = (env.BRIGHTBEAN_API_URL ?? '').trim();
+    const reason = pubDispatch && pubMetrics
+      ? 'PUBLICATION_DISPATCH_ENABLED e PUBLICATION_METRICS_ENABLED estão ativos'
+      : pubDispatch
+      ? 'PUBLICATION_DISPATCH_ENABLED está ativo'
+      : 'PUBLICATION_METRICS_ENABLED está ativo';
+
     if (!bbUrl) {
-      errors.push('PUBLICATION_DISPATCH_ENABLED está ativo mas BRIGHTBEAN_API_URL não está configurada.');
+      errors.push(`${reason} mas BRIGHTBEAN_API_URL não está configurada.`);
     } else {
       try {
         const u = new URL(bbUrl);
         if (u.protocol !== 'https:') {
-          errors.push('BRIGHTBEAN_API_URL deve utilizar HTTPS em produção quando o despachante estiver habilitado.');
+          errors.push('BRIGHTBEAN_API_URL deve utilizar HTTPS em produção quando a publicação ou métricas estiverem habilitadas.');
         }
       } catch {
         errors.push('BRIGHTBEAN_API_URL possui formato de URL inválido.');

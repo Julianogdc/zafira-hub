@@ -93,6 +93,16 @@ export class BrightBeanIntegrationConnector implements CommonIntegrationConnecto
         };
       }
 
+      if (typeof this.providerImpl.isConfigured === 'function' && !this.providerImpl.isConfigured()) {
+        return {
+          connected: false,
+          provider: 'BRIGHTBEAN',
+          externalScopeId: conn.externalScopeId || null,
+          message: 'Provedor BrightBean em modo desconectado (URL de integração não configurada).',
+          checkedAt: new Date(),
+        };
+      }
+
       const status = await this.providerImpl.getStatus({
         organizationId: ctx.organizationId,
         connectionId: conn.id,

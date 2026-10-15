@@ -47,17 +47,17 @@ export class BrightBeanProviderError extends Error {
 
 export interface BrightBeanProviderOptions {
   connectionService: IntegrationConnectionService;
-  apiBaseUrl: string;
+  apiBaseUrl?: string | null;
   fetchImpl?: typeof fetch;
 }
 
 export class BrightBeanProvider implements SocialPublisherProvider {
   private readonly connectionService: IntegrationConnectionService;
-  private readonly apiBaseUrl: string;
+  private readonly apiBaseUrl: string | null;
   private readonly fetchImpl?: typeof fetch;
 
   constructor(options: BrightBeanProviderOptions) {
-    if (!options.apiBaseUrl) {
+    if (options.apiBaseUrl === '') {
       throw new BrightBeanProviderError(
         'BRIGHTBEAN_CONFIG_ERROR',
         'apiBaseUrl é obrigatório para o BrightBeanProvider',
@@ -65,14 +65,25 @@ export class BrightBeanProvider implements SocialPublisherProvider {
       );
     }
     this.connectionService = options.connectionService;
-    this.apiBaseUrl = options.apiBaseUrl;
+    this.apiBaseUrl = options.apiBaseUrl ? options.apiBaseUrl.trim() : null;
     this.fetchImpl = options.fetchImpl;
+  }
+
+  public isConfigured(): boolean {
+    return Boolean(this.apiBaseUrl && this.apiBaseUrl.length > 0);
   }
 
   private async resolveClientAndConnection(ctx: SocialPublisherContext): Promise<{
     client: BrightBeanClient;
     connection: any;
   }> {
+    if (!this.isConfigured()) {
+      throw new BrightBeanProviderError(
+        'BRIGHTBEAN_DISCONNECTED',
+        'Provedor BrightBean está em modo desconectado (BRIGHTBEAN_API_URL não configurada).',
+        503
+      );
+    }
     if (!ctx.connectionId) {
       throw new BrightBeanProviderError(
         'BRIGHTBEAN_CONNECTION_REQUIRED',
@@ -119,7 +130,7 @@ export class BrightBeanProvider implements SocialPublisherProvider {
     );
 
     const client = new BrightBeanClient({
-      apiBaseUrl: this.apiBaseUrl,
+      apiBaseUrl: this.apiBaseUrl!,
       apiKey,
       fetchImpl: this.fetchImpl,
     });
@@ -282,6 +293,13 @@ export class BrightBeanProvider implements SocialPublisherProvider {
   }
 
   async getStatus(ctx: SocialPublisherContext): Promise<SocialPublisherStatus> {
+    if (!this.isConfigured()) {
+      return {
+        connected: false,
+        provider: 'BRIGHTBEAN',
+        workspaceId: ctx.workspaceId || null,
+      };
+    }
     try {
       const { client, connection } = await this.resolveClientAndConnection(ctx);
       const me = await client.getMe();

@@ -5,6 +5,7 @@ import {
   SocialPublisherService,
   SocialPublisherServiceError,
 } from './social-publisher.service.js';
+import { BrightBeanProviderError } from '../brightbean/brightbean.provider.js';
 import { ClientScopeContext } from '../../authorization/client-resource-scope.js';
 
 const linkAccountSchema = z.object({
@@ -62,6 +63,22 @@ export function createSocialPublisherRoutes(service: SocialPublisherService) {
           status: 'error',
           error: error.code,
           message: error.message,
+        });
+      }
+
+      if (error instanceof BrightBeanProviderError) {
+        return reply.status(error.statusCode).send({
+          status: 'error',
+          error: error.code,
+          message: error.message,
+        });
+      }
+
+      if (typeof (error as any)?.statusCode === 'number' && typeof (error as any)?.code === 'string') {
+        return reply.status((error as any).statusCode).send({
+          status: 'error',
+          error: (error as any).code,
+          message: (error as any).message || 'Erro na operação de publicação social.',
         });
       }
 

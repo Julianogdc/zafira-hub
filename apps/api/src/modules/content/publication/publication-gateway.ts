@@ -190,5 +190,9 @@ export async function resolveBrightBeanGateway(organizationId: string): Promise<
     throw new GatewayError('AUTH', connections.length === 0 ? 'Sem conexao ativa do BrightBean.' : 'Mais de uma conexao ativa do BrightBean.');
   }
   const apiKey = await integrationConnectionService.resolveCredential(organizationId, connections[0].id);
-  return new BrightBeanPublicationGateway(new BrightBeanClient({ apiBaseUrl: resolveBrightBeanApiUrl(), apiKey }));
+  const apiUrl = resolveBrightBeanApiUrl(process.env, { required: true });
+  if (!apiUrl) {
+    throw new GatewayError('INVALID', 'BRIGHTBEAN_API_URL nao configurada.');
+  }
+  return new BrightBeanPublicationGateway(new BrightBeanClient({ apiBaseUrl: apiUrl, apiKey }));
 }

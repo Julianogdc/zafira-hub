@@ -530,6 +530,39 @@ test('startup-validator (HM-4a) — validações condicionais quando agendadores
       return true;
     }
   );
+
+  // 5. Métricas de publicação ativadas sem URL do BrightBean (HM-4b)
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        PUBLICATION_METRICS_ENABLED: 'true',
+        BRIGHTBEAN_API_URL: '',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /PUBLICATION_METRICS_ENABLED está ativo mas BRIGHTBEAN_API_URL não está configurada/);
+      return true;
+    }
+  );
+
+  // 6. Ambos despachante e métricas ativados sem URL do BrightBean (HM-4b)
+  assert.throws(
+    () => validateStartupEnvironment({
+      env: {
+        ...base,
+        PUBLICATION_DISPATCH_ENABLED: 'true',
+        PUBLICATION_METRICS_ENABLED: 'true',
+        BRIGHTBEAN_API_URL: '',
+      },
+    }),
+    (err: any) => {
+      assert(err instanceof StartupValidationError);
+      assert.match(err.message, /PUBLICATION_DISPATCH_ENABLED e PUBLICATION_METRICS_ENABLED estão ativos mas BRIGHTBEAN_API_URL não está configurada/);
+      return true;
+    }
+  );
 });
 
 test('startup-validator (HM-4a) — compatibilidade com funcionalidades opcionais desativadas', () => {

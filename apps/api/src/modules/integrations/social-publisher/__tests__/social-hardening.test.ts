@@ -19,7 +19,7 @@ describe('Hardening Final do Backend Social (Passo 2C2.1.1)', () => {
   // =========================================================================
   // 1. BRIGHTBEAN_API_URL — FAIL CLOSED EM PRODUÇÃO
   // =========================================================================
-  describe('1. BRIGHTBEAN_API_URL Fail-Closed', () => {
+  describe('1. BRIGHTBEAN_API_URL Fail-Closed e Modo Desconectado (HM-4b)', () => {
     it('A. production + env válida -> retorna URL', () => {
       const url = resolveBrightBeanApiUrl({
         NODE_ENV: 'production',
@@ -28,9 +28,9 @@ describe('Hardening Final do Backend Social (Passo 2C2.1.1)', () => {
       assert.equal(url, 'https://brightbean.prod.internal/api/v1');
     });
 
-    it('B. production + env ausente -> lança erro sem vazar segredos', () => {
+    it('B. production + publicação ativa + env ausente -> lança erro sem vazar segredos', () => {
       assert.throws(
-        () => resolveBrightBeanApiUrl({ NODE_ENV: 'production', BRIGHTBEAN_API_URL: '' }),
+        () => resolveBrightBeanApiUrl({ NODE_ENV: 'production', PUBLICATION_DISPATCH_ENABLED: 'true', BRIGHTBEAN_API_URL: '' }),
         (err: any) => {
           assert.equal(err.message.includes('BRIGHTBEAN_API_URL é obrigatória em ambiente de produção'), true);
           return true;
@@ -38,7 +38,15 @@ describe('Hardening Final do Backend Social (Passo 2C2.1.1)', () => {
       );
 
       assert.throws(
-        () => resolveBrightBeanApiUrl({ NODE_ENV: 'production' }),
+        () => resolveBrightBeanApiUrl({ NODE_ENV: 'production', PUBLICATION_METRICS_ENABLED: 'true' }),
+        (err: any) => {
+          assert.equal(err.message.includes('BRIGHTBEAN_API_URL é obrigatória em ambiente de produção'), true);
+          return true;
+        }
+      );
+
+      assert.throws(
+        () => resolveBrightBeanApiUrl({ NODE_ENV: 'production' }, { required: true }),
         (err: any) => {
           assert.equal(err.message.includes('BRIGHTBEAN_API_URL é obrigatória em ambiente de produção'), true);
           return true;
@@ -46,7 +54,22 @@ describe('Hardening Final do Backend Social (Passo 2C2.1.1)', () => {
       );
     });
 
-    it('C. test/development + env ausente -> localhost permitido como fallback', () => {
+    it('C. production + publicação desativada + env ausente -> modo desconectado seguro (retorna null)', () => {
+      const disconnectedUrl = resolveBrightBeanApiUrl({
+        NODE_ENV: 'production',
+        PUBLICATION_DISPATCH_ENABLED: 'false',
+        PUBLICATION_METRICS_ENABLED: 'false',
+        BRIGHTBEAN_API_URL: '',
+      });
+      assert.equal(disconnectedUrl, null);
+
+      const defaultProdUrl = resolveBrightBeanApiUrl({
+        NODE_ENV: 'production',
+      });
+      assert.equal(defaultProdUrl, null);
+    });
+
+    it('D. test/development + env ausente -> localhost permitido como fallback', () => {
       const devUrl = resolveBrightBeanApiUrl({ NODE_ENV: 'development', BRIGHTBEAN_API_URL: '' });
       assert.equal(devUrl, 'http://localhost:8000/api/v1');
 
