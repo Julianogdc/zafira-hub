@@ -1,5 +1,6 @@
 import { open } from 'node:fs/promises';
-import { imageDimensions } from '@zafira/domain';
+import { imageDimensions, PUBLISH_MAX_IMAGE_BYTES } from '@zafira/domain';
+import type { FileStorage, StorageStreamResult } from './file-storage.js';
 
 /**
  * HM-3 (ajuste complementar) - Dimensoes de imagem por leitura LIMITADA do inicio do arquivo.
@@ -30,6 +31,70 @@ export async function readFileHead(filePath: string, maxBytes: number): Promise<
   }
 }
 
+/**
+ * Le no maximo `maxBytes` de um stream de leitura, encerrando-o assim que atingir a cota
+ * sem esgotar o restante do fluxo nem acumular dados excedentes na memoria.
+ */
+export async function readStreamHead(stream: NodeJS.ReadableStream, maxBytes: number): Promise<Buffer> {
+  if (maxBytes <= 0) {
+    if (typeof (stream as any).destroy === 'function') {
+      (stream as any).destroy();
+    }
+    return Buffer.alloc(0);
+  }
+
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      stream.removeListener('data', onData);
+      stream.removeListener('end', onEnd);
+      stream.removeListener('error', onError);
+      stream.removeListener('close', onClose);
+    };
+
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (err) {
+        reject(err);
+      } else {
+        const full = Buffer.concat(chunks);
+        resolve(full.length > maxBytes ? full.subarray(0, maxBytes) : full);
+      }
+    };
+
+    const onData = (chunk: Buffer | string) => {
+      if (settled) return;
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      chunks.push(buf);
+      total += buf.length;
+      if (total >= maxBytes) {
+        if (typeof (stream as any).destroy === 'function') {
+          (stream as any).destroy();
+        }
+        finish();
+      }
+    };
+
+    const onEnd = () => finish();
+    const onClose = () => finish();
+    const onError = (err: Error) => finish(err);
+
+    stream.on('data', onData);
+    stream.on('end', onEnd);
+    stream.on('error', onError);
+    stream.on('close', onClose);
+
+    if (typeof (stream as any).resume === 'function') {
+      (stream as any).resume();
+    }
+  });
+}
+
 export interface ImageHeadSource {
   /** Primeiros bytes ja capturados durante o recebimento (ate 64 KiB). */
   headerBuffer: Buffer;
@@ -52,3 +117,45 @@ export async function identifyImageDimensions(source: ImageHeadSource): Promise<
     return null; // leitura falhou: segue desconhecida (bloqueia o agendamento, nunca libera)
   }
 }
+
+/**
+ * HM-3 (ajuste complementar) - Identifica dimensoes de imagem armazenada atraves de stream
+ * limitado a no maximo IMAGE_DIMENSIONS_MAX_READ_BYTES (1 MiB).
+ * Nunca le o arquivo integralmente em memoria (evita buffers de ate 20 MB na heap).
+ * Se o arquivo for ilegivel, corrompido, exceder 20 MB ou as dimensoes nao forem encontradas dentro de 1 MiB,
+ * devolve null (desconhecidas), garantindo fail closed (agendamento bloqueado).
+ * O spool temporario (no caso do S3) ou o descritor de arquivo e sempre liberado via cleanup/destroy.
+ */
+export async function readImageDimensionsFromStorage(
+  storage: FileStorage,
+  storageKey: string,
+  sizeBytes?: number
+): Promise<ReturnType<typeof imageDimensions>> {
+  if (sizeBytes !== undefined && sizeBytes > PUBLISH_MAX_IMAGE_BYTES) {
+    return null;
+  }
+
+  let opened: StorageStreamResult | null = null;
+  try {
+    opened = await storage.openStream(storageKey);
+    const maxToRead = Math.min(opened.sizeBytes, IMAGE_DIMENSIONS_MAX_READ_BYTES);
+    const head = await readStreamHead(opened.stream, maxToRead);
+    return imageDimensions(head);
+  } catch {
+    return null; // armazenamento indisponivel, chave inexistente ou stream quebrado: segue desconhecida
+  } finally {
+    if (opened) {
+      if (typeof (opened.stream as any).destroy === 'function') {
+        (opened.stream as any).destroy();
+      }
+      if (opened.cleanup) {
+        try {
+          await opened.cleanup();
+        } catch {
+          // limpeza silenciosa de spool temporario
+        }
+      }
+    }
+  }
+}
+

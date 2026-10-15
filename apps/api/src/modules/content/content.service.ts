@@ -8,7 +8,6 @@ import {
   PUBLISH_COMPATIBILITY_NOTE,
   PUBLISH_MAX_IMAGE_BYTES,
   canAddMedia,
-  imageDimensions,
   imagePixelProblem,
   canChangeFormat,
   isVersionEditable,
@@ -23,7 +22,7 @@ import { prisma } from '../../lib/prisma.js';
 import { AuditService } from '../audit/audit.service.js';
 import { buildClientResourceScopeWhere, findClientInResourceScope } from '../authorization/client-resource-scope.js';
 import { resolveFileStorage, StorageNotConfiguredError, type FileStorage } from './file-storage.js';
-import { identifyImageDimensions } from './image-head.js';
+import { identifyImageDimensions, readImageDimensionsFromStorage } from './image-head.js';
 
 /**
  * F8-1 (DEC-F8-003) - Conteudo: arquivos finais versionados.
@@ -36,6 +35,10 @@ type Tx = Prisma.TransactionClient;
  * F8-5p.1 (DEC-F8-031, P35): calcula e grava UMA vez as dimensoes de imagens antigas (sem largura/altura),
  * lendo o proprio arquivo. Imagem acima de 20 MB nao e lida (ja e recusada para publicacao). Ilegivel segue nula
  * (desconhecida), o que bloqueia o agendamento. O banco so aceita a transicao nulo -> valor.
+ *
+ * HM-3: nunca le o arquivo integralmente em memoria nem chama storage.get(). Usa streaming limitado
+ * a no maximo 1 MiB (readImageDimensionsFromStorage) com limpeza garantida. Dimensoes que nao puderem
+ * ser identificadas nesse teto permanecem desconhecidas (nulas) e o agendamento permanece bloqueado.
  */
 export async function ensureImageDimensions<T extends { id: string; kind: string; storageKey: string; sizeBytes: number; widthPx: number | null; heightPx: number | null }>(
   media: T[],
@@ -48,7 +51,7 @@ export async function ensureImageDimensions<T extends { id: string; kind: string
       continue;
     }
     try {
-      const dims = imageDimensions(await storage().get(m.storageKey));
+      const dims = await readImageDimensionsFromStorage(storage(), m.storageKey, m.sizeBytes);
       if (!dims) {
         out.push(m);
         continue;
