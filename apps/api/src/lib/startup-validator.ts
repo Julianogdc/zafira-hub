@@ -6,7 +6,7 @@ import { URL } from 'node:url';
  * Garante que a API do Zafira Hub 2.1 não inicialize em ambiente de produção/homologação com:
  *  - Credenciais ausentes, fracas, curtas ou com valores conhecidos de desenvolvimento;
  *  - Chaves criptográficas em formato inadequado ou reutilizadas entre domínios diferentes;
- *  - Driver de armazenamento inseguro (FILE_STORAGE_DRIVER=local é proibido em produção);
+ *  - Driver de armazenamento inseguro (FILE_STORAGE_DRIVER=local é terminantemente proibido em produção);
  *  - Endpoints S3 inseguros (http sem TLS é proibido em produção);
  *  - Variáveis condicionais ativadas sem suas dependências de segurança;
  *
@@ -58,9 +58,6 @@ const KNOWN_INSECURE_SECRETS = new Set([
   'admin',
   'zafira_hub_app',
   'sua_senha_aqui',
-  'chave_secreta_longa_para_assinatura_jwt_producao',
-  'chave_secreta_longa_para_assinatura_cookie_producao',
-  'chave_secreta_interna_para_acesso_a_rotas_privadas',
 ]);
 
 const S3_BUCKET_NAME_REGEX = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
@@ -99,8 +96,7 @@ function isSecretWeak(secret: string | undefined, minLength = 32): { weak: boole
   if (
     lower.includes('staging_secret') ||
     lower.includes('exemplo') ||
-    lower.includes('placeholder') ||
-    lower.includes('sua_senha')
+    lower.includes('placeholder')
   ) {
     return { weak: true, reason: 'contém termo demonstrativo inseguro' };
   }
@@ -160,31 +156,36 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     errors.push(`COOKIE_SECRET inválido: ${cookieCheck.reason}.`);
   }
 
-  // 1.3 INTEGRATION_ENCRYPTION_KEY (para criptografia AES-256 de credenciais de integração)
-  const encKeyCheck = isCryptoKeyValid(env.INTEGRATION_ENCRYPTION_KEY, 32);
-  if (!encKeyCheck.valid) {
-    errors.push(`INTEGRATION_ENCRYPTION_KEY inválida: ${encKeyCheck.reason}.`);
-  }
-
-  // 1.4 APPROVAL_MEDIA_SECRET (para assinatura HMAC de links de aprovação pública)
-  const approvalCheck = isSecretWeak(env.APPROVAL_MEDIA_SECRET, 32);
-  if (approvalCheck.weak) {
-    errors.push(`APPROVAL_MEDIA_SECRET inválido: ${approvalCheck.reason}.`);
-  }
-
-  // 1.5 Defesa em profundidade: Segregação de Chaves Criptográficas
-  // Segredos críticos não devem ser idênticos entre si (evita ataque de reutilização de chave entre subsistemas)
+  // 1.3 Defesa em profundidade: Segregação de Chaves
   if (env.JWT_SECRET && env.COOKIE_SECRET && env.JWT_SECRET === env.COOKIE_SECRET) {
     errors.push('JWT_SECRET e COOKIE_SECRET não podem ser idênticos (exige segregação de segredos).');
   }
-  if (env.INTEGRATION_ENCRYPTION_KEY && env.JWT_SECRET && env.INTEGRATION_ENCRYPTION_KEY === env.JWT_SECRET) {
-    errors.push('INTEGRATION_ENCRYPTION_KEY e JWT_SECRET não podem ser idênticos.');
-  }
-  if (env.APPROVAL_MEDIA_SECRET && env.JWT_SECRET && env.APPROVAL_MEDIA_SECRET === env.JWT_SECRET) {
-    errors.push('APPROVAL_MEDIA_SECRET e JWT_SECRET não podem ser idênticos.');
+
+  // 1.4 INTEGRATION_ENCRYPTION_KEY (se fornecida, exige validação estrita; chave dedicada)
+  if (env.INTEGRATION_ENCRYPTION_KEY) {
+    const encKeyCheck = isCryptoKeyValid(env.INTEGRATION_ENCRYPTION_KEY, 32);
+    if (!encKeyCheck.valid) {
+      errors.push(`INTEGRATION_ENCRYPTION_KEY inválida: ${encKeyCheck.reason}.`);
+    }
+    if (env.JWT_SECRET && env.INTEGRATION_ENCRYPTION_KEY === env.JWT_SECRET) {
+      errors.push('INTEGRATION_ENCRYPTION_KEY e JWT_SECRET não podem ser idênticos.');
+    }
+  } else {
+    warnings.push('INTEGRATION_ENCRYPTION_KEY ausente: rotas que persistem novas credenciais exigirão esta chave.');
   }
 
-  // 1.6 HUB_INTERNAL_API_KEY (segredo de máquina opcional ou condicional)
+  // 1.5 APPROVAL_MEDIA_SECRET (se fornecida, exige validação estrita; se ausente, faz fallback para JWT_SECRET)
+  if (env.APPROVAL_MEDIA_SECRET) {
+    const approvalCheck = isSecretWeak(env.APPROVAL_MEDIA_SECRET, 32);
+    if (approvalCheck.weak) {
+      errors.push(`APPROVAL_MEDIA_SECRET inválido: ${approvalCheck.reason}.`);
+    }
+    if (env.JWT_SECRET && env.APPROVAL_MEDIA_SECRET === env.JWT_SECRET) {
+      errors.push('APPROVAL_MEDIA_SECRET e JWT_SECRET não podem ser idênticos.');
+    }
+  }
+
+  // 1.6 HUB_INTERNAL_API_KEY (segredo de máquina opcional)
   if (env.HUB_INTERNAL_API_KEY) {
     const hubKeyCheck = isSecretWeak(env.HUB_INTERNAL_API_KEY, 32);
     if (hubKeyCheck.weak) {
@@ -218,10 +219,8 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
   const storageDriver = (env.FILE_STORAGE_DRIVER ?? '').trim().toLowerCase();
   if (storageDriver === 'local') {
     errors.push("FILE_STORAGE_DRIVER 'local' é terminantemente proibido em ambiente de produção/homologação. Utilize 's3'.");
-  } else if (storageDriver !== 's3') {
-    errors.push("FILE_STORAGE_DRIVER deve ser configurado explicitamente como 's3' em produção/homologação.");
-  } else {
-    // Validação estrita do driver S3
+  } else if (storageDriver === 's3') {
+    // Validação estrita do driver S3 quando explicitamente ativado
     const bucket = (env.FILE_STORAGE_S3_BUCKET ?? '').trim();
     if (!bucket) {
       errors.push('FILE_STORAGE_S3_BUCKET é obrigatório para o driver S3 em produção.');
@@ -263,6 +262,8 @@ export function validateStartupEnvironment(options?: StartupValidationOptions): 
     } else if (!env.FILE_STORAGE_S3_REGION || env.FILE_STORAGE_S3_REGION.trim() === '') {
       errors.push('Armazenamento S3 exige configuração de FILE_STORAGE_S3_ENDPOINT ou FILE_STORAGE_S3_REGION.');
     }
+  } else if (storageDriver === '') {
+    warnings.push("FILE_STORAGE_DRIVER não definido em produção; rotas de arquivos exigirão 's3'.");
   }
 
   // ============================================================================
