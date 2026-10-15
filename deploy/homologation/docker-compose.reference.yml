@@ -6,14 +6,22 @@
 #             (o endereço permanece planejado e NÃO deve ser configurado nesta sessão).
 #
 # REGRAS DE SEGURANÇA E CONFORMIDADE:
-#   1. Zero senhas ou URLs padrão inseguras (DEC-HML-009 / P12 resolvida).
-#   2. Variáveis obrigatórias exigidas explicitamente conforme o startup-validator (HM-4a/HM-4b).
-#   3. Armazenamento S3 privado com HTTPS obrigatório em produção/homologação (Cloudflare R2).
-#   4. Segregação estrita de segredos criptográficos dedicados.
-#   5. Todas as integrações, sincronizadores e coletores desligados por padrão (false).
-#   6. PostgreSQL e API sem exposição direta de portas ao host/internet (somente rede interna).
-#   7. Imagens referenciadas exclusivamente por digests imutáveis (@sha256:<64 hex>).
-#   8. Limites definitivos de CPU e RAM não fixados aqui (objeto da etapa H7).
+#   1. Zero senhas ou URLs padrão inseguras (DEC-HML-009 / P12 resolvida). O Compose
+#      exige a presença das variáveis obrigatórias via interpolação ${VAR:?mensagem},
+#      falhando fechado caso estejam vazias ou ausentes.
+#   2. A validação de força, entropia, segregação de segredos criptográficos e regras
+#      de driver S3 é realizada de forma estrita pelo startup-validator no boot da API.
+#   3. A validação do formato de digest imutável (@sha256:<64 hex>) das imagens deve ser
+#      executada antes da subida pelo script scripts/homologation/validate-immutable-images.sh.
+#   4. Armazenamento S3 privado com HTTPS obrigatório em produção/homologação (Cloudflare R2).
+#   5. Segregação estrita de segredos criptográficos dedicados.
+#   6. Todas as integrações, sincronizadores e coletores desligados por padrão (false).
+#      A HM-4b comprovou a ausência de chamadas HTTP externas especificamente no caminho
+#      do BrightBean desconectado, não sendo uma prova global de todos os serviços.
+#   7. PostgreSQL e API sem exposição de portas ao host ou à internet (somente rede interna).
+#   8. O serviço Web Nginx escuta exclusivamente no loopback do host (127.0.0.1). O roteamento
+#      público definitivo via proxy reverso (Traefik/EasyPanel) depende da topologia da H7.
+#   9. Limites definitivos de CPU e RAM não fixados aqui (objeto da etapa H7).
 # ==============================================================================
 
 version: '3.8'
@@ -48,7 +56,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3001
-      # Conexão segura com a base de dados dedicada de homologação (nunca apontar para produção)
+      # Conexão segura com a base de dados dedicada de homologação (compatível com POSTGRES_USER, POSTGRES_PASSWORD e POSTGRES_DB)
       DATABASE_URL: "${DATABASE_URL:?Defina DATABASE_URL com credencial segura e base dedicada de homologacao}"
 
       # Segredos criptográficos obrigatórios e mutuamente exclusivos (HM-4a)
@@ -90,8 +98,9 @@ services:
       API_UPSTREAM: http://api:3001
       NGINX_ENVSUBST_FILTER: API_UPSTREAM
     ports:
-      # Ponto único de entrada: porta mapeada para proxy reverso da VPS (Traefik/EasyPanel) ou ensaios locais
-      - "${WEB_PORT:-8082}:80"
+      # Ponto único de entrada: escuta exclusivamente no loopback do host (127.0.0.1) para ensaios locais e smoke tests.
+      # O roteamento definitivo via Traefik/EasyPanel depende da escolha de topologia H7 (não configurado nesta sessão).
+      - "127.0.0.1:${WEB_PORT:-8082}:80"
     networks:
       - zafira-hub-hml-net
 
