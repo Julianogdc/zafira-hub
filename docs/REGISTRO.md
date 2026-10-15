@@ -36,6 +36,22 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-15 — H7: Consolidação Documental de Capacidade e Decisão de Risco — Antigravity
+- BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
+- CI/EVIDÊNCIA: Execução exclusivamente documental. Sem acesso remoto nem medições nesta sessão. Auditoria das evidências existentes e salvaguardas de governança. `secret-scan` 0 credenciais suspeitas em 568 arquivos (público); `public-guard` 0 detecções operacionais em 662 arquivos.
+- STATUS: concluído (documental; H7 permanece aberta e homologação física NÃO autorizada)
+- O QUE MUDOU:
+  1. `docs/REGISTRO.md` e `docs/ESTADO_ATUAL.md`: registrados DEC-HML-011, dispensa da janela de 7 dias pelo proprietário em favor de proposta de homologação controlada, avaliação das topologias e encerramento de sessão ativa.
+- LIMITES/LACUNAS:
+  - Dados brutos de infraestrutura mantidos fora do repositório público (conforme regras de governança e guarda segura).
+  - Ausência de série temporal contínua de 7 dias; mitigada pela proposta de testes controlados progressivos com critérios objetivos de interrupção imediata.
+  - Definição da topologia final (B vs C vs D) e autorização de deploy físico permanecem pendentes de decisão do proprietário.
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar decisão do proprietário sobre topologia e autorização formal da próxima etapa).
+- PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem acesso a infraestrutura remota, sem alteração de DNS/domínio, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
+- DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
 ### 2026-10-15 — HM-4c: Atualização do Pacote de Homologação e Runbooks de Implantação — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: Validação estrutural do Compose aprovada via `js-yaml` (serviços postgres, api, web; isolamento de portas sem exposição de Postgres/API; porta Web restrita a loopback 127.0.0.1; fail-closed com variáveis obrigatórias vazias); 16/16 testes unitários do `startup-validator` aprovados em 693ms; `validate-immutable-images.sh` validado com rejeição de tags mutáveis (:latest) e aceitação de digests SHA-256; `secret-scan` 0 credenciais suspeitas em 616 arquivos (interno) e 568 arquivos (público); `public-guard` 0 informações operacionais detectadas em 662 arquivos no repositório público.
@@ -81,6 +97,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 - PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
+### DEC-HML-011 — Consolidação Documental de Capacidade e Decisão de Risco de H7 (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Proprietário e Direção Técnica.
+- Problema: consolidar documentalmente as evidências existentes de capacidade do host de hospedagem, avaliar os riscos operacionais decorrentes de contenção de CPU observada no nó de virtualização, formalizar a decisão do proprietário de substituir a espera de 7 dias por uma estratégia de homologação controlada e comparar as topologias físicas B, C e D sem autorizar deploy físico nem encerrar a etapa H7.
+- Decisão: (1) **Consolidação documental de capacidade:**
+  - Registrar que os dados de infraestrutura conhecidos decorrem de relato histórico operacional do proprietário, sem arquivos brutos no Git e sem acesso remoto nesta sessão;
+  - Registrar que, embora indicadores de memória e disco apresentem folga sob determinadas condições de operação, a presença de contenção de CPU no nó de virtualização (CPU steal) impede a classificação da infraestrutura compartilhada como irrestritamente aprovada;
+  - Reconhecer a separação entre capacidade de memória da stack e contenção externa no hipervisor do provedor;
+  (2) **Formalização da exceção de cronograma e homologação controlada:**
+  - Registrar a decisão do proprietário de dispensar a janela prévia de 7 dias de observação passiva contínua em favor de uma estratégia de homologação controlada com salvaguardas estritas;
+  - A decisão dispensa a espera, mas NÃO representa aprovação automática da infraestrutura, aceite irrestrito de riscos, encerramento de H7 nem autorização de implantação física;
+  - Definir que qualquer futura execução de homologação física deverá obedecer a salvaguardas de isolamento absoluto, limites estritos de recursos, testes progressivos, telemetria contínua, critérios objetivos de interrupção imediata, preservação do ambiente de produção e plano de contingência para host dedicado (Topologia D);
+  (3) **Avaliação das topologias:** Topologias B (orquestrador dedicado), C (stack isolada em loopback) e D (host dedicado) permanecem em avaliação técnica; Topologia A (compartilhamento de ambiente produtivo) permanece descartada;
+  (4) Proibições mantidas: proibido acessar infraestrutura remota, criar recursos ou bancos reais, configurar DNS ou subdomínio, executar deploy e declarar H7 concluída.
+- Alternativas consideradas: aguardar 7 dias de observação passiva (dispensado por decisão do proprietário para viabilizar planejamento controlado).
+- Impacto: documentação de governança em `docs/ESTADO_ATUAL.md` e `docs/REGISTRO.md`.
 
 ---
 
