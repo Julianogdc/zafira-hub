@@ -39,7 +39,7 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 ### 2026-10-15 — HM-4b: Modo Desconectado e Inicialização Resiliente do BrightBean (H6) — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: run 38747057275 (https://github.com/Julianogdc/zafira-hub/actions/runs/38747057275), 5/5 SUCCESS; API: 925/925 (46 suites, incl. `brightbean-disconnected.test.ts` 8/8), Web: 102/102, Domain: 123/123, PostgreSQL: 208/208 (duas rodadas), Docker Build Gate OK, Publish Images GHCR OK, Homologation Rehearsal Browser Gates F4 a F8 PASS (F8 125/0, rollback/redeploy OK); Secret Scan OK; Public Guard OK.
-- STATUS: pendente de aceite (aguardando auditoria independente da Direção Técnica)
+- STATUS: concluído (aceite técnico definitivo pela Direção Técnica — DEC-HML-008)
 - O QUE MUDOU:
   1. `brightbean.config.ts`: `resolveBrightBeanApiUrl` atualizada para suportar modo desconectado em `NODE_ENV=production` retornando `null` quando `PUBLICATION_DISPATCH_ENABLED` e `PUBLICATION_METRICS_ENABLED` estão desligados, eliminando o bloqueio de importação de `app.ts` e proibindo qualquer fallback sintético ou localhost em produção (Regras A e B); fail-closed estrito mantido caso publicação ou métricas sejam ativadas sem URL (Regra E).
   2. `brightbean.provider.ts`: `BrightBeanProvider` agora suporta inicialização desacoplada em modo desconectado (`apiBaseUrl: null`), expõe `isConfigured(): boolean`, retorna `{ connected: false, provider: 'BRIGHTBEAN' }` em `getStatus` e falha fechado de forma controlada (`BrightBeanProviderError` com código `BRIGHTBEAN_DISCONNECTED` e status 503) em qualquer operação de escrita/leitura remota, garantindo zero conexões HTTP externas (Regras D e F).
@@ -53,9 +53,41 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
   - Homologação física com Cloudflare R2 real permanece pendente (HM-5/HM-6).
   - Subdomínio de homologação dedicado permanece apenas planejado (não configurado nesta sessão).
   - Credenciais e contas externas continuam não conectadas.
-- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar auditoria independente da Direção Técnica para HM-4b).
+- PRÓXIMA MICROETAPA AUTORIZADA: nenhuma (aguardar autorização formal da próxima etapa pelo proprietário).
 - PROIBIÇÕES ATUAIS: manter proibições permanentes (sem deploy, sem produção, sem VPS/EasyPanel/DNS/Cloudflare, sem banco real, sem alteração de Hub 1.0 ou hub-2.0, sem autorizar aceite por conta própria).
 - DOCUMENTAÇÃO ATUALIZADA: ESTADO_ATUAL / REGISTRO
+
+---
+
+### DEC-HML-008 — Aceite Técnico Definitivo da HM-4b (Modo Desconectado e Inicialização Resiliente — H6) (Direção, 2026-10-15)
+- Data / responsável: 2026-10-15 / Direção Técnica, via proprietário.
+- Problema: auditar e homologar tecnicamente a microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6), verificando se a API inicializa com segurança em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL` com publicação e métricas desligadas, sem fallback para localhost/URLs fictícias em produção, com o provedor desconectado retornando estados e erros controlados (503 `BRIGHTBEAN_DISCONNECTED`), sem chamadas HTTP externas no modo desconectado, com fail-closed estrito mantido caso publicação ou métricas sejam ativadas sem configuração exigida, e com preservação integral do `startup-validator` aprovado na HM-4a e das regras de autorização e isolamento.
+- Decisão: (1) **Aceite técnico definitivo da microetapa HM-4b (Modo Desconectado e Inicialização Resiliente — H6)**, com evidências:
+  - Baseline de código pública: `4feacac` (`feat(integrations): HM-4b modo desconectado e inicializacao resiliente do BrightBean (H6)`);
+  - Baseline de código interna: `fb651a0` (mesmo commit espelhado);
+  - CI oficial consolidado: run 38747057275 (https://github.com/Julianogdc/zafira-hub/actions/runs/38747057275), **5/5 SUCCESS**;
+  - Testes de domínio: 123/123 aprovados;
+  - Testes de API: 925/925 aprovados em 46 suites (incluindo suíte focada de 8 testes em `brightbean-disconnected.test.ts`);
+  - Testes do Web: 102/102 aprovados;
+  - PostgreSQL Integration Gate: 208/208 em duas execuções consecutivas no mesmo banco (`test:integration:db`);
+  - Docker Build Gate: aprovado com container smoke e reverse proxy usando configuração sintética completa;
+  - Publish Images: aprovado com publicação no GHCR e validação por digest pull;
+  - Homologation Rehearsal: Browser Gates F4, F5, F6, F7-1, F7-2, F7-3, F7-4 e **F8 (125 aprovados, 0 falhas)**, staging smoke tests, mecânica de rollback e redeploy com par de imagens de staging;
+  - Resultados auditados e aceitos:
+    1. Inicialização desacoplada da URL BrightBean com publicação e métricas desativadas;
+    2. Ausência de fallback localhost ou URL fictícia no perfil de produção;
+    3. Provedor desconectado com resposta controlada, sem tentativa de chamada HTTP ao BrightBean;
+    4. Operações indisponíveis retornam erro controlado 503 `BRIGHTBEAN_DISCONNECTED`;
+    5. Publicação e métricas ativadas sem configuração exigida continuam falhando fechado;
+    6. Preservação do `startup-validator` da HM-4a e das regras de autorização e isolamento.
+  (2) **Ressalvas não bloqueantes registradas obrigatoriamente:**
+  - *Especificidade dos testes de ausência de rede:* os testes de ausência de chamadas externas são específicos do caminho BrightBean desconectado, não prova global de ausência de tráfego de todos os serviços.
+  - *Smoke test físico pré-deploy:* antes do deploy físico, executar smoke test do processo real em `NODE_ENV=production` sem `BRIGHTBEAN_API_URL`, com configurações globais seguras e publicação/métricas desligadas.
+  - *Armazenamento Cloudflare R2 real:* a homologação física com bucket Cloudflare R2 real permanece pendente (HM-5/HM-6).
+  - *Subdomínio planejado:* o subdomínio de homologação dedicado permanece apenas planejado (não configurado nesta sessão).
+  (3) Proibido: modificar código, testes ou workflows; iniciar HM-4c; executar deploy; acessar VPS, EasyPanel, DNS ou Cloudflare; criar credenciais ou bancos reais; habilitar publicações ou integrações reais.
+- Alternativas consideradas: exigir BrightBean ativo mesmo em homologação sintética (rejeitado por impedir subida isolada do Hub).
+- Impacto: módulos `brightbean.config.ts`, `brightbean.provider.ts`, `brightbean.connector.ts`, `social-publisher.service.ts`, `social-publisher.routes.ts`, `publication-gateway.ts`, `startup-validator.ts` e suítes de teste.
 
 ---
 
