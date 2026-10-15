@@ -9,7 +9,7 @@
 | Última atualização | 2026-10-14 — Antigravity — **HM-3 ajustes complementares executados e submetidos para aceite técnico formal (DEC-HML-004)**; HM-2 aceita definitivamente (DEC-HML-003). Fase 8 não encerrada (Portão F8 aberto; F8-5e não autorizada) |
 | **Sessão ativa** | nenhuma |
 | Branch | `hub-2.1` (nunca trabalhar em `main` ou `hub-2.0`) |
-| **Baseline de código** | `44ee264` no público `Julianogdc/zafira-hub` — HM-3 ajustes complementares: streaming seguro, interrupção S3, leitura limitada de imagens e medições de memória (espelho no interno: `56e7f8f`; workflows e .env.example com diferenças intencionais preservadas) |
+| **Baseline de código** | `bc080ca` no público `Julianogdc/zafira-hub` — HM-3 ajustes complementares: streaming seguro, interrupção S3, leitura limitada de imagens e medições de memória (espelho no interno: `a6ca298`; workflows e .env.example com diferenças intencionais preservadas) |
 | Situação da baseline | **Testes locais 100% aprovados** (API 889/889, Web 102/102, Domain 123/123, typechecks e build verdes). Submetido para validação oficial única no CI. |
 
 "Baseline de código" é o último commit que alterou código. Commits posteriores que só mudam `docs/`, `AGENTS.md`, `CLAUDE.md` ou `GEMINI.md` são esperados. A verificação está em `AGENTS.md`.
