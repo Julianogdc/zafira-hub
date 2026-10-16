@@ -4,6 +4,8 @@ import { assertPasswordConfiguration, seedCoreOrganizations } from './seed-modul
 import { seedTeamsAndClients } from './seed-modules/03-teams-and-clients.mjs';
 import { buildDeliverableMirrorFixture, seedDeliverablesAndMirror } from './seed-modules/04-deliverables-and-mirror.mjs';
 
+import { seedOnboarding, onboardingSteps } from './seed-modules/05-onboarding-workflows.mjs';
+
 // Importing this module never connects. Prisma is loaded/constructed only AFTER validation.
 async function createPrisma(databaseUrl) {
   const { PrismaClient } = await import('@prisma/client');
@@ -16,6 +18,7 @@ export async function runNavigableSeed({ env = process.env, createClient = creat
   const target = assertSafeDatabaseTarget(config);
   assertPasswordConfiguration(config);
   const deliveryFixture = buildDeliverableMirrorFixture(config);
+  onboardingSteps();
   const db = await createClient(config.DATABASE_URL);
   try {
     return await db.$transaction(async (tx) => {
@@ -23,7 +26,8 @@ export async function runNavigableSeed({ env = process.env, createClient = creat
       const core = await seedCoreOrganizations(tx, config);
       const business = await seedTeamsAndClients(tx);
       const delivery = await seedDeliverablesAndMirror(tx, deliveryFixture);
-      return { ...core, business, delivery };
+      const onboarding = await seedOnboarding(tx, config);
+      return { ...core, business, delivery, onboarding };
     }, { isolationLevel: 'Serializable', timeout: 30000 });
   } finally {
     await db.$disconnect();

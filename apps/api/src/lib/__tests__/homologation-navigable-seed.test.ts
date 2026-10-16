@@ -17,6 +17,8 @@ const { ORGANIZATIONS, PEOPLE } = await import(coreUrl.href);
 const { TEAM_CLIENT_FIXTURE, assertTeamClientRelations } = await import(new URL('./seed-modules/03-teams-and-clients.mjs', scriptUrl).href);
 const businessCounts = { client: 5, team: 2, clientContact: 10, clientMeetingNote: 10, teamMember: 2, teamClientAssignment: 3, userClientAssignment: 3 };
 const { buildDeliverableMirrorFixture, assertDeliverableMirrorRelations, DELIVERY_MODELS } = await import(new URL('./seed-modules/04-deliverables-and-mirror.mjs', scriptUrl).href);
+const { buildOnboardingFixture, assertOnboardingRelations, seedOnboarding, ONBOARDING_MODELS, eligibleSyntheticMembers } = await import(new URL('./seed-modules/05-onboarding-workflows.mjs', scriptUrl).href);
+const onboardingCounts = { onboardingTemplate: 1, onboardingTemplateVersion: 1, onboardingStepDefinition: 4, onboardingStepDependency: 3, onboardingEvent: 2, onboardingExecution: 2, onboardingStepRun: 8, onboardingExecutionEvent: 7 };
 const deliveryCounts = { deliverableTemplate: 2, deliverablePlan: 2, deliverableItem: 4, deliverablePiece: 8, deliverableEvent: 24,
   clientIntegration: 2, asanaProjectMirror: 2, asanaTaskMirror: 12, asanaTaskChange: 6, asanaProjectSnapshot: 28 };
 
@@ -35,12 +37,14 @@ function configuration() {
 // rollback is modeled to check orchestration. Not evidence of PostgreSQL execution.
 function memoryDatabase(failAtWrite = Infinity) {
   let state: Record<string, any[]> = { organization: [], user: [], organizationMember: [],
-    ...Object.fromEntries([...Object.keys(TEAM_CLIENT_FIXTURE), ...DELIVERY_MODELS].map((model) => [model, []])) };
+    ...Object.fromEntries([...Object.keys(TEAM_CLIENT_FIXTURE), ...DELIVERY_MODELS, ...ONBOARDING_MODELS, 'organizationConfig'].map((model) => [model, []])) };
   let writes = 0;
   let disconnected = 0;
+  const operations: string[] = [];
   let identity = { database: DATABASE_NAME, username: 'synthetic', schema: 'public' };
   function matches(row: any, where: any): boolean {
     if (where.OR) return where.OR.some((part: any) => matches(row, part));
+    if (where.AND) return where.AND.every((part: any) => matches(row, part));
     for (const key of ['organizationId_userId', 'teamId_organizationMemberId', 'teamId_clientId', 'organizationMemberId_clientId']) {
       if (where[key]) return matches(row, where[key]);
     }
@@ -48,18 +52,20 @@ function memoryDatabase(failAtWrite = Infinity) {
       value && typeof value === 'object' ? value.in.includes(row[key]) : row[key] === value);
   }
   return {
-    get state() { return state; }, get writes() { return writes; }, get disconnected() { return disconnected; },
+    get state() { return state; }, get writes() { return writes; }, get disconnected() { return disconnected; }, operations,
     set identity(value: typeof identity) { identity = value; },
     async $transaction(action: any, options: any) {
       assert.equal(options.isolationLevel, 'Serializable');
       const draft = structuredClone(state);
       const tx: any = { $queryRaw: async () => [identity] };
+      const record = (model: string, operation: string) => { operations.push(model + '.' + operation); writes++; if (writes === failAtWrite) throw new Error('Injected write failure'); };
       for (const model of Object.keys(draft)) {
         tx[model] = {
+          create: async ({ data }: any) => { record(model, 'create'); draft[model].push(structuredClone(data)); return data; },
+          update: async ({ where, data }: any) => { record(model, 'update'); const row = draft[model].find((r) => matches(r, where)); if (!row) throw new Error('Missing update target'); Object.assign(row, structuredClone(data)); return row; },
           findMany: async ({ where }: any) => structuredClone(draft[model].filter((row) => matches(row, where))),
           upsert: async ({ where, create, update }: any) => {
-            writes++;
-            if (writes === failAtWrite) throw new Error('Injected write failure');
+            record(model, 'upsert');
             const found = draft[model].find((row) => matches(row, where));
             if (found) { Object.assign(found, update); return found; }
             if (draft[model].some((row) => (create.id !== undefined && row.id === create.id) ||
@@ -153,7 +159,7 @@ test('H4-B.1 two runs preserve exact state, foreign records and disjoint tenants
   db.state.organization.push({ id: 'unrelated', slug: 'unrelated', name: 'Untouched sentinel' });
   db.state.user.push({ id: 'unrelated', email: 'sentinel@zafira.invalid', name: 'Untouched sentinel' });
   const foreign = structuredClone(db.state);
-  assert.deepEqual(await runNavigableSeed({ env, createClient: () => db }), { organizations: 2, users: 6, memberships: 6, business: businessCounts, delivery: deliveryCounts });
+  assert.deepEqual(await runNavigableSeed({ env, createClient: () => db }), { organizations: 2, users: 6, memberships: 6, business: businessCounts, delivery: deliveryCounts, onboarding: onboardingCounts });
   const firstRun = structuredClone(db.state);
   await runNavigableSeed({ env, createClient: () => db });
   assert.deepEqual(db.state, firstRun);
@@ -398,4 +404,128 @@ test('H4-B.3 final snapshot failure rolls back all four modules', async () => {
   const db = memoryDatabase(total); const before = structuredClone(db.state);
   await assert.rejects(runNavigableSeed({ env: configuration(), createClient: () => db }), /Injected write failure/);
   assert.deepEqual(db.state, before);
+});
+
+
+test('H4-B.4 uses domain progress, immutable publication and one synthetic tenant', () => {
+  const f = buildOnboardingFixture(configuration());
+  assert.deepEqual(Object.fromEntries(ONBOARDING_MODELS.map((m: string) => [m, f[m].length])), onboardingCounts);
+  assert.equal(f.onboardingTemplateVersion[0].status, 'PUBLISHED');
+  assert.deepEqual(f.onboardingExecution.map((e: any) => e.clientId), [TEAM_CLIENT_FIXTURE.client[1].id, TEAM_CLIENT_FIXTURE.client[0].id]);
+  assert.deepEqual(f.onboardingStepRun.slice(0, 4).map((r: any) => r.status), ['DONE', 'DONE', 'IN_PROGRESS', 'WAITING']);
+  assert.deepEqual(f.onboardingStepRun.slice(4).map((r: any) => r.status), ['READY', 'WAITING', 'WAITING', 'WAITING']);
+  for (const rows of Object.values(f) as any[][]) assert.ok(rows.every((r) => r.organizationId === ORGANIZATIONS[0].id));
+  assert.ok(f.onboardingStepRun.every((r: any) => !r.evidenceLink && !r.calendarEventId && !r.completedBySystem));
+  assert.ok(f.onboardingStepRun.filter((r: any) => r.status === 'WAITING').every((r: any) => !r.releasedAt && !r.dueDate));
+});
+
+test('H4-B.4 release deadlines follow business days, org timezone and month boundary', () => {
+  const env = { ...configuration(), HML_SEED_REFERENCE_DATE: '2026-10-30' }; // Friday
+  const f = buildOnboardingFixture(env, 'America/Sao_Paulo');
+  assert.equal(f.onboardingStepRun[4].dueDate.toISOString().slice(0, 10), '2026-11-02');
+  // Friday 15 UTC is Saturday in Pacific/Kiritimati: domain rolls weekend then adds a business day.
+  const changed = buildOnboardingFixture(env, 'Pacific/Kiritimati');
+  assert.equal(changed.onboardingStepRun[4].dueDate.toISOString().slice(0, 10), '2026-11-03');
+  assert.throws(() => buildOnboardingFixture(env, 'Invalid/Timezone'), /ONBOARDING_TIMEZONE/);
+});
+
+test('H4-B.4 publishes new draft in order; exact rerun performs no onboarding write', async () => {
+  const db = memoryDatabase(), env = configuration();
+  await runNavigableSeed({ env, createClient: () => db });
+  const ordered = db.operations.filter((v) => v.startsWith('onboarding'));
+  assert.deepEqual(ordered.slice(0, 2), ['onboardingTemplate.create', 'onboardingTemplateVersion.create']);
+  assert.ok(ordered.indexOf('onboardingStepDependency.create') < ordered.indexOf('onboardingTemplateVersion.update'));
+  assert.ok(ordered.indexOf('onboardingTemplateVersion.update') < ordered.indexOf('onboardingExecution.create'));
+  const first = structuredClone(db.state), count = db.operations.length;
+  await runNavigableSeed({ env, createClient: () => db });
+  assert.deepEqual(db.state, first);
+  assert.equal(db.operations.slice(count).filter((v) => v.startsWith('onboarding')).length, 0);
+});
+
+for (const model of ONBOARDING_MODELS) {
+  test('H4-B.4 refuses immutable payload collision in ' + model + ' and preserves every module', async () => {
+    const db = memoryDatabase(), env = configuration();
+    await runNavigableSeed({ env, createClient: () => db });
+    db.state[model][0].organizationId = ORGANIZATIONS[1].id;
+    const before = structuredClone(db.state);
+    await assert.rejects(runNavigableSeed({ env, createClient: () => db }), /ONBOARDING_COLLISION/);
+    assert.deepEqual(db.state, before);
+  });
+}
+
+for (const model of ['onboardingTemplate', 'onboardingTemplateVersion', 'onboardingStepDefinition', 'onboardingExecution', 'onboardingStepRun']) {
+  test('H4-B.4 rejects alternate identity collision in ' + model, async () => {
+    const db = memoryDatabase(), env = configuration();
+    const f = buildOnboardingFixture(env);
+    db.state[model].push({ ...f[model][0], id: 'foreign-id' });
+    const before = structuredClone(db.state);
+    await assert.rejects(runNavigableSeed({ env, createClient: () => db }), /ONBOARDING_COLLISION/);
+    assert.deepEqual(db.state, before);
+  });
+}
+
+test('H4-B.4 partial published state is refused instead of repaired', async () => {
+  const db = memoryDatabase(), env = configuration();
+  db.state.onboardingTemplate.push({ ...buildOnboardingFixture(env).onboardingTemplate[0] });
+  await assert.rejects(runNavigableSeed({ env, createClient: () => db }), /ONBOARDING_PARTIAL_STATE/);
+  assert.equal(db.state.onboardingTemplateVersion.length, 0);
+});
+
+for (const change of ['timezone', 'date', 'status', 'evidence', 'member']) {
+  test('H4-B.4 refuses changed ' + change + ' without resetting human state', async () => {
+    const db = memoryDatabase(), env = configuration(); await runNavigableSeed({ env, createClient: () => db });
+    if (change === 'timezone') db.state.organizationConfig.push({ organizationId: ORGANIZATIONS[0].id, timezone: 'UTC' });
+    if (change === 'date') env.HML_SEED_REFERENCE_DATE = '2026-10-16';
+    if (change === 'status') db.state.onboardingStepRun[2].status = 'DONE';
+    if (change === 'evidence') db.state.onboardingStepRun[0].evidenceNote = 'Interacao sintetica posterior';
+    if (change === 'member') db.state.onboardingStepRun[2].assigneeMemberId = PEOPLE[5].membershipId;
+    const before = structuredClone(db.state);
+    await assert.rejects(runNavigableSeed({ env, createClient: () => db }), /COLLISION/);
+    assert.deepEqual(db.state, before);
+  });
+}
+
+for (const change of ['client', 'version', 'actor', 'assignee', 'dependency', 'cycle', 'evidence']) {
+  test('H4-B.4 graph refuses invalid ' + change + ' before writing', () => {
+    const f = structuredClone(buildOnboardingFixture(configuration()));
+    if (change === 'client') f.onboardingExecution[0].clientId = TEAM_CLIENT_FIXTURE.client[4].id;
+    if (change === 'version') f.onboardingStepRun[0].versionId = 'foreign-version';
+    if (change === 'actor') f.onboardingExecutionEvent[0].actorUserId = PEOPLE[4].id;
+    if (change === 'assignee') f.onboardingStepRun[2].assigneeMemberId = PEOPLE[5].membershipId;
+    if (change === 'dependency') f.onboardingStepDependency[0].dependsOnStepKey = 'missing';
+    if (change === 'cycle') f.onboardingStepDependency.push({ ...f.onboardingStepDependency[0], stepKey: 'briefing', dependsOnStepKey: 'acessos' });
+    if (change === 'evidence') f.onboardingStepRun[0].evidenceNote = null;
+    assert.throws(() => assertOnboardingRelations(f), /ONBOARDING/);
+  });
+}
+
+test('H4-B.4 preserves sentinels outside every new identity scope', async () => {
+  const db = memoryDatabase(), env = configuration();
+  for (const model of ONBOARDING_MODELS) db.state[model].push({ id: 'foreign', organizationId: 'foreign', versionId: 'foreign', executionId: 'foreign', templateId: 'foreign', stepKey: 'foreign' });
+  await runNavigableSeed({ env, createClient: () => db });
+  const first = structuredClone(db.state); await runNavigableSeed({ env, createClient: () => db });
+  assert.deepEqual(db.state, first);
+  for (const model of ONBOARDING_MODELS) assert.equal(db.state[model][0].organizationId, 'foreign');
+});
+
+test('H4-B.4 failure on final event rolls back core, business, delivery and onboarding', async () => {
+  const probe = memoryDatabase(), env = configuration(); await runNavigableSeed({ env, createClient: () => probe });
+  assert.equal(probe.operations.at(-1), 'onboardingExecutionEvent.create');
+  const db = memoryDatabase(probe.writes);
+  await assert.rejects(runNavigableSeed({ env, createClient: () => db }), /Injected/);
+  assert.ok(Object.values(db.state).every((rows: any) => rows.length === 0));
+});
+
+test('H4-B.4 actual inactive participants and missing local project block preflight', async () => {
+  for (const change of ['user', 'organizationMember', 'team', 'link']) {
+    const db = memoryDatabase(), env = configuration(); await runNavigableSeed({ env, createClient: () => db });
+    if (change === 'user') db.state.user[1].status = 'SUSPENDED';
+    if (change === 'organizationMember') db.state.organizationMember[1].status = 'SUSPENDED';
+    if (change === 'team') db.state.team[0].isActive = false;
+    if (change === 'link') db.state.clientIntegration.splice(0, 1);
+    const before = structuredClone(db.state);
+    // Direct module preflight isolates its own refusal from earlier modules' stronger checks.
+    await assert.rejects(db.$transaction((tx: any) => seedOnboarding(tx, env), { isolationLevel: 'Serializable' }), /ONBOARDING/);
+    assert.deepEqual(db.state, before);
+  }
 });

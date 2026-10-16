@@ -36,6 +36,14 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-16 — Preparação local saneada H4-B.4 — Codex
+- Escopo: módulo 05 de onboarding sintético, integração mínima no orquestrador e suíte existente; um modelo e duas execuções 50%/0%, sem código de produto ou dados reais.
+- STATUS: candidata preparada localmente; publicação, CI próprio e aceite ainda pendentes. O run 38903303623 é da versão anterior 499b88a.
+- Integridade: baselines públicas históricas 4feacac/e547ff2 preservadas; nenhum commit privado importado. Workflows, pacote e Mapa intactos. Governança/evidências completas permanecem privadas.
+- Próximo passo: revisão de SHA/manifesto e autorização específica antes de publicar ou executar nova rodada. Sem deploy ou custos adicionais. Sessão liberada: nenhuma.
+
+---
+
 ### 2026-10-16 — CI-PUB-PREP — Codex — candidata local, não publicada
 - BASELINE: aplicação pública 4feacac95b474d980f94d74912c8207462f221eb / pacote e547ff2 preservados; base da preparação 73b42c6346412849e9127fd8d0347583c5030f9a.
 - STATUS: preparação local autorizada em DEC-CI-003; aceite e CI pendentes. Nenhum CI histórico atribuído a esta árvore.
