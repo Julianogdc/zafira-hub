@@ -36,6 +36,24 @@ Cronologia de execuções e decisões do projeto. **Entradas mais recentes no to
 
 ---
 
+### 2026-10-16 — CI-PUB-PREP — Codex — candidata local, não publicada
+- BASELINE: aplicação pública 4feacac95b474d980f94d74912c8207462f221eb / pacote e547ff2 preservados; base da preparação 73b42c6346412849e9127fd8d0347583c5030f9a.
+- STATUS: preparação local autorizada em DEC-CI-003; aceite e CI pendentes. Nenhum CI histórico atribuído a esta árvore.
+- O QUE MUDOU: massa sintética navegável H4-B.1–3 (orquestrador, módulos 01–04 e testes); protótipo de coordenação somente leitura/simulação, testes, regras e pontes compartilhadas. Um passo no quality passa a executar seus testes, preservando os cinco jobs e todos os gates existentes. Nenhuma mudança de produto, schema/migrations, pacote ou integração real.
+- EVIDÊNCIA: resultados locais, SHA e manifesto por arquivo disponíveis na governança privada para revisão. Nenhum teste de banco físico ou CI executado nesta preparação; suítes locais não são CI 5/5. O protótipo não lança agentes ou inferência, e não opera neste remote público.
+- PRÓXIMA AÇÃO: revisão e autorização específica do proprietário sobre manifesto/SHA antes de push, publicação de imagens e rodada pública. Sem remote nesta cópia de preparo; não adicionar por iniciativa própria.
+- LIMITES: sem baselines avançadas, aceite de produto, acesso real, custos, deploy, permissões/visibilidade ou H4-B.4. Detalhes reservados e correspondência de commits somente no registro privado.
+- SESSÃO: handoff local preparado; sessão pública livre (nenhuma). Estado oficial da sessão controlado no privado.
+
+### DEC-CI-003 — Preparação local saneada aprovada; publicação depende de decisão posterior
+- Data / responsável: 2026-10-16 / proprietário, formalização por Codex.
+- Decisão: preparar localmente uma candidata descendente da árvore pública existente, por allowlist, preservando guardas e saneamentos. GOV-MA mantém EXECUTION_ENABLED=false; validar seus testes no quality existente. Nenhuma autorização de publicação, CI, imagens, permissões, infraestrutura ou custos nesta decisão.
+- Evidências/impactos: diff e manifesto privados revisáveis; versões públicas derivadas e código sintético, sem governança integral ou histórico privado. DEC-CI-001 continua vigente em seu alcance específico; nenhuma rodada consumida.
+- Revisão: após resultados locais, proprietário decide sobre SHA e manifesto concretos; falha de guarda, equivalência ou portão impede publicação/aceite.
+
+---
+
+
 ### 2026-10-15 — H4-A: Auditoria dos Dados Sintéticos e Planejamento da Massa Navegável — Antigravity
 - BASELINE (commit): `4feacac` (público) / `fb651a0` (interno)
 - CI/EVIDÊNCIA: Execução exclusivamente documental. Sem acesso remoto nem execução de seeds nesta sessão. Auditoria dos scripts de seed (`seed.ts`, `seed-multiorg-gate.mjs`, `seed-f6-gate.mjs`, `seed-f7-gate.mjs`, `seed-f7-exec-gate.mjs`), fixtures dos Browser Gates F4 a F8 e modelos Prisma. `secret-scan` 0 credenciais suspeitas em 568 arquivos (público); `public-guard` aprovado com 0 ocorrências operacionais no público.

@@ -89,6 +89,9 @@ jobs:
       - name: Unit Tests
         run: npm test
 
+      - name: Local Coordination Safety Tests
+        run: node --test scripts/coordination/coordinator.test.mjs
+
       - name: Unit Tests (Web)
         run: npm run test:web
 

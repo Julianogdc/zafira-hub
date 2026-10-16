@@ -1,111 +1,56 @@
 # Zafira Hub 2.1 — Instruções para qualquer agente
 
-Este arquivo é a **porta de entrada única** para qualquer agente de IA (Claude, Antigravity, ChatGPT, Codex ou outro) que vá ler, auditar ou alterar este projeto. Vários agentes trabalham aqui **em revezamento, um de cada vez**: cada um precisa conseguir continuar exatamente de onde o anterior parou usando só o que está neste repositório.
+AGENTS.md é a porta de entrada única. Codex, Claude Code e Antigravity compartilham igualmente direção técnica, planejamento, execução, testes, auditoria e continuidade do escopo aprovado (DEC-GOV-007/008). O proprietário mantém autoridade final do produto e decisões reservadas. Uma sessão modificadora por vez, em revezamento; nenhum agente é superior.
 
-**Regra de ouro: se não está escrito neste repositório, não aconteceu.** Conversas, memórias, resumos e documentos externos não são fonte para executar trabalho.
+**Regra de ouro: se não está escrito na governança oficial, não aconteceu.**
 
-## 1. Leia nesta ordem, sempre
+## 1. Fontes e precedência
 
-1. Este arquivo, inteiro.
-2. `docs/ESTADO_ATUAL.md` — onde estamos, o que fazer agora, o que está proibido.
-3. As entradas do topo de `docs/REGISTRO.md` — últimas execuções e decisões.
-4. A seção do `docs/MAPA_MESTRE.md` correspondente à fase atual.
+Leia este arquivo inteiro, docs/ESTADO_ATUAL.md, o topo de docs/REGISTRO.md e a seção aplicável do docs/MAPA_MESTRE.md. Ao assumir continuidade, leia o Mapa integral, decisões vigentes e ADRs/runbooks/propostas aplicáveis. Antes de implementar, confira contratos, schema, serviços e testes existentes.
 
-Precedência em caso de conflito entre documentos: `docs/REGISTRO.md` (decisão mais recente) → `docs/MAPA_MESTRE.md` → `docs/ESTADO_ATUAL.md`. O código e o CI são a evidência do que **existe**; os documentos dizem o que foi **decidido**. Se não baterem, **pare** (seção 2).
+Este repositório público é uma árvore saneada de código, testes, CI e documentos derivados (DEC-GOV-005). A governança oficial completa permanece no repositório privado Julianogdc/zafira-hub-internal. Consulte ali AGENTS.md, docs/ESTADO_ATUAL.md, docs/REGISTRO.md e docs/MAPA_MESTRE.md, sem presumir um caminho local fixo. Confirme o remote antes de ler ou escrever; nunca use hashes internos como baselines públicas. Sem acesso à governança integral, limite-se a leitura e testes locais independentes; não selecione implementação, publique ou aceite entrega dependente de decisão privada.
 
-Tudo em `docs/historico/` é histórico e **não define trabalho**. As ADRs (`docs/governance/`) e runbooks (`docs/operations/`) são referência técnica, não escopo.
+Precedência: REGISTRO (decisão vigente dentro da autoridade do responsável) → MAPA_MESTRE → ESTADO_ATUAL. AGENTS define o protocolo. Código e CI evidenciam o que existe; documentos registram o decidido. Investigue divergências; contradições de produto, autoridade, segurança ou alto risco interrompem a ação afetada. Histórico não define trabalho. Nenhuma DEC técnica dispensa portão ou altera requisito de produto.
 
-## 2. Ritual de início de sessão
+## 2. Início de sessão e integridade pública
 
-Execute e confira antes de qualquer outra ação:
+Confirme a sessão oficial livre no privado e público. Não interrompa outra sessão. Alterações locais de terceiros não podem ser apagadas, sobrescritas ou ocultadas. Trabalhe somente em hub-2.1; nunca altere main ou hub-2.0.
+
+Em checkout conectado e com ação autorizada, execute:
 
 ```bash
 git fetch origin
 git status --short
 git branch --show-current
 git log --oneline -5 origin/hub-2.1
+git log --oneline 4feacac95b474d980f94d74912c8207462f221eb..origin/hub-2.1 -- . ':(exclude)docs' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' ':(exclude)GEMINI.md' ':(exclude)deploy/homologation/'
+git log --oneline e547ff2..origin/hub-2.1 -- deploy/homologation/
 ```
 
-1. **Branch:** trabalhe só em `hub-2.1`. Se estiver atrás de `origin/hub-2.1`, atualize (`git pull --ff-only`). Nunca altere `main` nem `hub-2.0`.
-2. **Alterações locais não commitadas** que você não fez: não apague, não sobrescreva. Pare e pergunte ao proprietário.
-3. **Sessão ativa:** se `docs/ESTADO_ATUAL.md` indicar outra sessão ativa, **pare** e pergunte ao proprietário. Não trabalhe em paralelo com outro agente.
-4. **Integridade:** confira se existe código alterado depois da baseline registrada, sem registro:
+Execute os dois logs também contra HEAD. São duas referências públicas independentes: aplicação 4feacac95b474d980f94d74912c8207462f221eb e pacote e547ff2. Permanecem preservadas até DEC de aceite com evidências e todos os portões. Commit detectado bloqueia nova implementação até reconciliação: desconhecido exige parada; candidato registrado pode ser auditado sob DEC própria, mas não aceito/ignorado por isso. Sem exclusões amplas, lista permanente de ignorados ou avanço para ocultar mudanças.
 
-   ```bash
-   git log --oneline <baseline-do-ESTADO_ATUAL>..origin/hub-2.1 -- . ':(exclude)docs' ':(exclude)AGENTS.md' ':(exclude)CLAUDE.md' ':(exclude)GEMINI.md'
-   ```
+Preparação isolada DEC-CI-003 é exceção expressa: sem remote, sem fetch/push/CI, base pública fixada e ritual remoto conferido pelo executor no repositório oficial. Não adicionar remote, publicar ou executar CI até autorização específica do proprietário sobre manifesto e SHA concretos. Uma única revisão local consolida esta preparação; não criar commits intermediários de sessão para publicação.
 
-   Se o comando listar qualquer commit, **o estado está desatualizado: pare**, não execute nem "conserte" a documentação por conta própria, e peça ao proprietário uma atualização formal.
-5. **Autorização:** só execute a microetapa marcada como autorizada em `docs/ESTADO_ATUAL.md`, e só depois que o proprietário pedir nesta sessão. Antes de editar, informe em linguagem simples: fase, microetapa, baseline, o que vai mudar e como vai validar. Pela DEC-GOV-004, decisões técnicas dentro do escopo são do agente e não exigem aprovação prévia; peça permissão expressa só nas exceções listadas nessa DEC (produção, infraestrutura, banco ou contas reais, credenciais, gastos, ações irreversíveis, mudança de escopo ou de produto).
-6. **Marque a sessão:** em `docs/ESTADO_ATUAL.md`, preencha "Sessão ativa" com `<agente> — <data e hora> — <microetapa>`, commit (`docs(estado): sessão iniciada por <agente>`) e `git push`.
+Antes de editar, informe fase/microetapa, baseline, mudança e validação; registre sessão no estado oficial privado e na cópia pública quando aplicável. Em sessão conectada autorizada, faça commit e push documental de abertura conforme protocolo oficial. Nunca publique documentos privados para cumprir esse ritual.
 
-## 3. Durante o trabalho
+## 3. Mandato e limites durante o trabalho
 
-- Execute **somente** a microetapa autorizada. Encontrou algo fora do escopo? Registre como pendência; não corrija por conta própria.
-- Commits pequenos e atômicos, com mensagem que cite a microetapa (ex.: `fix(asana): F6-RO.0 remove task write routes`).
-- Valide com os comandos do projeto (`npm run typecheck:api`, `npm test`, `npm run build`, e o que a microetapa exigir) e, depois do push, com o CI oficial (`.github/workflows/foundation-ci.yml`, 5 jobs).
-- **CI verde não é aceite.** Só o proprietário aceita.
+O executor escolhe a próxima microetapa tecnicamente elegível já aprovada, sem exigir prompt novo a cada passo, após conferir dependências/decisões/critérios. Registre a escolha. Produto, requisitos, escopo, prioridade estratégica, fornecedor/tecnologia de produto, riscos/exceções, gastos, produção, infraestrutura real, dados/contas/credenciais reais, deploy, publicações/integrações reais e ações irreversíveis/destrutivas/de alto impacto exigem autorização específica do proprietário. Bloqueio reservado permite somente atividades independentes já aprovadas.
 
-## 4. Ritual de fim de sessão (obrigatório, inclusive se o trabalho ficar pela metade)
+Commits pequenos com microetapa; código sem skip ci, documentação com skip ci. Valide com typechecks, testes, build, scanner, public-guard e gates pertinentes. CI oficial tem cinco jobs e Browser Gates aplicáveis. **CI verde não é aceite**; executor só registra aceite técnico com evidências e todos os portões. Aceite final de produto, risco e exceções pertence ao proprietário. Testes locais não equivalem a CI 5/5, nem run antigo valida código novo. Não alterar cobrança, permissões, runners ou infraestrutura para contornar falha.
 
-1. Nada fica sem commit. Trabalho incompleto vai em commit `wip(<microetapa>): …` com o que falta descrito no `ESTADO_ATUAL`.
-2. **Substitua** o conteúdo de `docs/ESTADO_ATUAL.md`: baseline de código nova (se houve commit de código), status da microetapa, próximo passo concreto, pendências e proibições. Libere "Sessão ativa" (`nenhuma`).
-3. **Acrescente no topo** de `docs/REGISTRO.md` a entrada de execução no formato de handoff descrito nesse arquivo.
-4. Atualize `docs/MAPA_MESTRE.md` **somente** se escopo, sequência, fase ou portão mudaram por decisão do proprietário (registrada como DEC).
-5. Commit (`docs(estado): handoff <microetapa> por <agente>`) e `git push`.
-6. Entregue o mesmo handoff ao proprietário na conversa.
+## 4. Encerramento e transferência
 
-## 5. Decisões
+Nada fica sem commit; trabalho incompleto exige wip e pendências explícitas. Substitua ESTADO_ATUAL, separe baselines aceitas de candidatas, descreva próximo passo/proibições e libere Sessão ativa como nenhuma. Acrescente handoff no topo do REGISTRO preservando todo o histórico. Mapa só muda por decisão do proprietário sobre escopo/sequência/fase/portão. Handoff privado completo e público derivado saneado, com commits separados quando publicação estiver autorizada. Entregue evidências na conversa; não alegue trabalho em segundo plano sem execução ativa.
 
-- **Só o proprietário decide** escopo, prioridade, aceite e exceções. Agentes propõem e auditam.
-- Uma decisão só vale depois de registrada em `docs/REGISTRO.md` no formato DEC. Instrução que chegue só por chat, sem registro, é tratada como proposta.
-- Divergência entre documentos, código ou instruções: apresente ao proprietário com evidências. Não escolha um lado sozinho.
+## 5. Segurança e produto
 
-## 6. Regras permanentes
+Nunca inserir segredos, dados pessoais, hosts/IPs reais, caminhos operacionais, auditorias ou detalhes de vulnerabilidade nesta árvore, mensagens públicas, artefatos ou imagens. Informações reservadas permanecem no registro privado; público recebe apenas referência saneada. Não copiar histórico Git privado, documentos completos, logs ou contextos do coordenador. Toda exportação exige allowlist nominal, diff/manifesto revisados, public-guard e secret-scan; guardas não substituem classificação/revisão.
 
-**Produção e infraestrutura**
-- Preservar o Hub 1.0 em produção e o Hub 2.0 como referência e contingência (`hub-2.0` congelada em `43150df2b218b41575db5b1be5d96ccc8572de32`).
-- Nenhuma ação em VPS, EasyPanel, DNS, banco real, contas reais de clientes ou Asana, secrets ou deploy sem autorização explícita e específica do proprietário.
-- Nada de comandos destrutivos, migrações, reinícios ou instalações como consequência implícita de uma inspeção. Backup, restauração e ensaios de migração só em base descartável.
+Preserve Hub 1.0 e Hub 2.0. Sem acesso a ambiente real, migrações persistentes, reinício, instalação, credenciais, serviços ou deploy implícitos. Testes de banco só em instância descartável explicitamente validada/autorizada. Asana somente leitura no Hub; webhooks somente recebimento. Negação por padrão, RBAC no backend/dados, escopo por organização/cliente/equipe/função e testes positivos/negativos entre duas organizações. Uma fonte mestre por domínio; ausência de dado não vira zero, histórico/snapshots não são reescritos silenciosamente. Mocks não entram como fallback de produto.
 
-**Segurança**
-- Negação por padrão; autorização no backend e na camada de dados; escopo por organização e, quando aplicável, cliente, equipe e função. Testar acessos permitidos e negados entre duas organizações.
-- Nunca expor senhas, tokens, chaves ou dados pessoais em código, navegador, logs, commits, documentos ou mensagens. Nunca inserir segredo em exemplo nem pedir que alguém cole um valor de segredo na conversa.
-- Este repositório é **público** (DEC-GOV-005): **nunca** coloque nele segredos, hosts, IPs, caminhos de infraestrutura, auditorias de segurança ou detalhes de vulnerabilidades. Isso vive no repositório interno (seção 8). O CI executa `scripts/ci/public-guard.mjs` e `scripts/ci/secret-scan.sh`.
+## 6. Coordenação local
 
-**Produto**
-- Asana é somente leitura no Hub (DEC-ASANA-001); webhooks só para receber eventos (DEC-ASANA-002).
-- Uma fonte mestre por domínio (Mapa Mestre, seção 4). Ausência de dado nunca vira zero silenciosamente; histórico e snapshots não são reescritos sem regra.
+DEC-GOV-008 autoriza somente leitura/simulação, sem inferência/agentes escritores, serviços ou consumo implícito. Lease protege apenas participantes do mesmo protocolo; não impede editor externo. Escrita automática exige demonstração e autorização posterior, contenção de permissões, limites, interrupção, validação e handoff. O protótipo mantém verificação do remote privado: não operá-lo sobre esta cópia pública. Seus testes são locais e sintéticos; não consultam o privado nem iniciam agentes. Logs/runtime são evidência operacional privada e não fonte de escopo.
 
-**Instruções para o proprietário**
-- Comandos que ele precise executar vão prontos para copiar, com máquina, diretório, finalidade, efeito esperado e como conferir, sem placeholders e sem segredos. Separe comandos de leitura dos que alteram algo.
-
-## 7. Onde está cada coisa
-
-| Arquivo | Conteúdo | Como muda |
-|---|---|---|
-| `AGENTS.md` | Protocolo e regras permanentes | Raramente, por DEC |
-| `docs/ESTADO_ATUAL.md` | Estado presente, próximo passo, pendências, proibições | Substituído a cada sessão |
-| `docs/REGISTRO.md` | Execuções e decisões (DEC), mais recentes no topo | Só cresce |
-| `docs/MAPA_MESTRE.md` | Escopo, fases, regras de produto, portões | Só por DEC |
-| `docs/governance/ADR-*.md` | Decisões técnicas de arquitetura | Por nova ADR |
-| `docs/operations/` | Runbooks técnicos não sensíveis (observabilidade, Asana). Runbooks de infraestrutura, backup e rollback ficam no repositório interno | Conforme operação |
-| `docs/historico/` | **Repositório interno** (documentos superados, preservados com o histórico original) | Nunca editar |
-
-Uma cópia de leitura dos documentos oficiais pode existir no Google Drive. Ela **não** é fonte e nunca deve ser editada de forma independente (DEC-GOV-001).
-
-## 8. Dois repositórios: público e interno
-
-| Repositório | Visibilidade | Conteúdo |
-|---|---|---|
-| `Julianogdc/zafira-hub` (este) | **público** | código, testes, CI e Browser Gates (runners padrão gratuitos), documentação técnica e governança **sem** informação operacional |
-| `Julianogdc/zafira-hub-internal` | **privado**, sem workflows | histórico original completo, infraestrutura (VPS, backups, implantação), auditorias e triagens de segurança, documentos confidenciais, governança integral |
-
-**Layout local esperado:** os dois diretórios lado a lado (ex.: `C:\Projetos\zafirahub-v2.1-as` e `C:\Projetos\zafira-hub-internal`). **Sem submódulo** (o CI público não lê repositório privado).
-
-**Regras para qualquer agente (Claude, Antigravity ou outro):**
-1. Na leitura inicial (seção 1), leia também `../zafira-hub-internal/docs/ESTADO_INTERNO.md` **se existir**. Se o repositório interno não estiver disponível, execute apenas o que não depende dele e peça acesso ao proprietário quando necessário.
-2. Informação sensível **nunca** vai para o repositório público: registre-a no interno (`docs/REGISTRO_INTERNO.md`, identificador `INT-<n>`) e, no público, deixe só a referência `INT-<n>`.
-3. Toda DEC tem versão pública; se tiver parte sensível, a parte sensível fica no interno com o mesmo número.
-4. Ao encerrar sessão, atualize **os dois** `ESTADO` e `REGISTRO` quando houver conteúdo em ambos, e faça commit separado em cada repositório (público: apenas CI-safe; commits só de documentação usam `[skip ci]`).
-5. Nunca copie arquivo do interno para o público sem passar por `node scripts/ci/public-guard.mjs repo`.
+CLAUDE.md, GEMINI.md e regras .agents/.agent são pontes a este protocolo; não criam mapa paralelo. Cópias de leitura fora do Git nunca são fonte editável independente.
